@@ -1,0 +1,97 @@
+{
+	"cSpell.diagnosticLevel": "Information", // to find spelling mistakes
+	"cSpell.words": [
+		"aarch64", // processor architecture
+		"attrset", "attrsets", // nix/abbr (attribute set)
+		"autologin", // agetty
+		"binfmt", // abbr "binary format"
+		"blockdev", // program / function
+		"bootable", // word (~= able to boot)
+		"bootloader", // word
+		"bridgeadapter", // virtual box
+		"bridgedifs", // virtual box
+		"builtins", // nix
+		"cmake", // program
+		"cmds", // abbr commands
+		"concat", // abbr
+		"controlvm", // virtual box
+		"convertfromraw", // virtual box
+		"coreutils", // package
+		"createrawvmdk", // virtual box
+		"createvm", // virtual box
+		"ctxify", // abbr (~= add context)
+		"CWD", // abbr
+		"deps", // abbr dependencies
+		"devs", // abbr (devices)
+		"dontUnpack", // nixos
+		"dropbear", // program
+		"extglob", // cli arg
+		"fallocate", // program / function
+		"fdisk", // program
+		"fetchpatch", // nix
+		"fetchurl", // nix function
+		"foldl", // nix (fold left)
+		"foldr", // nix (fold right)
+		"FUNCNAME", // bash var
+		"fw_printenv", // program
+		"fw_setenv", // program
+		"gdisk", // program
+		"getsize64", // cli arg
+		"getty", // serice
+		"gids", // abbr/plural (group IDs)
+		"gollenstede", // name
+		"hostiocache", // virtual box
+		"internalcommands", // virtual box
+		"libubootenv", // package
+		"losetup", // program / function
+		"lowerdir", // mount overlay option
+		"mkdir", // program / function
+		"mktemp", // program / function
+		"modifyvm", // virtual box
+		"mountpoint", // program / function
+		"namespacing", // word
+		"netbootxyz", // option
+		"nixos", // (duh)
+		"nixpkgs", // nix
+		"noatime", // mount option
+		"nodiscard", // cli arg
+		"ostype", // virtual box
+		"partlabel", // linux
+		"partprobe", // program / function
+		"pkgs", // nix
+		"pname", // nix/abbr (package name)
+		"portcount", // virtual box
+		"poweroff", // program / function
+		"raspberrypi", // abbr
+		"raspberrypifw", // package
+		"rawdisk", // virtual box
+		"realpath", // program / function
+		"rpool", // zfs
+		"sata", // storage protocol
+		"sbabic", // name
+		"screenshotpng", // virtual box
+		"sgdisk", // program
+		"showvminfo", // virtual box
+		"sigs", // cli arg
+		"socat", // program / function
+		"startvm", // virtual box
+		"stdenv", // nix
+		"storageattach", // virtual box
+		"timesync", // systemd
+		"TMPDIR", // env var
+		"tmpfs", // linux
+		"toplevel", // nix
+		"uart", "uarts", // serial protocol
+		"uartmode", // virtual box
+		"udev", // program
+		"udevadm", // program
+		"udptunnel", // program
+		"uids", // abbr/plural (group IDs)
+		"upperdir", // mount overlay option
+		"vboxusers", // virtual box
+		"vfat", // linux
+		"vmdk", // file type (virtual disk format)
+		"wiplib", // name / abbr (WIP library)
+		"workdir", // mount overlay option
+	]
+}

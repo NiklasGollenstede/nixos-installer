@@ -1,0 +1,4 @@
+# Treat lock file as binary (collapsed diff, no line count, no EOL treatment):
+flake.lock binary
+# Dont include license in line count:
+LICENSE binary

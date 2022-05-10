@@ -82,9 +82,11 @@ in rec {
 
             networking.hostName = name;
 
-            system.extraSystemBuilderCmds = if !config.boot.initrd.enable then "" else ''
+            system.extraSystemBuilderCmds = (if !config.boot.initrd.enable then "" else ''
                 ln -sT ${builtins.unsafeDiscardStringContext config.system.build.bootStage1} $out/boot-stage-1.sh # (this is super annoying to locate otherwise)
-            '';
+            '') + (if !inputs?self then "" else ''
+                ln -sT ${inputs.self.outPath} $out/config # (build input for reference)
+            '');
 
         }) ];
         specialArgs = specialArgs; # explicitly passing »pkgs« here breaks »config.nixpkgs.overlays«!
@@ -145,7 +147,7 @@ in rec {
     ... }: let
         otherArgs = (builtins.removeAttrs args [ "systems" ]) // { inherit systems overlays modules specialArgs scripts inputs configPath nixosSystem localSystem; };
         nixosConfigurations = if builtins.isList systems then mergeAttrsUnique (map (systems: mkNixosConfigurations (otherArgs // systems)) systems) else mkNixosConfigurations (otherArgs // systems);
-    in {
+    in let outputs = {
         inherit nixosConfigurations;
     } // (forEachSystem [ "aarch64-linux" "x86_64-linux" ] (localSystem: let
         pkgs = (import inputs.nixpkgs { inherit overlays; system = localSystem; });
@@ -212,6 +214,10 @@ in rec {
                 ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: (
                     "ln -sT ${system.config.system.build.toplevel} $out/systems/${name}"
                 )) nixosConfigurations)}
+                ${lib.optionalString (scripts != [ ]) ''
+                    mkdir -p $out/scripts
+                    ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: _: "ln -sT ${outputs.apps.${localSystem}.${name}.program} $out/scripts/${name}") nixosConfigurations)}
+                ''}
                 ${lib.optionalString (inputs != { }) ''
                     mkdir -p $out/inputs
                     ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: { outPath, ... }: "ln -sT ${outPath} $out/inputs/${name}") inputs)}
@@ -220,6 +226,6 @@ in rec {
             '';
         };
 
-    }));
+    })); in outputs;
 
 }

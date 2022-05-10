@@ -49,11 +49,7 @@ in { imports = [ ({ ## Hardware
     fileSystems."/nix/store" = { options = ["bind,ro"]; device = "/system/nix/store"; neededForBoot = true; };
 
     # Some base config:
-    users.mutableUsers = false; users.allowNoPasswordLogin = true;
-    networking.hostId = lib.mkDefault (builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName));
-    environment.etc."machine-id".text = (builtins.substring 0 32 (builtins.hashString "sha256" "${config.networking.hostName}:machine-id"));
-    boot.kernelParams = [ "panic=10" "boot.panic_on_fail" ]; # Reboot on kernel panic, panic if boot fails.
-    systemd.extraConfig = "StatusUnitFormat=name"; # Show unit names instead of descriptions during boot.
+    wip.base.enable = true; wip.base.includeNixpkgs = inputs.nixpkgs;
 
     # Static config for VBox Adapter 1 set to NAT (the default):
     networking.interfaces.enp0s3.ipv4.addresses = [ {

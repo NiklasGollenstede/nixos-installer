@@ -12,5 +12,5 @@ This is a minimal example for a NixOS system installation function using the fun
 function install-system {( set -eu # 1: blockDev
     prepare-installer "$@"
     do-disk-setup "$1"
-    install-system-to $mnt prompt=true @{config.th.minify.topLevel:-}
+    install-system-to $mnt prompt=true
 )}

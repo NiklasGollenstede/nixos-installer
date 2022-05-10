@@ -11,7 +11,7 @@ With the functions from here, adding a simple three-liner can be enough to do a 
 function install-system {( set -eu # 1: blockDev
     prepare-installer "$@"
     do-disk-setup "$1"
-    install-system-to $mnt prompt=true @{config.th.minify.topLevel:-}
+    install-system-to $mnt prompt=true
 )}
 ```
 

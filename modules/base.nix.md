@@ -16,6 +16,7 @@ in {
 
     options.${prefix} = { base = {
         enable = lib.mkEnableOption "saner defaults";
+        includeNixpkgs = lib.mkOption { description = "»nixpkgs« to include in the system build."; type = lib.types.nullOr lib.types.package; default = null; };
     }; };
 
     config = let
@@ -35,6 +36,16 @@ in {
         boot.kernelParams = [ "panic=10" "boot.panic_on_fail" ]; # Reboot on kernel panic, panic if boot fails.
         # might additionally want to do this: https://stackoverflow.com/questions/62083796/automatic-reboot-on-systemd-emergency-mode
         systemd.extraConfig = "StatusUnitFormat=name"; # Show unit names instead of descriptions during boot.
+
+
+    }) (lib.mkIf (cfg.includeNixpkgs != null) {
+
+        nix.registry.nixpkgs.flake = cfg.includeNixpkgs;
+        environment.etc."nix/channels/nixpkgs".source = cfg.includeNixpkgs.outPath;
+        nix.nixPath = [ "nixpkgs=/etc/nix/channels/nixpkgs" "nixos-config=/etc/nixos" ];
+        nix.extraOptions = "experimental-features = nix-command flakes"; # apparently, even nix 2.8 (in nixos-22.05) needs this
+        environment.shellAliases = { "with" = ''nix-shell --run "bash --login" -p''; };
+
 
     }) ({
         # Free convenience:

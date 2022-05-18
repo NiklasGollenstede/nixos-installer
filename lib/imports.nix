@@ -74,14 +74,14 @@ in rec {
         names = builtins.concatLists (map (overlay: builtins.attrNames (overlay { } { })) (builtins.attrValues overlays));
     in mapMerge (name: { ${name} = pkgs.${name}; }) names;
 
-    ## Given a path to a module in »nixpkgs/nixos/modules/« and placed in another module's »imports«, adds an option »disableModule.<path>« that defaults to being false, but when explicitly set to »true«, disables all »config« values set by the module.
+    ## Given a path to a module in »nixpkgs/nixos/modules/«, when placed in another module's »imports«, this adds an option »disableModule.${modulePath}« that defaults to being false, but when explicitly set to »true«, disables all »config« values set by the module.
     #  Every module should, but not all modules do, provide such an option themselves.
     #  This is similar to adding the path to »disabledModules«, but:
     #  * leaves the module's other definitions (options, imports) untouched, preventing further breakage due to missing options
     #  * makes the disabling an option, i.e. it can be changed dynamically based on other config values
-    makeNixpkgsModuleConfigOptional = nixpkgs: specialArgs: modulePath: let
-        fullPath = "${nixpkgs.outPath}/nixos/modules/${modulePath}";
-        moduleArgs = { utils = import "${nixpkgs.outPath}/nixos/lib/utils.nix" { inherit (specialArgs) lib config pkgs; }; } // specialArgs;
+    makeNixpkgsModuleConfigOptional = specialArgs: modulePath: let
+        fullPath = "${specialArgs.inputs.nixpkgs.outPath}/nixos/modules/${modulePath}";
+        moduleArgs = { utils = import "${specialArgs.inputs.nixpkgs.outPath}/nixos/lib/utils.nix" { inherit (specialArgs) lib config pkgs; }; } // specialArgs;
         module = import fullPath moduleArgs;
     in { _file = fullPath; imports = [
         { options.disableModule.${modulePath} = lib.mkOption { description = "Disable the nixpkgs module ${modulePath}"; type = lib.types.bool; default = false; }; }
@@ -93,12 +93,12 @@ in rec {
         { disabledModules = [ modulePath ]; }
     ]; };
 
-    ## Given a path to a module and a function taking the instantiation of the original and returning a partial module as override, recursively applies that override to the original module definition.
-    #  This allows for much more fine-grained overriding of the configuration (or even other parts) of a module than »makeNixpkgsModuleConfigOptional«, but the override function needs to be tailored to internal implementation details of the original module.
-    #  Esp. it is important to know that »mkIf« both existing in the original module and in the return from the override results in an attrset »{ _type="if"; condition; content; }«. Accessing content from an existing »mkIf« thus requires adding ».content« to the lookup path, and the »content« of returned »mkIf«s may get merged with any existing attribute of that name.
-    overrideNixpkgsModule = nixpkgs: specialArgs: modulePath: override: let
-        fullPath = "${nixpkgs.outPath}/nixos/modules/${modulePath}";
-        moduleArgs = { utils = import "${nixpkgs.outPath}/nixos/lib/utils.nix" { inherit (specialArgs) lib config pkgs; }; } // specialArgs;
+    ## Given a path to a module, and a function that takes the instantiation of the original module and returns a partial module as override, this recursively applies that override to the original module definition.
+    #  Used as an »imports« entry, this allows for much more fine-grained overriding of the configuration (or even other parts) of a module than »makeNixpkgsModuleConfigOptional«, but the override function needs to be tailored to internal implementation details of the original module.
+    #  Esp. it is important to know that »mkIf« both existing in the original module and in the return from the override results in an attrset »{ _type="if"; condition; content; }«. Accessing content of an existing »mkIf« thus requires adding ».content« to the lookup path, and the »content« of returned »mkIf«s will get merged with any existing attribute of that name.
+    overrideNixpkgsModule = specialArgs: modulePath: override: let
+        fullPath = "${specialArgs.inputs.nixpkgs.outPath}/nixos/modules/${modulePath}";
+        moduleArgs = { utils = import "${specialArgs.inputs.nixpkgs.outPath}/nixos/lib/utils.nix" { inherit (specialArgs) lib config pkgs; }; } // specialArgs;
         module = import fullPath moduleArgs;
     in { _file = fullPath; imports = [
         (mergeAttrsRecursive [ { imports = module.imports or [ ]; options = module.options or { }; config = module.config or { }; } (override module) ])

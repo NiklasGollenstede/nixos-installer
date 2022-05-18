@@ -51,6 +51,7 @@
 		"mountpoint", // program / function
 		"namespacing", // word
 		"netbootxyz", // option
+		"niklas", // name
 		"nixos", // (duh)
 		"nixpkgs", // nix
 		"noatime", // mount option

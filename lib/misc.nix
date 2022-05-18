@@ -31,7 +31,7 @@ in rec {
     preferredRoute = from: to: (lib.findFirst ({ prefix, ip, ... }: prefix == "" || (builtins.any (fromSub: startsWith prefix fromSub) from)) { ip = ""; } to).ip;
 
     # Given a message and any value, traces both the message and the value, and returns the value.
-    trace = lib: message: value: (builtins.trace (message +": "+ (lib.generators.toPretty { } value)) value);
+    trace = message: value: (builtins.trace (message +": "+ (lib.generators.toPretty { } value)) value);
 
     rpoolOf = hostName: "rpool-${builtins.substring 0 8 (builtins.hashString "sha256" hostName)}";
 

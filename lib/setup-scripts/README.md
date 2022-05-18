@@ -3,7 +3,7 @@
 
 This is a library of bash functions, mostly for NixOS system installation.
 
-The (paths to these) scripts are meant to me passed in the `scripts` argument to [`mkSystemsFalke`](../flakes.nix#mkSystemsFalke), which makes their functions available in the per-host `devShells`/`apps`.
+The (paths to these) scripts are meant to me passed in the `scripts` argument to [`mkSystemsFlake`](../flakes.nix#mkSystemsFlake), which makes their functions available in the per-host `devShells`/`apps`.
 Host-specific nix variables are available to the bash functions as `@{...}` through [`substituteImplicit`](../scripts.nix#substituteImplicit) with the respective host as root context.
 
 With the functions from here, adding a simple three-liner can be enough to do a completely automated NixOS installation:

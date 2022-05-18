@@ -9,7 +9,7 @@ Things that really should be (more like) this by default.
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: { config, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
+dirname: inputs: specialArgs@{ config, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
     prefix = inputs.config.prefix;
     cfg = config.${prefix}.base;
 in {
@@ -45,6 +45,9 @@ in {
         nix.nixPath = [ "nixpkgs=/etc/nix/channels/nixpkgs" "nixos-config=/etc/nixos" ];
         nix.extraOptions = "experimental-features = nix-command flakes"; # apparently, even nix 2.8 (in nixos-22.05) needs this
         environment.shellAliases = { "with" = ''nix-shell --run "bash --login" -p''; };
+        system.extraSystemBuilderCmds = (if !specialArgs?inputs && !specialArgs.inputs?self then "" else ''
+            ln -sT ${specialArgs.inputs.self.outPath} $out/config # (build input for reference)
+        '');
 
 
     }) ({

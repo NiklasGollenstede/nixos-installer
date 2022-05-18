@@ -22,7 +22,7 @@ in rec {
         # A non-flake has only the attrs of »sourceInfo«.
         # A flake has »{ inputs; outputs; sourceInfo; } // outputs // sourceInfo«, where »inputs« is what's passed to the outputs function without »self«, and »outputs« is the result of calling the outputs function. Don't know the merge priority.
         if (!input?sourceInfo) then sourceInfo else (let
-            outputs = (import "${patched.outPath}/flake.nix").outputs ({ self = outputs; } // input.inputs);
+            outputs = (import "${patched.outPath}/flake.nix").outputs ({ self = sourceInfo // outputs; } // input.inputs);
         in { inherit (input) inputs; inherit outputs; inherit sourceInfo; } // outputs // sourceInfo)
     )) else input) inputs);
 
@@ -58,11 +58,13 @@ in rec {
     ) then (props) else throw "File ${entryPath} must fulfill the structure: dirname: inputs: { ... }: { imports = [ { preface = { hardware = str; ... } } ]; }";
 
     # Builds the System Configuration for a single host. Since each host depends on the context of all other host (in the same "network"), this is essentially only callable through »mkNixosConfigurations«.
-    # See »mkSystemsFalke« for documentation of the arguments.
+    # See »mkSystemsFlake« for documentation of the arguments.
     mkNixosConfiguration = args@{ name, entryPath, peers, inputs, overlays, modules, nixosSystem, localSystem ? null, ... }: let
         preface = (getSystemPreface inputs entryPath ({ inherit lib; } // specialArgs));
         targetSystem = "${preface.hardware}-linux"; buildSystem = if localSystem != null then localSystem else targetSystem;
-        specialArgs = (args.specialArgs or { }) // { # make these available in the attrSet passed to the modules
+        specialArgs = { # make these available in the attrSet passed to the modules
+            inherit inputs; # These are global and passed by the caller of this function (or not), so avoid using these (in favor of the own flakes inputs) where possible!
+        } // (args.specialArgs or { }) // {
             inherit name; nodes = peers; # NixOPS
         };
     in { inherit preface; } // (nixosSystem {
@@ -84,8 +86,6 @@ in rec {
 
             system.extraSystemBuilderCmds = (if !config.boot.initrd.enable then "" else ''
                 ln -sT ${builtins.unsafeDiscardStringContext config.system.build.bootStage1} $out/boot-stage-1.sh # (this is super annoying to locate otherwise)
-            '') + (if !inputs?self then "" else ''
-                ln -sT ${inputs.self.outPath} $out/config # (build input for reference)
             '');
 
         }) ];
@@ -94,7 +94,7 @@ in rec {
 
     # Given either a list (or attr set) of »files« (paths to ».nix« or ».nix.md« files for dirs with »default.nix« files in them) or a »dir« path (and optionally a list of file names to »exclude« from it), this builds the NixOS configuration for each host (per file) in the context of all configs provided.
     # If »files« is an attr set, exactly one host with the attribute's name as hostname is built for each attribute. Otherwise the default is to build for one host per configuration file, named as the file name without extension or the sub-directory name. Setting »preface.instances« can override this to build the same configuration for those multiple names instead (the specific »name« is passed as additional »specialArgs« to the modules and can thus be used to adjust the config per instance).
-    # All other arguments are as specified by »mkSystemsFalke« and are passed to »mkNixosConfiguration«.
+    # All other arguments are as specified by »mkSystemsFlake« and are passed to »mkNixosConfiguration«.
     mkNixosConfigurations = args: let # { files, dir, exclude, ... }
         files = args.files or (getNixFiles args.dir (args.exclude or [ ]));
         files' = if builtins.isAttrs files then files else (builtins.listToAttrs (map (entryPath: let
@@ -121,7 +121,7 @@ in rec {
 
     # Builds a system of NixOS hosts and exports them plus managing functions as flake outputs.
     # All arguments are optional, as long as the default can be derived from the other arguments as passed.
-    mkSystemsFalke = args@{
+    mkSystemsFlake = args@{
         # An attrset of imported Nix flakes, for example the argument(s) passed to the flake »outputs« function. All other arguments are optional (and have reasonable defaults) if this is provided and contains »self« and the standard »nixpkgs«. This is also the second argument passed to the individual host's top level config files.
         inputs ? { },
         # Root path of the NixOS configuration. »./.« in the »flake.nix«
@@ -208,23 +208,22 @@ in rec {
 
     }) // {
 
-        packages.all-systems = pkgs.stdenv.mkDerivation { # dummy that just pulls in all system builds
-            name = "all-systems"; src = ./.; installPhase = ''
-                mkdir -p $out/systems
-                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: (
-                    "ln -sT ${system.config.system.build.toplevel} $out/systems/${name}"
-                )) nixosConfigurations)}
-                ${lib.optionalString (scripts != [ ]) ''
-                    mkdir -p $out/scripts
-                    ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: _: "ln -sT ${outputs.apps.${localSystem}.${name}.program} $out/scripts/${name}") nixosConfigurations)}
-                ''}
-                ${lib.optionalString (inputs != { }) ''
-                    mkdir -p $out/inputs
-                    ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: { outPath, ... }: "ln -sT ${outPath} $out/inputs/${name}") inputs)}
-                ''}
-                ${lib.optionalString (configPath != null) "ln -sT ${configPath} $out/config"}
-            '';
-        };
+        # dummy that just pulls in all system builds
+        packages.all-systems = pkgs.runCommandLocal "all-systems" { } ''
+            mkdir -p $out/systems
+            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: (
+                "ln -sT ${system.config.system.build.toplevel} $out/systems/${name}"
+            )) nixosConfigurations)}
+            ${lib.optionalString (scripts != [ ]) ''
+                mkdir -p $out/scripts
+                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: _: "ln -sT ${outputs.apps.${localSystem}.${name}.program} $out/scripts/${name}") nixosConfigurations)}
+            ''}
+            ${lib.optionalString (inputs != { }) ''
+                mkdir -p $out/inputs
+                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: { outPath, ... }: "ln -sT ${outPath} $out/inputs/${name}") inputs)}
+            ''}
+            ${lib.optionalString (configPath != null) "ln -sT ${configPath} $out/config"}
+        '';
 
     })); in outputs;
 

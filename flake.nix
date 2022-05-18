@@ -13,13 +13,13 @@
 }; outputs = inputs: let patches = {
 
     nixpkgs = [
-        ./patches/nixpkgs-test.patch # after »nix build«, check »result/inputs/nixpkgs/patched!« to see that these patches were applied
-        ./patches/nixpkgs-fix-systemd-boot-install.patch
+       # ./patches/nixpkgs-test.patch # after »nix build«, check »result/inputs/nixpkgs/patched!« to see that these patches were applied
+       # ./patches/nixpkgs-fix-systemd-boot-install.patch
     ];
 
 }; in (import "${./.}/lib/flakes.nix" "${./.}/lib" inputs).patchFlakeInputsAndImportRepo inputs patches ./. (inputs@ { self, nixpkgs, ... }: repo@{ overlays, lib, ... }: let
 
-    systemsFlake = lib.wip.mkSystemsFalke (rec {
+    systemsFlake = lib.wip.mkSystemsFlake (rec {
         #systems = { dir = "${./.}/hosts"; exclude = [ ]; };
         inherit inputs;
         scripts = [ ./example/install.sh.md ] ++ (lib.attrValues lib.wip.setup-scripts);

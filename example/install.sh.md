@@ -3,14 +3,20 @@
 
 # System Installer Script
 
-This is a minimal example for a NixOS system installation function using the functions defined in [`../lib/setup-scripts/`](../lib/setup-scripts/). See its [README](../lib/setup-scripts/README.md) for more documentation.
+This is a minimal example for an adjusted NixOS system installation using the functions defined in [`../lib/setup-scripts/`](../lib/setup-scripts/).
+See its [README](../lib/setup-scripts/README.md) for more documentation.
 
 
-## Implementation
+## (Example) Implementation
 
 ```bash
-function install-system {( set -eu # 1: blockDev
+
+# Replace the entry point with the same function:
+function install-system {( set -eu # 1: blockDevs
     prepare-installer "$@"
-    do-disk-setup "$1"
-    install-system-to $mnt prompt=true
+    do-disk-setup "${argv[0]}"
+    init-or-restore-system
+    install-system-to $mnt
 )}
+
+# ... could also replace any other function(s) ...

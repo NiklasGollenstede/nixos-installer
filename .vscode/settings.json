@@ -2,34 +2,53 @@
 	"cSpell.diagnosticLevel": "Information", // to find spelling mistakes
 	"cSpell.words": [
 		"aarch64", // processor architecture
+		"acltype", // zfs
+		"ashift", // zfs
+		"askpass", // program
 		"attrset", "attrsets", // nix/abbr (attribute set)
 		"autologin", // agetty
 		"binfmt", // abbr "binary format"
+		"blkid", // program / function
 		"blockdev", // program / function
 		"bootable", // word (~= able to boot)
+		"bootkey", // partition name
 		"bootloader", // word
 		"bridgeadapter", // virtual box
 		"bridgedifs", // virtual box
 		"builtins", // nix
+		"cachefile", // zfs
+		"canmount", // zfs
+		"checksumming", // word
 		"cmake", // program
-		"cmds", // abbr commands
+		"cmds", // abbr (commands)
+		"compress_chksum", // f2fs
 		"concat", // abbr
 		"controlvm", // virtual box
 		"convertfromraw", // virtual box
 		"coreutils", // package
 		"createrawvmdk", // virtual box
 		"createvm", // virtual box
+		"cryptsetup", // program
 		"ctxify", // abbr (~= add context)
 		"CWD", // abbr
+		"dedup", // zfs
 		"deps", // abbr dependencies
 		"devs", // abbr (devices)
+		"dnodesize", // zfs
 		"dontUnpack", // nixos
+		"dosfstools", // package
+		"draid", // zfs
 		"dropbear", // program
+		"e2fsprogs", // package
+		"elif", // abbr (else if)
+		"encryptionroot", // zfs
 		"extglob", // cli arg
 		"fallocate", // program / function
 		"fdisk", // program
 		"fetchpatch", // nix
 		"fetchurl", // nix function
+		"filesystems", // plural
+		"findutils", // package
 		"foldl", // nix (fold left)
 		"foldr", // nix (fold right)
 		"FUNCNAME", // bash var
@@ -39,38 +58,76 @@
 		"getsize64", // cli arg
 		"getty", // serice
 		"gids", // abbr/plural (group IDs)
+		"gnugrep", // package
+		"gnused", // package
 		"gollenstede", // name
+		"gptfdisk", // package
+		"headlessly", // word
+		"hostbus", // cli arg
 		"hostiocache", // virtual box
+		"hostport", // cli arg
+		"inetutils", // package
+		"inodes", // plural
 		"internalcommands", // virtual box
+		"ints", // plural
+		"keydev", // cli arg
+		"keyformat", // zfs
+		"keylocation", // zfs
+		"keystatus", // zfs
+		"lazytime", // f2fs
 		"libubootenv", // package
+		"logbias", // zfs
 		"losetup", // program / function
 		"lowerdir", // mount overlay option
+		"lsusb", // program / function
+		"luks", // linux
+		"macaddr", // cli arg
 		"mkdir", // program / function
 		"mktemp", // program / function
 		"modifyvm", // virtual box
 		"mountpoint", // program / function
 		"namespacing", // word
 		"netbootxyz", // option
+		"netdev", // cli arg
 		"niklas", // name
 		"nixos", // (duh)
 		"nixpkgs", // nix
 		"noatime", // mount option
+		"noauto", // mount option
+		"nodev", // mount option
+		"nodiratime", // mount option
 		"nodiscard", // cli arg
+		"noexec", // mount option
+		"nofail", // cli arg
+		"nographic", // cli arg
+		"nosuid", // mount option
+		"oneshot", // systemd
 		"ostype", // virtual box
+		"OVMF", // package
 		"partlabel", // linux
 		"partprobe", // program / function
+		"pbkdf", // cli arg
 		"pkgs", // nix
 		"pname", // nix/abbr (package name)
 		"portcount", // virtual box
+		"posix", // word
+		"posixacl", // zfs
 		"poweroff", // program / function
+		"raidz", // zfs
+		"ramdisk", // word
+		"ramfs", // linux
 		"raspberrypi", // abbr
 		"raspberrypifw", // package
+		"raspi3b", // cli arg
 		"rawdisk", // virtual box
 		"realpath", // program / function
+		"refreservation", // zfs
+		"relatime", // mount option
 		"rpool", // zfs
 		"sata", // storage protocol
 		"sbabic", // name
 		"screenshotpng", // virtual box
+		"setuid", // cli arg
 		"sgdisk", // program
 		"showvminfo", // virtual box
 		"sigs", // cli arg
@@ -78,21 +135,40 @@
 		"startvm", // virtual box
 		"stdenv", // nix
 		"storageattach", // virtual box
+		"stty", // program / function
+		"syncoid", // program
+		"temproot", // abbr (temporary root (FS))
 		"timesync", // systemd
 		"TMPDIR", // env var
+		"tmpfiles", // nixos option
 		"tmpfs", // linux
 		"toplevel", // nix
+		"typecode", // cli arg
 		"uart", "uarts", // serial protocol
 		"uartmode", // virtual box
 		"udev", // program
 		"udevadm", // program
 		"udptunnel", // program
 		"uids", // abbr/plural (group IDs)
+		"unencrypted", // ~= not encrypted / decrypted
 		"upperdir", // mount overlay option
+		"urandom", // linux
 		"vboxusers", // virtual box
+		"vdev", "vdevs", // zfs
 		"vfat", // linux
+		"virt", // abbr (virtualization)
+		"virtio", // cli arg
 		"vmdk", // file type (virtual disk format)
+		"wipefs", // program
 		"wiplib", // name / abbr (WIP library)
 		"workdir", // mount overlay option
+		"xattr", // zfs
+		"xfsprogs", // package
+		"ykchalresp", // program
+		"ykinfo", // program
+		"yubikey", // program
+		"yubikey", // program
+		"YubiKeys", // plural
+		"zfsutil", // program / function
 	]
 }

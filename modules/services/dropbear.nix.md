@@ -66,6 +66,7 @@ in {
 
     }) (lib.mkIf (cfg.rootKeys != [ ]) {
 
+        # TODO: This is suboptimal when the system gets activated more than once. Could use a »tmpfiles« rule, or simply »>« (instead of »>>« here).
         system.activationScripts.root-authorized_keys = ''
             mkdir -pm 700 /root/.ssh/
             [ -e /root/.ssh/authorized_keys ] || install -m 600 -T /dev/null /root/.ssh/authorized_keys

@@ -7,7 +7,8 @@ in rec {
     # Given a function and a list, calls the function for each list element, and returns the merge of all attr sets returned by the function
     # attrs = mapMerge (value: { "${newKey}" = newValue; }) list
     # attrs = mapMerge (key: value: { "${newKey}" = newValue; }) attrs
-    mapMerge = toAttr: listOrAttrs: mergeAttrs (if builtins.isAttrs listOrAttrs then lib.mapAttrsToList toAttr listOrAttrs else map toAttr listOrAttrs);
+    mapMerge       = toAttr: listOrAttrs: mergeAttrs       (if builtins.isAttrs listOrAttrs then lib.mapAttrsToList toAttr listOrAttrs else map toAttr listOrAttrs);
+    mapMergeUnique = toAttr: listOrAttrs: mergeAttrsUnique (if builtins.isAttrs listOrAttrs then lib.mapAttrsToList toAttr listOrAttrs else map toAttr listOrAttrs);
 
     # Given a list of attribute sets, returns the merged set of all contained attributes, with those in elements with higher indices taking precedence.
     mergeAttrs = attrsList: builtins.foldl' (a: b: a // b) { } attrsList;
@@ -46,6 +47,9 @@ in rec {
         ${l2name} = mapMerge (l1name: if attrs.${l1name}?${l2name} then { ${l1name} = attrs.${l1name}.${l2name}; } else { }) l1names;
     }) l2names;
 
+    # Like »builtins.catAttrs«, just for attribute sets instead of lists: Given an attribute set of attribute sets (»{ ${l1name}.${l2name} = value; }«) and the »name« of a second-level attribute, this returns the attribute set mapping directly from the first level's names to the second-level's values (»{ ${l1name} = value; }«), omitting any first-level attributes that lack the requested second-level attribute.
+    catAttrSets = name: attrs: (builtins.mapAttrs (_: value: value.${name}) (lib.filterAttrs (_: value: value?${name}) attrs));
+
 
     ## String Manipulation
 
@@ -53,6 +57,7 @@ in rec {
     mapMatching = exp: strings: (builtins.filter (v: v != null) (builtins.concatLists (builtins.filter (v: v != null) (map (string: (builtins.match exp string)) strings))));
     # Given a regular expression and a list of strings, returns the list of all the strings matched in their entirety by the regular expression.
     filterMatching = exp: strings: (builtins.filter (matches exp) strings);
+    filterMismatching = exp: strings: (builtins.filter (string: !(matches exp string)) strings);
     matches = exp: string: builtins.match exp string != null;
     extractChars = exp: string: let match = (builtins.match "^.*(${exp}).*$" string); in if match == null then null else builtins.head match;
 
@@ -74,5 +79,12 @@ in rec {
     pow = (let pow = b: e: if e == 1 then b else if e == 0 then 1 else b * pow b (e - 1); in pow); # (how is this not an operator or builtin?)
 
     toBinString = int: builtins.concatStringsSep "" (map builtins.toString (lib.toBaseDigits 2 int));
+
+    parseSizeSuffix = decl: let
+        match = builtins.match ''^([0-9]+)(K|M|G|T|P)?(i)?(B)?$'' decl;
+        num = lib.toInt (builtins.head match); unit = builtins.elemAt match 1;
+        exponent = if unit == null then 0 else { K = 1; M = 2; G = 3; t = 4; P = 5; }.${unit};
+        base = if (builtins.elemAt match 3) == null || (builtins.elemAt match 2) != null then 1024 else 1000;
+    in if builtins.isInt decl then decl else if match != null then num * (pow base exponent) else throw "${decl} is not a number followed by a size suffix";
 
 }

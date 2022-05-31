@@ -27,7 +27,9 @@ in rec {
     )) else input) inputs);
 
     # Generates implicit flake outputs by importing conventional paths in the local repo.
-    importRepo = inputs: repoPath: outputs: let list = (outputs inputs ((if builtins.pathExists "${repoPath}/lib/default.nix" then {
+    importRepo = inputs: repoPath': outputs: let
+        repoPath = builtins.path { path = repoPath'; name = "source"; }; # referring to the current flake directory as »./.« is quite intuitive (and »inputs.self.outPath« causes infinite recursion), but without this it adds another hash to the path (because it copies it)
+    in let list = (outputs inputs ((if builtins.pathExists "${repoPath}/lib/default.nix" then {
         lib           = import "${repoPath}/lib"      "${repoPath}/lib"      inputs;
     } else { }) // (if builtins.pathExists "${repoPath}/overlays/default.nix" then rec {
         overlays      = import "${repoPath}/overlays" "${repoPath}/overlays" inputs;
@@ -151,7 +153,8 @@ in rec {
         inherit nixosConfigurations;
     } // (forEachSystem [ "aarch64-linux" "x86_64-linux" ] (localSystem: let
         pkgs = (import inputs.nixpkgs { inherit overlays; system = localSystem; });
-        nix_wrapped = pkgs.writeShellScriptBin "nix" ''exec ${pkgs.nix}/bin/nix --extra-experimental-features nix-command "$@"'';
+        nix = if lib.versionOlder pkgs.nix.version "2.4" then pkgs.nix_2_4 else pkgs.nix;
+        nix_wrapped = pkgs.writeShellScriptBin "nix" ''exec ${nix}/bin/nix --extra-experimental-features nix-command "$@"'';
     in (if scripts == [ ] then { } else {
 
         # E.g.: $ nix run .#$target -- install-system /tmp/system-$target.img
@@ -159,16 +162,15 @@ in rec {
         # If the first argument (after  »--«) is »sudo«, then the program will re-execute itself with sudo as root (minus that »sudo« argument).
         # If the first/next argument is »bash«, it will execute an interactive shell with the variables and functions sourced (largely equivalent to »nix develop .#$host«).
         apps = lib.mapAttrs (name: system: let
-            appliedScripts = substituteImplicit { inherit pkgs scripts; context = system; };
+            appliedScripts = substituteImplicit { inherit pkgs scripts; context = system // { native = pkgs; }; };
 
         in { type = "app"; program = "${pkgs.writeShellScript "scripts-${name}" ''
 
             # if first arg is »sudo«, re-execute this script with sudo (as root)
-            if [[ $1 == sudo ]] ; then shift ; exec sudo --preserve-env=SSH_AUTH_SOCK,debug -- "$0" "$@" ; fi
+            if [[ $1 == sudo ]] ; then shift ; exec sudo --preserve-env=SSH_AUTH_SOCK -- "$0" "$@" ; fi
 
             # if the (now) first arg is »bash« or there are no args, re-execute this script as bash »--init-file«, starting an interactive bash in the context of the script
             if [[ $1 == bash ]] || [[ $# == 0 && $0 == *-scripts-${name} ]] ; then
-                set -x
                 exec ${pkgs.bashInteractive}/bin/bash --init-file <(cat << "EOS"${"\n"+''
                     # prefix the script to also include the default init files
                     ! [[ -e /etc/profile ]] || . /etc/profile
@@ -182,7 +184,8 @@ in rec {
             fi
 
             # provide installer tools (native to localSystem, not targetSystem)
-            PATH=${pkgs.nixos-install-tools}/bin:${nix_wrapped}/bin:${pkgs.nix}/bin:$PATH
+            hostPath=$PATH
+            PATH=${pkgs.nixos-install-tools}/bin:${nix_wrapped}/bin:${nix}/bin:${pkgs.util-linux}/bin:${pkgs.coreutils}/bin:${pkgs.gnused}/bin:${pkgs.findutils}/bin:${pkgs.tree}/bin:${pkgs.zfs}/bin
 
             ${appliedScripts}
 
@@ -196,7 +199,7 @@ in rec {
         # ... and then call any of the functions in ./utils/functions.sh (in the context of »$(hostname)«, where applicable).
         # To get an equivalent root shell: $ nix run /etc/nixos/#functions-$(hostname) -- sudo bash
         devShells = lib.mapAttrs (name: system: pkgs.mkShell (let
-            appliedScripts = substituteImplicit { inherit pkgs scripts; context = system; };
+            appliedScripts = substituteImplicit { inherit pkgs scripts; context = system // { native = pkgs; }; };
         in {
             nativeBuildInputs = [ pkgs.nixos-install-tools nix_wrapped pkgs.nix ];
             shellHook = ''

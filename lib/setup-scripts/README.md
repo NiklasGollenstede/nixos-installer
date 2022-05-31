@@ -3,15 +3,17 @@
 
 This is a library of bash functions, mostly for NixOS system installation.
 
-The (paths to these) scripts are meant to me passed in the `scripts` argument to [`mkSystemsFlake`](../flakes.nix#mkSystemsFlake), which makes their functions available in the per-host `devShells`/`apps`.
+The (paths to these) scripts are meant to me passed in the `scripts` argument to [`mkSystemsFlake`](../flakes.nix#mkSystemsFlake) (see [`flake.nix`](../../flake.nix) for an example), which makes their functions available in the per-host `devShells`/`apps`.
 Host-specific nix variables are available to the bash functions as `@{...}` through [`substituteImplicit`](../scripts.nix#substituteImplicit) with the respective host as root context.
+Any script passed later in `scripts` can overwrite the functions of these (earlier) default scripts.
 
-With the functions from here, adding a simple three-liner can be enough to do a completely automated NixOS installation:
+With the functions from here, [a simple four-liner](../install.sh) is enough to do a completely automated NixOS installation:
 ```bash
-function install-system {( set -eu # 1: blockDev
+function install-system {( set -eu # 1: diskPaths
     prepare-installer "$@"
-    do-disk-setup "$1"
-    install-system-to $mnt prompt=true
+    do-disk-setup "${argv[0]}"
+    init-or-restore-system
+    install-system-to $mnt
 )}
 ```
 

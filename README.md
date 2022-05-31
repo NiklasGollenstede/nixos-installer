@@ -1,7 +1,7 @@
 
 # Work In Progress Nix(OS) Library
 
-Whenever I have a Nix function, NixOS Module, nixpkgs package/overlay, related bash script, or combination of those that I need in more than one project, I first put it here so that it can be shared between them.
+The idea of this repo / flake is that whenever I have a Nix function, NixOS Module, nixpkgs package/overlay, related bash script, or combination of those that I need in more than one project, I first put it here so that it can be shared between them.
 
 Eventually I may decide to move parts of this into their own flake repository, but as long as they live here, APIs are not necessarily stable.
 
@@ -13,7 +13,7 @@ The more interesting of the components currently in this repository are largely 
 This is a nix flake repository, so [`flake.nix`](./flake.nix) is the entry point and export mechanism for almost everything.
 
 [`lib/`](./lib/) adds additional library functions as `.wip` to the default `nixpkgs.lib` and exports the whole thing as `lib`. Other folders in this repo may thus use them as `inputs.self.lib.wip.*`. \
-[`lib/setup-scripts/`](./lib/setup-scripts/) contains some bash scripts that integrate with the options defined in [modules/installer.nix.md](./modules/installer.nix.md) and some default options to help installing NixOS hosts.
+[`lib/setup-scripts/`](./lib/setup-scripts/) contains bash scripts that integrate with the options defined in [`modules/fs/`](./modules/fs/) (esp. [`modules/fs/disks.nix.md`](./modules/fs/disks.nix.md)) and some default options to do flexible and fully automated installations of configured NixOS hosts.
 
 [`modules/`](./modules/) contains NixOS configuration modules. Added options' names start with `wip.` (or a custom prefix, see [Namespacing](#namespacing-in-nixos)).
 The modules are inactive by default, and are, where possible, designed to be independent from each other and the other things in this repo. Some though do have dependencies on added or modified packages, or other modules in the same directory.
@@ -28,7 +28,7 @@ The modules are inactive by default, and are, where possible, designed to be ind
 Any `preface.*` options have to be set in the first sub-module in these files (`## Hardware` section). \
 This flake only defines a single [`example`](./hosts/example.nix.md) host meant to demonstrate how other flakes can use the (NixOS) flake library framework.
 
-[`utils/`](./utils/) contains the [installation](./utils/install.sh.md) script for the hosts (which is three lines bash, plus a lot of documentation) and this flake's [default config](./utils/defaultConfig/) (see [Namespacing](#namespacing-in-nixos)).
+[`example/`](./example/) contains an example of adjusting the [installation](./example/install.sh.md) script for the hosts and this flake's [default config](./example/defaultConfig/) (see [Namespacing](#namespacing-in-nixos)).
 
 
 ## Namespacing in NixOS
@@ -49,7 +49,7 @@ The only workaround (that I could come up with) is to have a flake-level option 
 Since flakes are purely functional, the only way to provide configuration to a flake as a whole (as opposed to exporting parts of the flake as functions, which would break the convention on flake exports) is via the flakes `inputs`, and those inputs must be flakes themselves.
 The inputs have defaults defined by the flake itself, but can be overridden by the importing flake.
 
-A flake using the modules exported by this flake may thus accept the default that all options are defined under the prefix `wip.`, or it may override its `config` input by a flake of the same shape as [`utils/defaultConfig/`](./utils/defaultConfig/) but with a different `prefix`.
+A flake using the modules exported by this flake may thus accept the default that all options are defined under the prefix `wip.`, or it may override its `config` input by a flake of the same shape as [`example/defaultConfig/`](./example/defaultConfig/) but with a different `prefix`.
 As a local experiment, the result of running this in a `nix repl` is sufficient:
 ```nix
 :b (import <nixpkgs> { }).writeTextDir "flake.nix" ''

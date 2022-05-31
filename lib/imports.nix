@@ -101,7 +101,7 @@ in rec {
         moduleArgs = { utils = import "${specialArgs.inputs.nixpkgs.outPath}/nixos/lib/utils.nix" { inherit (specialArgs) lib config pkgs; }; } // specialArgs;
         module = import fullPath moduleArgs;
     in { _file = fullPath; imports = [
-        (mergeAttrsRecursive [ { imports = module.imports or [ ]; options = module.options or { }; config = module.config or { }; } (override module) ])
+        (mergeAttrsRecursive (([ { imports = module.imports or [ ]; options = module.options or { }; config = module.config or { }; } ]) ++ (lib.toList (override module))))
         { disabledModules = [ modulePath ]; }
     ]; };
 }

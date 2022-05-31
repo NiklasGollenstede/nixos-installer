@@ -7,8 +7,8 @@
 ); inputs = {
 
     # To update »./flake.lock«: $ nix flake update
-    nixpkgs = { url = "github:NixOS/nixpkgs/nixos-unstable"; };
-    config = { type = "github"; owner = "NiklasGollenstede"; repo = "nix-wiplib"; dir = "example/defaultConfig"; };
+    nixpkgs = { url = "github:NixOS/nixpkgs/nixos-22.05"; };
+    config = { type = "github"; owner = "NiklasGollenstede"; repo = "nix-wiplib"; dir = "example/defaultConfig"; rev = "5e9cc7ce3440be9ce6aeeaedcc70db9c80489c5f"; }; # Use some previous commit's »./example/defaultConfig/flake.nix« as the default config for this flake.
 
 }; outputs = inputs: let patches = {
 
@@ -20,9 +20,9 @@
 }; in (import "${./.}/lib/flakes.nix" "${./.}/lib" inputs).patchFlakeInputsAndImportRepo inputs patches ./. (inputs@ { self, nixpkgs, ... }: repo@{ overlays, lib, ... }: let
 
     systemsFlake = lib.wip.mkSystemsFlake (rec {
-        #systems = { dir = "${./.}/hosts"; exclude = [ ]; };
+        #systems = { dir = "${inputs.self.outPath}/hosts"; exclude = [ ]; };
         inherit inputs;
-        scripts = [ ./example/install.sh.md ] ++ (lib.attrValues lib.wip.setup-scripts);
+        scripts = (lib.attrValues lib.wip.setup-scripts) ++ [ ./example/install.sh.md ];
     });
 
 in [ # Run »nix flake show --allow-import-from-derivation« to see what this merges to:
@@ -32,5 +32,5 @@ in [ # Run »nix flake show --allow-import-from-derivation« to see what this me
         packages = lib.wip.getModifiedPackages (lib.wip.importPkgs inputs { system = localSystem; }) overlays;
         defaultPackage = systemsFlake.packages.${localSystem}.all-systems;
     }))
-    { patches = import "${./.}/patches" "${./.}/patches" inputs; }
+    { patches = import "${inputs.self.outPath}/patches" "${inputs.self.outPath}/patches" inputs; }
 ]); }

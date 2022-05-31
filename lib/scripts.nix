@@ -3,64 +3,61 @@ dirname: { self, nixpkgs, ...}: let
 in rec {
 
     # Turns an attr set into a bash dictionary (associative array) declaration, e.g.:
-    # bashSnippet = "declare -A dict=(\n${asBashDict { } { foo = "42"; bar = "baz"; }}\n)"
+    # bashSnippet = "declare -A dict=(\n${asBashDict { } { foo = "42"; bar = "baz"; }})"
     asBashDict = { mkName ? (n: v: n), mkValue ? (n: v: v), indent ? "    ", ... }: attrs: (
-        builtins.concatStringsSep "\n" (lib.mapAttrsToList (name: value: (
-            "${indent}[${lib.escapeShellArg (mkName name value)}]=${lib.escapeShellArg (mkValue name value)}"
+        builtins.concatStringsSep "" (lib.mapAttrsToList (name: value: (
+            let key = mkName name value; in if key == null then "" else
+            "${indent}[${lib.escapeShellArg key}]=${lib.escapeShellArg (mkValue name value)}\n"
         )) attrs)
     );
 
-    # Turns an attrset into a string that can (safely) be bash-»eval«ed to declare the attributes (prefixed with a »_«) as variables into the current scope.
-    asBashEvalSet = recursive: attrs: builtins.concatStringsSep " ; " (lib.mapAttrsToList (name: value: (
-        "_${name}=${lib.escapeShellArg (if recursive && builtins.isAttrs value then asBashEvalSet true value else toString value)}"
-    )) attrs);
-
-    # Makes an attrset of attrsets eligible to be passed to »asBashDict«. The bash script can (safely) call »eval« on each first-level attribute value to get the second-level attributes (prefixed with a »_«) into the current variable scope.
-    # Meant primarily as a helper for »substituteLazy«.
-    attrsAsBashEvalSets = attrs: builtins.mapAttrs (name: asBashEvalSet true) attrs;
-
-    # Makes a list of attrsets eligible to be passed to »asBashDict«. The bash script can (safely) call »eval« on each list item to get the contained attributes (prefixed with a »_«) into the current variable scope.
-    # Meant primarily as a helper for »substituteLazy«.
-    listAsBashEvalSets = list: map (asBashEvalSet true) list;
-
     # This function allows using nix values in bash scripts without passing an explicit and manually curated list of values to the script.
-    # Given a path list of bash script »sources« and an attrset »context«, the function parses the scripts for the literal sequence »@{« followed by a lookup path of period-joined words, resolves that attribute path against »context«, declares a variable with that value and swaps out the »@{« plus path for a »${« use of the declared variable. The returned script sources the variable definitions and all translated »sources« in order.
-    # The lookup path may end in »!« plus the name of a (single argument) »builtins.*« function,in which case the resolved value will be passed to that function and its return value is used instead (e.g. for »attrNames«, »attrValues«, »toJSON«, »catAttrs«, ...).
+    # Given a path list of bash script »sources« and an attrset »context«, this function parses the scripts for the literal sequence »@{« followed by a lookup path of period-joined words, resolves that attribute path against »context«, declares a variable with that value, and swaps out the »@{« plus path for a »${« use of the declared variable. The returned script sources the variable definitions and all translated »sources« in order.
+    # The lookup path may end in »!« plus the name of a function and optionally string arguments separated by ».«s, in which case the function is taken from »helpers//self.lib.wip//(pkgs.lib or lib)//pkgs//builtins« and called with the string args and the resolved value as last arg; the return value then replaces the resolved value. Examples: »!attrNames«, »!toJSON«, »!catAttrs«, »!hashString.sha256«.
     # The names of the declared values are the lookup paths, with ».« and »!« replaced by »_« and »__«.
     # The symbol immediately following the lookup path (/builtin name) can be »}« or any other symbol that bash variable substitutions allow after the variable name (like »:«, »/«), eliminating the need to assign to a local variable to do things like replacements, fallbacks or substrings.
     # If the lookup path does not exist in »context«, then the value will be considered the same as »null«, and a value of »null« will result in a bash variable that is not defined (which can then be handled in the bash script).
-    # Other scalars (bool, float, int, path) will be passed to »builtins.toString«, Lists will be mapped with »toString« and declared as bash arrays, attribute sets will be declared using »asBashDict« with their values »toString«ed as well.
+    # Other scalars (bool, float, int, path) will be passed to »builtins.toString«. Anything that has an ».outPath« that is a string will be passed as that ».outPath«.
+    # Lists will be declared as bash arrays, attribute sets will be declared as associative arrays using »asBashDict«.
+    # Bash does not support any nested data structures. Lists or attrsets in within lists or attrsets are therefore (recursively) encoded and escaped as strings, such that calling »eval« on them is safe if (but only if) they are known to be encoded from nested lists/attrsets. Example: »eval 'declare -A fs='"@{config.fileSystems['/']}" ; root=${fs[device]}«.
     # Any other value (functions), and things that »builtins.toString« doesn't like, will throw here.
-    substituteImplicit = args@{ pkgs, scripts, context, helpers ? { }, }: let
+    substituteImplicit = args@{ pkgs, scripts, context, helpers ? { }, trace ? (m: v: v), }: let
         scripts = map (source: rec {
             text = builtins.readFile source; inherit source;
             parsed = builtins.split ''@\{([#!]?)([a-zA-Z][a-zA-Z0-9_.-]*[a-zA-Z0-9](![a-zA-Z][a-zA-Z0-9_.-]*[a-zA-Z0-9])?)([:*@\[#%/^,\}])'' text; # (first part of a bash parameter expansion, with »@« instead of »$«)
-        }) args.scripts;
+        }) (if builtins.isAttrs args.scripts then builtins.attrValues args.scripts else args.scripts);
         decls = lib.unique (map (match: builtins.elemAt match 1) (builtins.filter builtins.isList (builtins.concatMap (script: script.parsed) scripts)));
-        vars = pkgs.writeText "vars" (lib.concatMapStringsSep "\n" (decl: let
+        vars = pkgs.writeText "vars" ("#!/usr/bin/env bash\n" + (lib.concatMapStringsSep "\n" (decl: let
             call = let split = builtins.split "!" decl; in if (builtins.length split) == 1 then null else builtins.elemAt split 2;
             path = (builtins.filter builtins.isString (builtins.split "[.]" (if call == null then decl else builtins.substring 0 ((builtins.stringLength decl) - (builtins.stringLength call) - 1) decl)));
             resolved = lib.attrByPath path null context;
             applied = if call == null || resolved == null then resolved else (let
                 split = builtins.filter builtins.isString (builtins.split "[.]" call); name = builtins.head split; args = builtins.tail split;
-                func = builtins.foldl' (func: arg: func arg) (helpers.${name} or self.lib.wip.${name} or (pkgs.lib or lib).${name} or pkgs.${name}) args;
+                func = builtins.foldl' (func: arg: func arg) (helpers.${name} or self.lib.wip.${name} or (pkgs.lib or lib).${name} or pkgs.${name} or builtins.${name}) args;
             in func resolved);
             value = if builtins.isString (applied.outPath or null) then applied.outPath else if (
                 (builtins.isBool applied) || (builtins.isFloat applied) || (builtins.isInt applied) || (builtins.isPath applied)
             ) then builtins.toString applied else applied;
-            name = builtins.replaceStrings [ "." "!" ] [ "_" "__" ] decl; #(builtins.trace decl decl);
-        in (
-                 if (value == null) then ""
+            name = trace "substituteImplicit »${decl}« =>" (builtins.replaceStrings [ "." "!" "-" ] [ "_" "1" "0" ] decl);
+            toStringRecursive = value: if builtins.isString (value.outPath or null) then (
+                value.outPath
+            ) else if builtins.isAttrs value then (
+                "(\n${asBashDict { mkName = name: value: if value == null then null else name; mkValue = name: toStringRecursive; } value})"
+            ) else if (builtins.isList value) then (
+                "( ${lib.escapeShellArgs (map toStringRecursive value)} )"
+            ) else (toString value);
+        in (let final = (
+                 if (value == null) then "#${name}=null"
             else if (builtins.isString value) then "${name}=${lib.escapeShellArg value}"
-            else if (builtins.isList value) then "${name}=(${lib.escapeShellArgs (map builtins.toString value)})"
-            else if (builtins.isAttrs value) then "declare -A ${name}=${"(\n${asBashDict { mkValue = name: builtins.toString; } value}\n)"}"
+            else if (builtins.isList value) then "${name}=${toStringRecursive value}"
+            else if (builtins.isAttrs value) then "declare -A ${name}=${toStringRecursive value}"
             else throw "Can't use value of unsupported type ${builtins.typeOf} as substitution for ${decl}" # builtins.isFunction
-        )) decls);
+        ); in trace final final)) decls));
     in ''
         source ${vars}
         ${lib.concatMapStringsSep "\n" (script: "source ${pkgs.writeScript (builtins.baseNameOf script.source) (
             lib.concatMapStringsSep "" (seg: if builtins.isString seg then seg else (
-                "$"+"{"+(builtins.head seg)+(builtins.replaceStrings [ "." "!" ] [ "_" "__" ] (builtins.elemAt seg 1))+(toString (builtins.elemAt seg 3))
+                "$"+"{"+(builtins.head seg)+(builtins.replaceStrings [ "." "!" "-" ] [ "_" "1" "0" ] (builtins.elemAt seg 1))+(toString (builtins.elemAt seg 3))
             )) script.parsed
         )}") scripts}
     '';
@@ -94,7 +91,10 @@ in rec {
     escapeUnitName = name: lib.concatMapStringsSep "" (s: if builtins.isList s then "-" else s) (builtins.split "[^a-zA-Z0-9_.\\-]+" name); # from nixos/modules/services/backup/syncoid.nix
 
     pathToName = path: (builtins.replaceStrings [ "/" ":" ] [ "-" "-" ] path);
-    # (If »path« ends with »/«, then »path[0:-1]« is the closest "parent".)
-    parentPaths = path: let parent = builtins.dirOf path; in if parent == "." || parent == "/" then [ ] else (parentPaths parent) ++ [ parent ];
-
+    # Given a »path«, returns the list of all its parents, starting with »path« itself and ending with only its first segment.
+    # Examples: "/a/b/c" -> [ "/a/b/c" "/a/b" "/a" ] ; "x/y" -> [ "x/y" "x" ]
+    parentPaths = path: let
+        absolute = if lib.hasPrefix "/" path then 1 else 0; prefix = if absolute == 1 then "/" else "";
+        split = builtins.filter builtins.isString (builtins.split ''/'' (builtins.substring (absolute) ((builtins.stringLength path) - absolute - (if lib.hasSuffix "/" path then 1 else 0)) path));
+    in map (length: prefix + (builtins.concatStringsSep "/" (lib.take length split))) (lib.reverseList ((lib.range 1 (builtins.length split))));
 }

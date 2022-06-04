@@ -7,7 +7,7 @@ function prompt-for-user-passwords { # (void)
         userPasswords[$user]=@{config.users.users!catAttrSets.password[$user]}
     done
     for user in "@{!config.users.users!catAttrSets.passwordFile[@]}" ; do
-        if ! userPasswords[$user]=$(prompt-new-password "for the user account »$user«") ; then exit 1 ; fi
+        if ! userPasswords[$user]=$(prompt-new-password "for the user account »$user«") ; then return 1 ; fi
     done
 }
 
@@ -35,15 +35,15 @@ function populate-keystore { { # (void)
     done
     for usage in "${!methods[@]}" ; do
         if [[ "${methods[$usage]}" == home-pw || "${methods[$usage]}" == copy ]] ; then continue ; fi
-        add-key-"${methods[$usage]}" "$usage" "${options[$usage]}"
+        add-key-"${methods[$usage]}" "$usage" "${options[$usage]}" || return 1
     done
     for usage in "${!methods[@]}" ; do
         if [[ "${methods[$usage]}" != home-pw ]] ; then continue ; fi
-        add-key-"${methods[$usage]}" "$usage" "${options[$usage]}"
+        add-key-"${methods[$usage]}" "$usage" "${options[$usage]}" || return 1
     done
     for usage in "${!methods[@]}" ; do
         if [[ "${methods[$usage]}" != copy ]] ; then continue ; fi
-        add-key-"${methods[$usage]}" "$usage" "${options[$usage]}"
+        add-key-"${methods[$usage]}" "$usage" "${options[$usage]}" || return 1
     done
 )}
 
@@ -70,6 +70,7 @@ function create-luks-layers {( set -eu # (void)
 function open-luks-layers { # (void)
     keystore=/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}
     for luksName in "@{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ; do
+        if [[ -e /dev/mapper/$luksName ]] ; then continue ; fi
         rawDev=@{config.boot.initrd.luks.devices!catAttrSets.device[$luksName]}
         primaryKey="$keystore"/luks/"$luksName"/0.key
 

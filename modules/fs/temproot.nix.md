@@ -173,12 +173,12 @@ in {
             };
             fs.temproot.local.mounts = {
                 "/nix" = { zfsProps = zfsNoSyncProps; mode = "755"; }; # this (or /nix/store) is required
-                "/var/log" = { source = "logs"; };
-                "/local" = { source = "system"; };
+                "/var/log" = { source = "logs"; mode = "755"; };
+                "/local" = { source = "system"; mode = "755"; };
                 # »/swap« is used by »cfg.swap.asPartition = false«
             };
             fs.temproot.remote.mounts = {
-                "/remote" = { source = "system"; extraFsOptions = { neededForBoot = true; }; }; # if any secrets need to be picked up by »activate«, they should be here
+                "/remote" = { source = "system"; mode = "755"; extraFsOptions = { neededForBoot = true; }; }; # if any secrets need to be picked up by »activate«, they should be here
             };
         };
 
@@ -213,7 +213,7 @@ in {
     in {
 
         ${prefix} = {
-            fs.disks.partitions."swap-${hash}" = { type = "8200"; size = cfg.swap.size; order = 1250; };
+            fs.disks.partitions."swap-${hash}" = { type = lib.mkDefault "8200"; size = lib.mkDefault cfg.swap.size; order = lib.mkDefault 1250; };
             fs.keystore.keys."luks/swap-${hash}/0" = lib.mkIf cfg.swap.encrypted (lib.mkOptionDefault "random");
         };
         swapDevices = [ { device = "/dev/${if useLuks then "mapper" else "disk/by-partlabel"}/swap-${hash}"; } ];

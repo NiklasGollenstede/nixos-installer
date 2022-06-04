@@ -23,16 +23,16 @@ in {
     config = let
     in ({
 
-        systemd.services = lib.wip.mapMerge (target: { device, preMountCommands,  ... }: if (preMountCommands != null) then let
+        systemd.services = lib.wip.mapMerge (target: { device, preMountCommands, depends, ... }: if (preMountCommands != null) then let
             isDevice = lib.wip.startsWith "/dev/" device;
             target' = utils.escapeSystemdPath target;
             device' = utils.escapeSystemdPath device;
-            mountPoint = "${target'}.mount";
         in { "pre-mount-${target'}" = {
             description = "Prepare mounting (to) ${target}";
-            wantedBy = [ mountPoint ]; before = [ mountPoint ] ++ (lib.optional isDevice "systemd-fsck@${device'}.service");
+            wantedBy = [ "${target'}.mount" ]; before = [ "${target'}.mount" ]
+            ++ (lib.optional isDevice "systemd-fsck@${device'}.service"); # TODO: Does this exist for every device? Does depending on it instantiate the template?
             requires = lib.optional isDevice "${device'}.device"; after = lib.optional isDevice "${device'}.device";
-            unitConfig.RequiresMountsFor = [ (builtins.dirOf device) (builtins.dirOf target) ];
+            unitConfig.RequiresMountsFor = depends ++ [ (builtins.dirOf device) (builtins.dirOf target) ];
             unitConfig.DefaultDependencies = false;
             serviceConfig.Type = "oneshot"; script = preMountCommands;
         }; } else { }) config.fileSystems;

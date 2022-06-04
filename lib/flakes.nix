@@ -185,7 +185,7 @@ in rec {
 
             # provide installer tools (native to localSystem, not targetSystem)
             hostPath=$PATH
-            PATH=${pkgs.nixos-install-tools}/bin:${nix_wrapped}/bin:${nix}/bin:${pkgs.util-linux}/bin:${pkgs.coreutils}/bin:${pkgs.gnused}/bin:${pkgs.findutils}/bin:${pkgs.tree}/bin:${pkgs.zfs}/bin
+            PATH=${pkgs.nixos-install-tools}/bin:${nix_wrapped}/bin:${nix}/bin:${pkgs.util-linux}/bin:${pkgs.coreutils}/bin:${pkgs.gnused}/bin:${pkgs.gnugrep}/bin:${pkgs.findutils}/bin:${pkgs.tree}/bin:${pkgs.gawk}/bin:${pkgs.zfs}/bin
 
             ${appliedScripts}
 

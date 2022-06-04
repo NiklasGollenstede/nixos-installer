@@ -10,12 +10,13 @@ Just to provide an example of what a host configuration using this set of librar
 To prepare a virtual machine disk, as `sudo` user with `nix` installed, run in `..`:
 ```bash
  nix run '.#example' -- sudo install-system /home/$(id -un)/vm/disks/example.img && sudo chown $(id -un): /home/$(id -un)/vm/disks/example.img
+ nix run '.#example-raidz' -- sudo install-system /tmp/nixos-main.img:raidz1=/tmp/nixos-rz1.img:raidz2=/tmp/nixos-rz2.img:raidz3=/tmp/nixos-rz3.img
 ```
-Then to run in a qemu VM with KVM:
+Then to boot the system in a qemu VM with KVM:
 ```bash
  nix run '.#example' -- sudo run-qemu /home/$(id -un)/vm/disks/example.img
 ```
-Or as user with vBox access run this and use the UI or the printed commands:
+Or as user with vBox access, run this and use the UI or the printed commands:
 ```bash
  nix run '.#example' -- register-vbox /home/$(id -un)/vm/disks/example.img
 ```

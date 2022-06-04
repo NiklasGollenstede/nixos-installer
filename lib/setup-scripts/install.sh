@@ -33,9 +33,9 @@ function prepare-installer { # ...
         if zfs get -o value -H name "$poolName" &>/dev/null ; then echo "ZFS pool »$poolName« is already imported. Export the pool before running the installer." ; exit 1 ; fi
     done
 
-    if [[ ${SUDO_USER:-} ]] ; then function nix {( set +x ; declare -a args=("$@") ; PATH=/bin:/usr/bin su - "$SUDO_USER" -c "$(declare -p args)"' ; nix "${args[@]}"' )} ; fi
+    if [[ ${SUDO_USER:-} ]] ; then function nix {( set +x ; declare -a args=("$@") ; PATH=$hostPath su - "$SUDO_USER" -c "$(declare -p args)"' ; nix "${args[@]}"' )} ; fi
 
-    if [[ ${args[debug]:-} ]] ; then set +e ; set -E ; trap 'code= ; @{native.bashInteractive}/bin/bash --init-file @{config.environment.etc.bashrc.source} || code=$? ; if [[ $code ]] ; then exit $code ; fi' ERR ; fi # On error, instead of exiting straight away, open a shell to allow diagnosing/fixing the issue. Only exit if that shell reports failure (e.g. CtrlC + CtrlD). Unfortunately, the exiting has to be repeated for level of each nested sub-shells.
+    if [[ ${args[debug]:-} ]] ; then set +e ; set -E ; trap 'code= ; cat 2>/dev/null || true ; @{native.bashInteractive}/bin/bash --init-file @{config.environment.etc.bashrc.source} || code=$? ; if [[ $code ]] ; then exit $code ; fi' ERR ; fi # On error, instead of exiting straight away, open a shell to allow diagnosing/fixing the issue. Only exit if that shell reports failure (e.g. CtrlC + CtrlD). Unfortunately, the exiting has to be repeated for level of each nested sub-shells. The cat eats anything lined up on stdin, which would otherwise be run in the shell (TODO: but it blocks if there is nothing on stdin, requiring Ctrl+D to be pressed).
 
 }
 
@@ -44,11 +44,11 @@ function prepare-installer { # ...
 #  The restore commands are expected to pull in a backup of the systems secrets and state from somewhere, and need to acknowledge that something happened by running »restore-supported-callback«.
 function init-or-restore-system {( set -eu # (void)
     if [[ ! ${args[restore]:-} ]] ; then
-        run-hook-script 'System Initialization' @{config.wip.fs.disks.initSystemCommands!writeText.postPartitionCommands} # TODO: Do this later inside the chroot?
+        run-hook-script 'System Initialization' @{config.wip.fs.disks.initSystemCommands!writeText.initSystemCommands} # TODO: Do this later inside the chroot?
         return # usually, this would be it ...
     fi
     requiresRestoration=$(mktemp) ; trap "rm -f '$requiresRestoration'" EXIT ; function restore-supported-callback {( rm -f "$requiresRestoration" )}
-    run-hook-script 'System Restoration' @{config.wip.fs.disks.restoreSystemCommands!writeText.postPartitionCommands}
+    run-hook-script 'System Restoration' @{config.wip.fs.disks.restoreSystemCommands!writeText.restoreSystemCommands}
     if [[ -e $requiresRestoration ]] ; then echo 'The »restoreSystemCommands« did not call »restore-supported-callback« to mark backup restoration as supported for this system. Assuming incomplete configuration.' 1>&2 ; exit 1 ; fi
 )}
 

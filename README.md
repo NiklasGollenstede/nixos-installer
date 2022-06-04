@@ -67,7 +67,8 @@ As a local experiment, the result of running this in a `nix repl` is sufficient:
 Often, the concept expressed by a source code file is at least as important as the concrete implementation of it.
 `nix` unfortunately isn't super readable and also does not have documentation tooling support nearly on par with languages like TypeScript.
 
-Embedding the source code "file" within a MarkDown file emphasizes the importance of textual expressions of the motivation and context of each piece of source code, and should thus incentivize writing sufficient documentation
+Embedding the source code "file" within a MarkDown file emphasizes the importance of textual expressions of the motivation and context of each piece of source code, and should thus incentivize writing sufficient documentation.
+Having the documentation right next to the code should also help against documentation rot.
 
 Technically, Nix (and most other code files) don't need to have any specific file extension. By embedding the MarkDown header in a block comment, the file can still be a valid source code file, while the MarDown header ending in a typed code block ensures proper syntax highlighting of the source code in editors or online repos.
 

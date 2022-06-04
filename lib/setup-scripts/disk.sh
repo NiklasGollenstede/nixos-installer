@@ -33,7 +33,8 @@ function do-disk-setup { # 1: diskPaths
 # * So alignment at the default »align=8MiB« actually seems a decent choice.
 
 
-## Partitions all »config.wip.fs.disks.devices« to ensure that all (correctly) specified »config.wip.fs.disks.partitions« exist.
+## Partitions the »diskPaths« instances of all »config.wip.fs.disks.devices« to ensure that all specified »config.wip.fs.disks.partitions« exist.
+#  Parses »diskPaths«, creates and loop-mounts images for non-/dev/ paths, and tries to abort if any partition already exists on the host.
 function partition-disks { { # 1: diskPaths
     beQuiet=/dev/null ; if [[ ${args[debug]:-} ]] ; then beQuiet=/dev/stdout ; fi
     declare -g -A blockDevs=( ) # this ends up in the caller's scope
@@ -45,11 +46,11 @@ function partition-disks { { # 1: diskPaths
 
     local name ; for name in "@{!config.wip.fs.disks.devices[@]}" ; do
         if [[ ! ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name not provided" ; exit 1 ; fi
-        if [[ ! ${blockDevs[$name]} =~ ^(/dev/.*)$ ]] ; then
+        if [[ ${blockDevs[$name]} != /dev/* ]] ; then
             local outFile=${blockDevs[$name]} ; ( set -eu
                 eval 'declare -A disk='"@{config.wip.fs.disks.devices[$name]}"
-                install -o root -g root -m 640 -T /dev/null "$outFile" && fallocate -l "${disk[size]}" "$outFile"
-            ) && blockDevs[$name]=$(losetup --show -f "$outFile") && prepend_trap "losetup -d ${blockDevs[$name]}" EXIT # NOTE: this must not be inside a sub-shell!
+                install -o root -g root -m 640 -T /dev/null "$outFile" && truncate -s "${disk[size]}" "$outFile"
+            ) && blockDevs[$name]=$(losetup --show -f "$outFile") && prepend_trap "losetup -d '${blockDevs[$name]}'" EXIT # NOTE: this must not be inside a sub-shell!
         else
             if [[ ! "$(blockdev --getsize64 "${blockDevs[$name]}")" ]] ; then echo "Block device $name does not exist at ${blockDevs[$name]}" ; exit 1 ; fi
             blockDevs[$name]=$(realpath "${blockDevs[$name]}")
@@ -60,60 +61,66 @@ function partition-disks { { # 1: diskPaths
 
     for partDecl in "@{config.wip.fs.disks.partitionList[@]}" ; do
         eval 'declare -A part='"$partDecl"
-        if [[ -e /dev/disk/by-partlabel/"${part[name]}" ]] && ! is-partition-on-disks /dev/disk/by-partlabel/"${part[name]}" "${blockDevs[@]}" ; then echo "Partition /dev/disk/by-partlabel/${part[name]} exists but does not reside on one of the target disks ${blockDevs[@]}" ; exit 1 ; fi
+        if [[ -e /dev/disk/by-partlabel/"${part[name]}" ]] && ! is-partition-on-disks /dev/disk/by-partlabel/"${part[name]}" "${blockDevs[@]}" ; then echo "Partition /dev/disk/by-partlabel/${part[name]} already exists on this host and does not reside on one of the target disks ${blockDevs[@]}. Refusing to create another partition with the same partlabel!" ; exit 1 ; fi
     done
 
-    for name in "@{!config.wip.fs.disks.devices[@]}" ; do (
+    for name in "@{!config.wip.fs.disks.devices[@]}" ; do
         eval 'declare -A disk='"@{config.wip.fs.disks.devices[$name]}"
         if [[ ${disk[serial]:-} ]] ; then
-            actual=$(udevadm info --query=property --name="${blockDevs[${disk[name]}]}" | @{native.gnugrep}/bin/grep -oP 'ID_SERIAL_SHORT=\K.*')
-            if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device ${blockDevs[${disk[name]}]} does not match the serial declared for ${disk[name]}" ; exit 1 ; fi
+            actual=$(udevadm info --query=property --name="$blockDev" | grep -oP 'ID_SERIAL_SHORT=\K.*')
+            if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev does not match the serial declared for ${disk[name]}" ; exit 1 ; fi
         fi
-
-        declare -a sgdisk=( --zap-all ) # delete existing part tables
-        for partDecl in "@{config.wip.fs.disks.partitionList[@]}" ; do
-            eval 'declare -A part='"$partDecl"
-            if [[ ${part[disk]} != "${disk[name]}" ]] ; then continue ; fi
-            if [[ ${part[size]:-} =~ ^[0-9]+%$ ]] ; then
-                devSize=$(blockdev --getsize64 "${blockDevs[${disk[name]}]}")
-                part[size]=$(( $devSize / 1024 * ${part[size]:0:(-1)} / 100 ))K
-            fi
-            sgdisk+=( -a "${part[alignment]:-${disk[alignment]}}" -n "${part[index]:-0}":"${part[position]}":+"${part[size]:-}" -t 0:"${part[type]}" -c 0:"${part[name]}" )
-        done
-
-        if [[ ${disk[mbrParts]:-} ]] ; then
-            sgdisk+=( --hybrid "${disk[mbrParts]}" ) # --hybrid: create MBR in addition to GPT; ${disk[mbrParts]}: make these GPT part 1 MBR parts 2[3[4]]
-        fi
-
-        ( PATH=@{native.gptfdisk}/bin ; set -x ; sgdisk "${sgdisk[@]}" "${blockDevs[${disk[name]}]}" >$beQuiet ) # running all at once is much faster
-
-        if [[ ${disk[mbrParts]:-} ]] ; then
-            printf "
-                M                                # edit hybrid MBR
-                d;1                              # delete parts 1 (GPT)
-
-                # move the selected »mbrParts« to slots 1[2[3]] instead of 2[3[4]] (by re-creating part1 in the last sector, then sorting)
-                n;p;1                            # new ; primary ; part1
-                $(( $(blockSectorCount "${blockDevs[${disk[name]}]}") - 1)) # start (size 1sec)
-                x;f;r                            # expert mode ; fix order ; return
-                d;$(( (${#disk[mbrParts]} + 1) / 2 + 1 )) # delete ; part(last)
-
-                # create GPT part (spanning primary GPT area) as last part
-                n;p;4                            # new ; primary ; part4
-                1;33                             # start ; end
-                t;4;ee                           # type ; part4 ; GPT
-
-                ${disk[extraFDiskCommands]}
-                p;w;q                            # print ; write ; quit
-            " | @{native.gnused}/bin/sed -E 's/^ *| *(#.*)?$//g' | @{native.gnused}/bin/sed -E 's/\n\n+| *; */\n/g' | tee >((echo -n '++ ' ; tr $'\n' '|' ; echo) 1>&2) | ( set -x ; fdisk "${blockDevs[${disk[name]}]}" &>$beQuiet )
-        fi
-
-    ) ; done
+        partition-disk "${disk[name]}" "${blockDevs[${disk[name]}]}"
+    done
     @{native.parted}/bin/partprobe "${blockDevs[@]}"
     @{native.systemd}/bin/udevadm settle -t 15 || true # sometimes partitions aren't quite made available yet
 
     # ensure that filesystem creation does not complain about the devices already being occupied by a previous filesystem
     wipefs --all "@{config.wip.fs.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" >$beQuiet
+)}
+
+## Given a declared disk device's »name« and a path to an actual »blockDev« (or image) file, partitions the device as declared in the config.
+function partition-disk {( set -eu # 1: name, 2: blockDev, 3?: devSize
+    name=$1 ; blockDev=$2
+    eval 'declare -A disk='"@{config.wip.fs.disks.devices[$name]}"
+    devSize=${3:-$(@{native.util-linux}/bin/blockdev --getsize64 "$blockDev")}
+
+    declare -a sgdisk=( --zap-all ) # delete existing part tables
+    for partDecl in "@{config.wip.fs.disks.partitionList[@]}" ; do
+        eval 'declare -A part='"$partDecl"
+        if [[ ${part[disk]} != "${disk[name]}" ]] ; then continue ; fi
+        if [[ ${part[size]:-} =~ ^[0-9]+%$ ]] ; then
+            part[size]=$(( $devSize / 1024 * ${part[size]:0:(-1)} / 100 ))K
+        fi
+        sgdisk+=( -a "${part[alignment]:-${disk[alignment]}}" -n "${part[index]:-0}":"${part[position]}":+"${part[size]:-}" -t 0:"${part[type]}" -c 0:"${part[name]}" )
+    done
+
+    if [[ ${disk[mbrParts]:-} ]] ; then
+        sgdisk+=( --hybrid "${disk[mbrParts]}" ) # --hybrid: create MBR in addition to GPT; ${disk[mbrParts]}: make these GPT part 1 MBR parts 2[3[4]]
+    fi
+
+    ( PATH=@{native.gptfdisk}/bin ; set -x ; sgdisk "${sgdisk[@]}" "$blockDev" >$beQuiet ) # running all at once is much faster
+
+    if [[ ${disk[mbrParts]:-} ]] ; then
+        printf "
+            M                                # edit hybrid MBR
+            d;1                              # delete parts 1 (GPT)
+
+            # move the selected »mbrParts« to slots 1[2[3]] instead of 2[3[4]] (by re-creating part1 in the last sector, then sorting)
+            n;p;1                            # new ; primary ; part1
+            $(( ($devSize/512) - 1)) # start (size 1sec)
+            x;f;r                            # expert mode ; fix order ; return
+            d;$(( (${#disk[mbrParts]} + 1) / 2 + 1 )) # delete ; part(last)
+
+            # create GPT part (spanning primary GPT area) as last part
+            n;p;4                            # new ; primary ; part4
+            1;33                             # start ; end
+            t;4;ee                           # type ; part4 ; GPT
+
+            ${disk[extraFDiskCommands]}
+            p;w;q                            # print ; write ; quit
+        " | @{native.gnused}/bin/sed -E 's/^ *| *(#.*)?$//g' | @{native.gnused}/bin/sed -E 's/\n\n+| *; */\n/g' | tee >((echo -n '++ ' ; tr $'\n' '|' ; echo) 1>&2) | ( PATH=@{native.util-linux}/bin ; set -x ; fdisk "$blockDev" &>$beQuiet )
+    fi
 )}
 
 ## Checks whether a »partition« resides on one of the provided »blockDevs«.
@@ -152,31 +159,35 @@ function format-partitions {( set -eu
 
 ## Mounts all file systems as it would happen during boot, but at path prefix »$mnt« (instead of »/«).
 function mount-system {( set -eu # 1: mnt, 2?: fstabPath
+    # TODO: »config.system.build.fileSystems« is a dependency-sorted list. Could use that ...
     # mount --all --fstab @{config.system.build.toplevel}/etc/fstab --target-prefix "$1" -o X-mount.mkdir # (»--target-prefix« is not supported on Ubuntu 20.04)
     mnt=$1 ; fstabPath=${2:-"@{config.system.build.toplevel}/etc/fstab"}
     PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH
-    <$fstabPath @{native.gnugrep}/bin/grep -v '^#' | LC_ALL=C sort -k2 | while read source target type options numbers ; do
+    <$fstabPath grep -v '^#' | LC_ALL=C sort -k2 | while read source target type options numbers ; do
         if [[ ! $target || $target == none ]] ; then continue ; fi
         options=,$options, ; options=${options//,ro,/,}
         if [[ $options =~ ,r?bind, ]] || [[ $type == overlay ]] ; then continue ; fi
         if ! mountpoint -q "$mnt"/"$target" ; then (
             mkdir -p "$mnt"/"$target"
-            [[ $type == tmpfs ]] || @{native.kmod}/bin/modprobe --quiet $type || true # (this does help sometimes)
+            [[ $type == tmpfs || $type == */* ]] || @{native.kmod}/bin/modprobe --quiet $type || true # (this does help sometimes)
             mount -t $type -o "${options:1:(-1)}" "$source" "$mnt"/"$target"
         ) || [[ $options == *,nofail,* ]] ; fi # (actually, nofail already makes mount fail silently)
     done
     # Since bind mounts may depend on other mounts not only for the target (which the sort takes care of) but also for the source, do all bind mounts last. This would break if there was a different bind mountpoint within a bind-mounted target.
-    <$fstabPath @{native.gnugrep}/bin/grep -v '^#' | LC_ALL=C sort -k2 | while read source target type options numbers ; do
+    <$fstabPath grep -v '^#' | LC_ALL=C sort -k2 | while read source target type options numbers ; do
         if [[ ! $target || $target == none ]] ; then continue ; fi
         options=,$options, ; options=${options//,ro,/,}
         if [[ $options =~ ,r?bind, ]] || [[ $type == overlay ]] ; then : ; else continue ; fi
         if ! mountpoint -q "$mnt"/"$target" ; then (
             mkdir -p "$mnt"/"$target"
             if [[ $type == overlay ]] ; then
-                options=${options//,workdir=/,workdir=$mnt\/} ; options=${options//,upperdir=/,upperdir=$mnt\/} # work and upper dirs must be in target, lower dirs are probably store paths
-                workdir=$(<<<"$options" @{native.gnugrep}/bin/grep -o -P ',workdir=\K[^,]+' || true) ; if [[ $workdir ]] ; then mkdir -p "$workdir" ; fi
-                upperdir=$(<<<"$options" @{native.gnugrep}/bin/grep -o -P ',upperdir=\K[^,]+' || true) ; if [[ $upperdir ]] ; then mkdir -p "$upperdir" ; fi
+                options=${options//,workdir=/,workdir=$mnt\/} ; options=${options//,upperdir=/,upperdir=$mnt\/} # Work and upper dirs must be in target.
+                workdir=$(<<<"$options" grep -o -P ',workdir=\K[^,]+' || true) ; if [[ $workdir ]] ; then mkdir -p "$workdir" ; fi
+                upperdir=$(<<<"$options" grep -o -P ',upperdir=\K[^,]+' || true) ; if [[ $upperdir ]] ; then mkdir -p "$upperdir" ; fi
+                lowerdir=$(<<<"$options" grep -o -P ',lowerdir=\K[^,]+' || true) # TODO: test the lowerdir stuff
+                options=${options//,lowerdir=$lowerdir,/,lowerdir=$mnt/${lowerdir//:/:$mnt\/},} ; source=overlay
             else
+                if [[ $source == /nix/store/* ]] ; then options=,ro$options ; fi
                 source=$mnt/$source ; if [[ ! -e $source ]] ; then mkdir -p "$source" ; fi
             fi
             mount -t $type -o "${options:1:(-1)}" "$source" "$mnt"/"$target"
@@ -187,13 +198,10 @@ function mount-system {( set -eu # 1: mnt, 2?: fstabPath
 ## Unmounts all file systems (that would be mounted during boot / by »mount-system«).
 function unmount-system {( set -eu # 1: mnt, 2?: fstabPath
     mnt=$1 ; fstabPath=${2:-"@{config.system.build.toplevel}/etc/fstab"}
-    <$fstabPath @{native.gnugrep}/bin/grep -v '^#' | LC_ALL=C sort -k2 -r | while read source target rest ; do
+    <$fstabPath grep -v '^#' | LC_ALL=C sort -k2 -r | while read source target rest ; do
         if [[ ! $target || $target == none ]] ; then continue ; fi
         if mountpoint -q "$mnt"/"$target" ; then
             umount "$mnt"/"$target"
         fi
     done
 )}
-
-## Given a block device path, returns the number of 512byte sectors it can hold.
-function blockSectorCount { printf %s "$(( $(blockdev --getsize64 "$1") / 512 ))" ; }

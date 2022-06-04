@@ -92,7 +92,7 @@ in let module = {
         fileSystems.${keystore} = { fsType = "vfat"; device = "/dev/mapper/keystore-${hash}"; options = [ "ro" "noatime" "umask=0277" "noauto" ]; formatOptions = ""; };
 
         ${prefix} = {
-            fs.disks.partitions."keystore-${hash}" = { type = "8309"; order = 1375; disk = "primary"; size = "32M"; };
+            fs.disks.partitions."keystore-${hash}" = { type = lib.mkDefault "8309"; order = lib.mkDefault 1375; disk = lib.mkDefault "primary"; size = lib.mkDefault "32M"; };
             fs.disks.postFormatCommands = ''
                 ( : 'Copy the live keystore to its primary persistent location:'
                     tmp=$(mktemp -d) ; mount "/dev/mapper/keystore-${hash}" $tmp ; trap "umount $tmp ; rmdir $tmp" EXIT

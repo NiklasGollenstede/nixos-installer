@@ -26,8 +26,8 @@ in {
     in lib.mkIf cfg.enable (lib.mkMerge [ ({
 
         ${prefix} = {
-            fs.disks.partitions."boot-${hash}" = { type = "ef00"; size = cfg.size; index = 1; order = 1500; disk = "primary"; }; # require it to be part1, and create it early
-            fs.disks.devices = lib.mkIf cfg.createMbrPart { primary = { mbrParts = "1"; extraFDiskCommands = ''
+            fs.disks.partitions."boot-${hash}" = { type = lib.mkDefault "ef00"; size = lib.mkDefault cfg.size; index = lib.mkDefault 1; order = lib.mkDefault 1500; disk = lib.mkOptionDefault "primary"; }; # require it to be part1, and create it early
+            fs.disks.devices = lib.mkIf cfg.createMbrPart { primary = { mbrParts = lib.mkDefault "1"; extraFDiskCommands = ''
                 t;1;c  # type ; part1 ; W95 FAT32 (LBA)
                 a;1    # active/boot ; part1
             ''; }; };

@@ -35,7 +35,7 @@ in {
             serviceConfig.ExecStart = lib.concatStringsSep "" [
                 "${pkgs.dropbear}/bin/dropbear"
                 " -F -E" # don't fork, use stderr
-                " -p 22" # handle a single connection on stdio
+                " -p 22" # listen on TCP/22
                 " -R" # generate host keys on connection
                 #" -r .../dropbear_rsa_host_key"
             ];

@@ -31,8 +31,8 @@ function create-zpools { # 1: mnt
 }
 
 ## Ensures that the system's datasets exist and have the defined properties (but not that they don't have properties that aren't defined).
-#  The pool(s) must exist, be imported with root prefix »$mnt«, and (if datasets are to be created or encryption roots to be inherited) the system's keystore must be open (see »mount-keystore-luks«).
-#  »keystatus« and »mounted« of existing datasets should remain unchained, newly crated datasets will not be mounted but have their keys loaded.
+#  The pool(s) must exist, be imported with root prefix »$mnt«, and (if datasets are to be created or encryption roots to be inherited) the system's keystore must be open (see »mount-keystore-luks«) or the keys be loaded.
+#  »keystatus« and »mounted« of existing datasets should remain unchanged, newly crated datasets will not be mounted but have their keys loaded.
 function ensure-datasets {( set -eu # 1: mnt, 2?: filterExp
     if (( @{#config.wip.fs.zfs.datasets[@]} == 0 )) ; then return ; fi
     mnt=$1 ; while [[ "$mnt" == */ ]] ; do mnt=${mnt:0:(-1)} ; done # (remove any tailing slashes)
@@ -58,6 +58,7 @@ function ensure-datasets {( set -eu # 1: mnt, 2?: filterExp
             if [[ ${props[keyformat]:-} == ephemeral ]] ; then
                 cryptRoot=${dataset[name]} ; unset props[keyformat] ; props[keylocation]=file:///dev/null
             fi
+            if [[ $explicitKeylocation ]] ; then props[keylocation]=$explicitKeylocation ; fi
             unset props[encryption] ; unset props[keyformat] # can't change these anyway
             names=$(IFS=, ; echo "${!props[*]}") ; values=$(IFS=$'\n' ; echo "${props[*]}")
             if [[ $values != "$(zfs get -o value -H "$names" "${dataset[name]}")" ]] ; then (
@@ -66,27 +67,28 @@ function ensure-datasets {( set -eu # 1: mnt, 2?: filterExp
             ) ; fi
 
             if [[ $cryptRoot && $(zfs get -o value -H encryptionroot "${dataset[name]}") != "$cryptRoot" ]] ; then ( # inherit key from parent (which the parent would also already have done if necessary)
-                parent=$(dirname "${dataset[name]}")
-                if [[ $(zfs get -o value -H keystatus "$parent") != available ]] ; then
-                    zfs load-key -L file://"$cryptKey" "$parent" ; trap "zfs unload-key $parent || true" EXIT
+                if [[ $(zfs get -o value -H keystatus "$cryptRoot") != available ]] ; then
+                    zfs load-key -L file://"$cryptKey" "$cryptRoot" ; trap "zfs unload-key $cryptRoot || true" EXIT
                 fi
                 if [[ $(zfs get -o value -H keystatus "${dataset[name]}") != available ]] ; then
-                    zfs load-key -L file://"$cryptKey" "${dataset[name]}" # will unload with parent
+                    zfs load-key -L file://"$cryptKey" "${dataset[name]}" # will unload with cryptRoot
                 fi
                 ( set -x ; zfs change-key -i "${dataset[name]}" )
             ) ; fi
 
-        else # create dataset
+        else ( # create dataset
             if [[ ${props[keyformat]:-} == ephemeral ]] ; then
                 props[encryption]=aes-256-gcm ; props[keyformat]=hex ; props[keylocation]=file:///dev/stdin ; explicitKeylocation=file:///dev/null
                 declare -a args=( ) ; for name in "${!props[@]}" ; do args+=( -o "${name}=${props[$name]}" ) ; done
                 </dev/urandom tr -dc 0-9a-f | head -c 64 | ( set -x ; zfs create "${args[@]}" "${dataset[name]}" )
                 zfs unload-key "${dataset[name]}"
-            else (
-                # TODO: if [[ $cryptRoot && $(zfs get -o value -H keystatus "$cryptRoot") != available ]] ; then ... load key while in this block ...
+            else
+                if [[ $cryptRoot && $cryptRoot != ${dataset[name]} && $(zfs get -o value -H keystatus "$cryptRoot") != available ]] ; then
+                    zfs load-key -L file://"$cryptKey" "$cryptRoot" ; trap "zfs unload-key $cryptRoot || true" EXIT
+                fi
                 declare -a args=( ) ; for name in "${!props[@]}" ; do args+=( -o "${name}=${props[$name]}" ) ; done
                 ( set -x ; zfs create "${args[@]}" "${dataset[name]}" )
-            ) ; fi
+            fi
             if [[ ${props[canmount]} != off ]] ; then (
                 mount -t zfs -o zfsutil "${dataset[name]}" $tmpMnt ; trap "umount '${dataset[name]}'" EXIT
                 chmod 000 "$tmpMnt" ; ( chown "${dataset[uid]}:${dataset[gid]}" -- "$tmpMnt" ; chmod "${dataset[mode]}" -- "$tmpMnt" )
@@ -95,7 +97,7 @@ function ensure-datasets {( set -eu # 1: mnt, 2?: filterExp
                 ( set -x ; zfs set keylocation="$explicitKeylocation" "${dataset[name]}" )
             fi
             zfs snapshot -r "${dataset[name]}"@empty
-        fi
+        ) ; fi
 
         eval 'declare -A allows='"${dataset[permissions]}"
         for who in "${!allows[@]}" ; do

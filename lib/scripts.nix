@@ -1,5 +1,6 @@
-dirname: { self, nixpkgs, ...}: let
+dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
+    inherit (import "${dirname}/vars.nix" dirname inputs) extractLineAnchored;
 in rec {
 
     # Turns an attr set into a bash dictionary (associative array) declaration, e.g.:
@@ -61,6 +62,13 @@ in rec {
             )) script.parsed
         )}") scripts}
     '';
+
+    ## Given a bash »script« as string and a function »name«, this finds and extracts the definition of that function in and from the script.
+    #  The function definition has to start at the beginning of a line and must ends the next »}« of »)}« at the beginning of a line that is followed by nothing but a comment on that line.
+    extractBashFunction = script: name: let
+        inherit (extractLineAnchored ''${name}[ ]*[(][ ]*[)]|function[ ]+${name}[ ]'' true false script) line after;
+        body = builtins.split "(\n[)]?[}])([ ]*[#][^\n]*)?\n" after;
+    in if (builtins.length body) < 3 then null else line + (builtins.head body) + (builtins.head (builtins.elemAt body 1));
 
     # Used as a »system.activationScripts« snippet, this performs substitutions on a »text« before writing it to »path«.
     # For each name-value pair in »substitutes«, all verbatim occurrences of the attribute name in »text« are replaced by the content of the file with path of the attribute value.

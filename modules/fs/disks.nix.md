@@ -17,9 +17,9 @@ in {
     options.${prefix} = { fs.disks = {
         devices = lib.mkOption {
             description = "Set of disk devices that this host will be installed on.";
-            type = lib.types.attrsOf (lib.types.submodule ({ name, ... }: { options = {
+            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
                 name = lib.mkOption { description = "Name that this device is being referred to as in other places."; type = lib.types.str; default = name; readOnly = true; };
-                size = lib.mkOption { description = "The size of the image to create, when using an image for this device, as argument to »fallocate -l«."; type = lib.types.str; default = "16G"; };
+                size = lib.mkOption { description = "The size of the image to create, when using an image for this device, as argument to »truncate -s«."; type = lib.types.str; default = "16G"; };
                 serial = lib.mkOption { description = "Serial number of the specific hardware device to use. If set the device path passed to the installer must point to the device with this serial. Use »udevadm info --query=property --name=$DISK | grep -oP 'ID_SERIAL_SHORT=\K.*'« to get the serial."; type = lib.types.nullOr lib.types.str; default = null; };
                 alignment = lib.mkOption { description = "Default alignment quantifier for partitions on this device. Should be at least the optimal physical write size of the device, but going larger at worst wastes this many times the number of partitions disk sectors."; type = lib.types.int; default = 16384; };
                 mbrParts = lib.mkOption { description = "Up to three colon-separated (GPT) partition numbers that will be made available in a hybrid MBR."; type = lib.types.nullOr lib.types.str; default = null; };
@@ -27,12 +27,13 @@ in {
                     t;1;b  # type ; part1 ; W95 FAT32
                     a;1    # active/boot ; part1
                 ''; };
-            }; }));
-            default = { primary = { }; };
+            }; })));
+            default = { };
+            apply = lib.filterAttrs (k: v: v != null);
         };
         partitions = lib.mkOption {
             description = "Set of disks disk partitions that the system will need/use. Partitions will be created on their respective ».disk«s in ».order« using »sgdisk -n X:+0+$size«.";
-            type = lib.types.attrsOf (lib.types.submodule ({ name, ... }: { options = {
+            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
                 name = lib.mkOption { description = "Name/partlabel that this partition can be referred to as once created."; type = lib.types.str; default = name; readOnly = true; };
                 disk = lib.mkOption { description = "Name of the disk that this partition resides on, which will automatically be declared with default options."; type = lib.types.str; default = "primary"; };
                 type = lib.mkOption { description = "»gdisk« partition type of this partition."; type = lib.types.str; };
@@ -41,10 +42,12 @@ in {
                 alignment = lib.mkOption { description = "Adjusted alignment quantifier for this partition only."; type = lib.types.nullOr lib.types.int; default = null; example = 1; };
                 index = lib.mkOption { description = "Optionally explicit partition table index to place this partition in. Use ».order« to make sure that this index hasn't been used yet.."; type = lib.types.nullOr lib.types.int; default = null; };
                 order = lib.mkOption { description = "Creation order ranking of this partition. Higher orders will be created first, and will thus be placed earlier in the partition table (if ».index« isn't explicitly set) and also further to the front of the disk space."; type = lib.types.int; default = 1000; };
-            }; }));
+            }; })));
             default = { };
+            apply = lib.filterAttrs (k: v: v != null);
         };
-        partitionList = lib.mkOption { description = "Partitions as a sorted list"; type = lib.types.listOf (lib.types.attrsOf lib.types.anything); default = lib.sort (before: after: before.order >= after.order) (lib.attrValues cfg.partitions); readOnly = true; internal = true; };
+        partitionList = lib.mkOption { description = "Partitions as a sorted list."; type = lib.types.listOf (lib.types.attrsOf lib.types.anything); default = lib.sort (before: after: before.order >= after.order) (lib.attrValues cfg.partitions); readOnly = true; internal = true; };
+        partitioning = lib.mkOption { description = "The resulting disk partitioning as »sgdisk --backup --print« per disk."; type = lib.types.package; readOnly = true; internal = true; };
 
         # These are less disk-state-describing and more installation-imperative ...
         # Also, these are run as root and thee are no security or safety checks ...
@@ -55,7 +58,27 @@ in {
         restoreSystemCommands = lib.mkOption { description = ""; type = lib.types.lines; default = ""; };
     }; };
 
-    # Create all devices referenced by partitions:
-    config.${prefix}.fs.disks.devices = lib.wip.mapMerge (name: { ${name} = { }; }) (lib.catAttrs "disk" config.${prefix}.fs.disks.partitionList);
+    config.${prefix} = {
+        # Create all devices referenced by partitions:
+        fs.disks.devices = lib.wip.mapMerge (name: { ${name} = { }; }) (lib.catAttrs "disk" config.${prefix}.fs.disks.partitionList);
+
+        fs.disks.partitioning = let
+            partition-disk = builtins.toFile "partition-disk" (lib.wip.extractBashFunction (builtins.readFile "${dirname}/../../lib/setup-scripts/disk.sh") "partition-disk");
+            esc = lib.escapeShellArg;
+        in pkgs.runCommand "partitioning-${config.networking.hostName}" { } ''
+            ${lib.wip.substituteImplicit { inherit pkgs; scripts = [ partition-disk ]; context = { inherit config; native = pkgs; }; }} # inherit (builtins) trace;
+            mkdir $out ; beQuiet=/dev/stdout
+            ${lib.concatStrings (lib.mapAttrsToList (name: disk: ''
+                name=${esc name} ; img=$name.img
+                ${pkgs.coreutils}/bin/truncate -s ${esc disk.size} $img
+                partition-disk $name $img ${toString (lib.wip.parseSizeSuffix disk.size)}
+                ${pkgs.gptfdisk}/bin/sgdisk --backup=$out/$name.backup $img
+                ${pkgs.gptfdisk}/bin/sgdisk --print $img >$out/$name.gpt
+                ${if disk.mbrParts != null then ''
+                    ${pkgs.util-linux}/bin/fdisk --type mbr --list $img >$out/$name.mbr
+                '' else ""}
+            '') cfg.devices)}
+        '';
+    };
 
 }

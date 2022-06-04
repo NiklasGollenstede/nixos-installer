@@ -106,3 +106,62 @@ function add-bootkey-to-keydev {( set -eu # 1: blockDev, 2?: hostHash
     @{native.parted}/bin/partprobe "$blockDev" ; @{native.systemd}/bin/udevadm settle -t 15 # wait for partitions to update
     </dev/urandom tr -dc 0-9a-f | head -c 512 >/dev/disk/by-partlabel/"$bootkeyPartlabel"
 )}
+
+
+## Tries to open and mount the systems keystore from its LUKS partition. If successful, adds the traps to close it when the parent shell exits.
+#  See »open-system«'s implementation for some example calls to this function.
+function mount-keystore-luks { # ...: cryptsetupOptions
+    # (For the traps to work, this can't run in a sub shell. The function therefore can't use »( set -eu ; ... )« internally and instead has to use »&&« after every command and in place of most »;«, and the function can't be called from a pipeline.)
+    keystore=keystore-@{config.networking.hostName!hashString.sha256:0:8} &&
+    mkdir -p -- /run/$keystore &&
+    @{native.cryptsetup}/bin/cryptsetup open "$@" /dev/disk/by-partlabel/$keystore $keystore &&
+    mount -o nodev,umask=0077,fmask=0077,dmask=0077,ro /dev/mapper/$keystore /run/$keystore &&
+    prepend_trap "umount /run/$keystore ; @{native.cryptsetup}/bin/cryptsetup close $keystore ; rmdir /run/$keystore" EXIT
+}
+
+## Performs any steps necessary to mount the target system at »/tmp/nixos-install-@{config.networking.hostName}« on the current host.
+#  For any steps taken, it also adds the reaps to undo them on  exit from the calling shell, and it always adds the exit trap to do the unmounting itself.
+#  »diskImages« may be passed in the same format as to the installer. If so, any image files are ensured to be loop-mounted.
+#  Perfect to inspect/update/amend/repair a system's installation afterwards, e.g.:
+#  $ source ${config_wip_fs_disks_initSystemCommands1writeText_initSystemCommands}
+#  $ source ${config_wip_fs_disks_restoreSystemCommands1writeText_restoreSystemCommands}
+#  $ install-system-to /tmp/nixos-install-${config_networking_hostName}
+#  $ nixos-enter --root /tmp/nixos-install-${config_networking_hostName}
+function open-system { # 1?: diskImages
+    # (for the traps to work, this can't run in a sub shell, so also can't »set -eu«, so use »&&« after every command and in place of most »;«)
+
+    local diskImages=${1:-} # If »diskImages« were specified and they point at files that aren't loop-mounted yet, then loop-mount them now:
+    local images=$( losetup --list --all --raw --noheadings --output BACK-FILE )
+    local decl && for decl in ${diskImages//:/ } ; do
+        local image=${decl/*=/} && if [[ $image != /dev/* ]] && ! <<<$images grep -xF $image ; then
+            local blockDev=$( losetup --show -f "$image" ) && prepend_trap "losetup -d '$blockDev'" EXIT &&
+            @{native.parted}/bin/partprobe "$blockDev" &&
+        :;fi &&
+    :;done &&
+    ( @{native.systemd}/bin/udevadm settle -t 15 || true ) && # sometimes partitions aren't quite made available yet
+
+    if [[ @{config.wip.fs.keystore.enable} && ! -e /dev/mapper/keystore-@{config.networking.hostName!hashString.sha256:0:8} ]] ; then # Try a bunch of approaches for opening the keystore:
+        mount-keystore-luks --key-file=<(printf %s "@{config.networking.hostName}") ||
+        mount-keystore-luks --key-file=/dev/disk/by-partlabel/bootkey-@{config.networking.hostName!hashString.sha256:0:8} ||
+        mount-keystore-luks --key-file=<( read -s -p PIN: pin && echo ' touch!' >&2 && ykchalresp -2 "$pin" ) ||
+        # TODO: try static yubikey challenge
+        mount-keystore-luks
+    fi &&
+
+    local mnt=/tmp/nixos-install-@{config.networking.hostName} && if [[ ! -e $mnt ]] ; then mkdir -p "$mnt" && prepend_trap "rmdir '$mnt'" EXIT ; fi &&
+
+    open-luks-layers && # Load crypt layers and zfs pools:
+    if [[ $( LC_ALL=C type -t ensure-datasets ) == 'function' ]] ; then
+        local poolName && for poolName in "@{!config.wip.fs.zfs.pools[@]}" ; do
+            if ! zfs get -o value -H name "$poolName" &>/dev/null ; then
+                zpool import -f -N -R "$mnt" "$poolName" && prepend_trap "zpool export '$poolName'" EXIT &&
+            :;fi &&
+            : | zfs load-key -r "$poolName" || true &&
+        :;done &&
+        ensure-datasets "$mnt" &&
+    :;fi &&
+
+    prepend_trap "unmount-system '$mnt'" EXIT && mount-system "$mnt" &&
+
+    true # (success)
+}

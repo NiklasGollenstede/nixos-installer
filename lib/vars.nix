@@ -61,8 +61,23 @@ in rec {
     matches = exp: string: builtins.match exp string != null;
     extractChars = exp: string: let match = (builtins.match "^.*(${exp}).*$" string); in if match == null then null else builtins.head match;
 
-    # If »exp« (which mustn't match across »\n«) matches (a part of) exactly one line in »text«, return that »line« including tailing »\n«, plus the text part »before« and »after«, and the text »without« the line.
-    extractLine = exp: text: let split = builtins.split "([^\n]*${exp}[^\n]*\n)" (builtins.unsafeDiscardStringContext text); get = builtins.elemAt split; ctxify = str: lib.addContextFrom text str; in if builtins.length split != 3 then null else rec { before = ctxify (get 0); line = ctxify (builtins.head (get 1)); after = ctxify (get 2); without = ctxify (before + after); }; # (TODO: The string context stuff is actually required, but why? Shouldn't »builtins.split« propagate the context?)
+    # If »exp« (which mustn't match across »\n«) matches (a part of) exactly one line in »text«, return that »line« including tailing »\n«, plus the text part »before« and »after«, the text »without« the line, and any »captures« made by »exp«. If »text« does not end in a »\n«, then one will be added (since this function operates on lines).
+    # The »*Anchored« version allows the expression to require to match from the »start« and/or to the »end« of its line, by passing the respective bool(s) as »true«.
+    extractLineAnchored = exp: start: end: text: let
+        exp' = "(${if start then "^|\n" else ""})(${if start then "" else "[^\n]*"}(${exp})${if end then "" else "[^\n]*"}\n)"; # First capture group is the optional start anchor, the second one the line itself.
+        text' = (builtins.unsafeDiscardStringContext (if (lastChar text) == "\n" then text else text + "\n")); # Ensure tailing newline and drop context (since it needs to be added again anyway).
+        split = builtins.split exp' text';
+        get = builtins.elemAt split; matches = get 1;
+        ctxify = str: lib.addContextFrom text str;
+    in if builtins.length split != 3 then null else rec { # length < 3 => no match ; length < 3 => multiple matches
+        before = ctxify ((get 0) + (builtins.head matches));
+        line = ctxify (builtins.elemAt matches 1);
+        captures = map ctxify (lib.sublist 3 (builtins.length matches) matches);
+        after = ctxify (get 2);
+        without = ctxify (before + after);
+    }; # (TODO: The string context stuff is actually required, but why? Shouldn't »builtins.split« propagate the context?)
+    extractLine = exp: text: extractLineAnchored exp false false text;
+    #extractLine = exp: text: let split = builtins.split "([^\n]*${exp}[^\n]*\n)" (builtins.unsafeDiscardStringContext (if (lastChar text) == "\n" then text else text + "\n")); get = builtins.elemAt split; ctxify = str: lib.addContextFrom text str; in if builtins.length split != 3 then null else rec { before = ctxify (get 0); line = ctxify (builtins.head (get 1)); captures = map ctxify (builtins.tail (get 1)); after = ctxify (get 2); without = ctxify (before + after); }; # (TODO: The string context stuff is actually required, but why? Shouldn't »builtins.split« propagate the context?)
 
     # Given a string, returns its first/last char (or last utf-8(?) byte?).
     firstChar = string: builtins.substring                                (0) 1 string;

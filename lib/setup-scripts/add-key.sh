@@ -20,7 +20,7 @@ function add-key-hostname {( set -eu # 1: usage
 ## Adds a key by copying it from a bootkey partition (see »add-bootkey-to-keydev«) to the keystore.
 function add-key-usb-part {( set -eu # 1: usage
     keystore=/run/keystore-@{config.networking.hostName!hashString.sha256:0:8} ; usage=$1
-    if [[ ! "$usage" =~ ^(luks/keystore/.*)$ ]] ; then printf '»usb-part« key mode is only available for the keystore itself.\n' ; exit 1 ; fi
+    if [[ ! "$usage" =~ ^(luks/keystore-[^/]+/[1-8])$ ]] ; then printf '»usb-part« key mode is only available for the keystore itself.\n' ; exit 1 ; fi
     bootkeyPartlabel=bootkey-"@{config.networking.hostName!hashString.sha256:0:8}"
     cat /dev/disk/by-partlabel/"$bootkeyPartlabel" | write-secret "$keystore"/"$usage".key
 )}

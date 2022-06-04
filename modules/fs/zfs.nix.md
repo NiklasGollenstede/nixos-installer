@@ -21,7 +21,7 @@ in let module = {
 
         pools = lib.mkOption {
             description = "ZFS pools created during this host's installation.";
-            type = lib.types.attrsOf (lib.types.submodule ({ name, ... }: { options = {
+            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
                 name = lib.mkOption { description = "Attribute name as name of the pool."; type = lib.types.str; default = name; readOnly = true; };
                 vdevArgs = lib.mkOption { description = "List of arguments that specify the virtual devices (vdevs) used when initially creating the pool. Can consist of the device type keywords and partition labels. The latter are prefixed with »/dev/mapper/« if a mapping with that name is configured or »/dev/disk/by-partlabel/« otherwise, and then the resulting argument sequence is is used verbatim in »zpool create«."; type = lib.types.listOf lib.types.str; default = [ name ]; example = [ "raidz1 data1-..." "data2-..." "data3-..." "cache" "cache-..." ]; };
                 props = lib.mkOption { description = "Zpool properties to pass when creating the pool. May also set »feature@...« and »compatibility«."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; };
@@ -31,13 +31,14 @@ in let module = {
                 props.ashift = lib.mkOptionDefault "12"; # be explicit
                 props.comment = lib.mkOptionDefault "hostname=${config.networking.hostName};"; # This is just nice to know without needing to inspect the datasets.
                 props.cachefile = lib.mkOptionDefault "none"; # If it works on first boot without (stateful) cachefile, then it will also do so later.
-            }; }));
+            }; })));
             default = { };
+            apply = lib.filterAttrs (k: v: v != null);
         };
 
         datasets = lib.mkOption {
             description = "ZFS datasets managed and mounted on this host.";
-            type = lib.types.attrsOf (lib.types.submodule ({ name, ... }: { options = {
+            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
                 name = lib.mkOption { description = "Attribute name as name of the pool."; type = lib.types.str; default = name; readOnly = true; };
                 props = lib.mkOption { description = "ZFS properties to set on the dataset."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; };
                 mount = lib.mkOption { description = "Whether to create a »fileSystems« entry to mount the dataset. »noauto« creates an entry with that option set."; type = lib.types.enum [ true "noauto" false ]; default = false; };
@@ -47,8 +48,9 @@ in let module = {
                 mode = lib.mkOption { description = "Permission mode of the dataset's root directory."; type = lib.types.str; default = "750"; };
             }; config = {
                 props.canmount = lib.mkOptionDefault "off"; # (need to know this explicitly for each dataset)
-            }; }));
+            }; })));
             default = { };
+            apply = lib.filterAttrs (k: v: v != null);
         };
 
         extraInitrdPools = lib.mkOption { description = "Additional pool that are imported in the initrd."; type = lib.types.listOf lib.types.str; default = [ ]; apply = lib.unique; };

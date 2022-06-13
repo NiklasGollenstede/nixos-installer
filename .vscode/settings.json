@@ -34,6 +34,7 @@
 		"dedup", // zfs
 		"deps", // abbr dependencies
 		"devs", // abbr (devices)
+		"dmask", // mount
 		"dnodesize", // zfs
 		"dontUnpack", // nixos
 		"dosfstools", // package
@@ -49,11 +50,13 @@
 		"fetchurl", // nix function
 		"filesystems", // plural
 		"findutils", // package
+		"fmask", // mount
 		"foldl", // nix (fold left)
 		"foldr", // nix (fold right)
 		"FUNCNAME", // bash var
 		"fw_printenv", // program
 		"fw_setenv", // program
+		"gcroots", // Nix
 		"gdisk", // program
 		"getsize64", // cli arg
 		"getty", // serice
@@ -64,6 +67,7 @@
 		"gptfdisk", // package
 		"headlessly", // word
 		"hostbus", // cli arg
+		"hostfwd", // cli arg
 		"hostiocache", // virtual box
 		"hostport", // cli arg
 		"inetutils", // package
@@ -74,6 +78,7 @@
 		"keyformat", // zfs
 		"keylocation", // zfs
 		"keystatus", // zfs
+		"kmod", // linux
 		"lazytime", // f2fs
 		"libubootenv", // package
 		"logbias", // zfs
@@ -86,6 +91,7 @@
 		"mktemp", // program / function
 		"modifyvm", // virtual box
 		"mountpoint", // program / function
+		"mtab", // linux
 		"namespacing", // word
 		"netbootxyz", // option
 		"netdev", // cli arg
@@ -100,6 +106,7 @@
 		"noexec", // mount option
 		"nofail", // cli arg
 		"nographic", // cli arg
+		"noheadings", // cli arg
 		"nosuid", // mount option
 		"oneshot", // systemd
 		"ostype", // virtual box
@@ -107,6 +114,7 @@
 		"partlabel", // linux
 		"partprobe", // program / function
 		"pbkdf", // cli arg
+		"pflash", // cli arg
 		"pkgs", // nix
 		"pname", // nix/abbr (package name)
 		"portcount", // virtual box
@@ -136,6 +144,7 @@
 		"stdenv", // nix
 		"storageattach", // virtual box
 		"stty", // program / function
+		"sublist", // Nix
 		"syncoid", // program
 		"temproot", // abbr (temporary root (FS))
 		"timesync", // systemd
@@ -149,9 +158,11 @@
 		"udev", // program
 		"udevadm", // program
 		"udptunnel", // program
+		"UEFI", // abbr
 		"uids", // abbr/plural (group IDs)
 		"unencrypted", // ~= not encrypted / decrypted
 		"upperdir", // mount overlay option
+		"upstreamed", // word
 		"urandom", // linux
 		"vboxusers", // virtual box
 		"vdev", "vdevs", // zfs

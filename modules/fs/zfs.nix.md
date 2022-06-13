@@ -120,7 +120,7 @@ in let module = {
         fi )'';
     in {
 
-        boot.initrd.postDeviceCommands = lib.mkIf (anyPool "autoApplyDuringBoot") (lib.mkAfter ''
+        boot.initrd.postDeviceCommands = lib.mkIf (anyPool "autoApplyDuringBoot") (lib.mkOrder 2000 ''
             ${ensure-datasets-for "autoApplyDuringBoot" "${extraUtils}/bin/zfs"}
         '');
         boot.initrd.supportedFilesystems = lib.mkIf (anyPool "autoApplyDuringBoot") [ "zfs" ];

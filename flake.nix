@@ -20,7 +20,7 @@
 }; in (import "${./.}/lib/flakes.nix" "${./.}/lib" inputs).patchFlakeInputsAndImportRepo inputs patches ./. (inputs@ { self, nixpkgs, ... }: repo@{ overlays, lib, ... }: let
 
     systemsFlake = lib.wip.mkSystemsFlake (rec {
-        #systems = { dir = "${inputs.self.outPath}/hosts"; exclude = [ ]; };
+        #systems = { dir = "${inputs.self}/hosts"; exclude = [ ]; }; # (implicit)
         inherit inputs;
         scripts = (lib.attrValues lib.wip.setup-scripts) ++ [ ./example/install.sh.md ];
     });
@@ -32,5 +32,5 @@ in [ # Run »nix flake show --allow-import-from-derivation« to see what this me
         packages = lib.wip.getModifiedPackages (lib.wip.importPkgs inputs { system = localSystem; }) overlays;
         defaultPackage = systemsFlake.packages.${localSystem}.all-systems;
     }))
-    { patches = import "${inputs.self.outPath}/patches" "${inputs.self.outPath}/patches" inputs; }
+    { patches = import "${inputs.self}/patches" "${inputs.self}/patches" inputs; }
 ]); }

@@ -17,28 +17,33 @@ in {
     options.${prefix} = { services.dropbear = {
         enable = lib.mkEnableOption "dropbear SSH daemon";
         socketActivation = lib.mkEnableOption "socket activation mode for dropbear";
-        rootKeys = lib.mkOption { default = [ ]; type = lib.types.listOf lib.types.str; description = "Literal lines to write to »/root/.ssh/authorized_keys«"; };
+        rootKeys = lib.mkOption { description = "Literal lines to write to »/root/.ssh/authorized_keys«"; default = [ ]; type = lib.types.listOf lib.types.str; };
+        hostKeys = lib.mkOption { description = "Location of the host key(s) to use. If empty, then a key(s) will be generated at »/etc/dropbear/dropbear_(ecdsa/rsa)_host_key« on first access to the server."; default = [ ]; type = lib.types.listOf lib.types.path; };
     }; };
 
-    config = lib.mkIf cfg.enable (lib.mkMerge [ ({
+    config = let
+        defaultArgs = lib.concatStringsSep "" [
+            "${pkgs.dropbear}/bin/dropbear"
+            " -p 22" # listen on TCP/22
+            (if cfg.hostKeys == [ ] then (
+                " -R" # generate host keys on connection
+            ) else lib.concatMapStrings (path: (
+                " -r ${path}"
+            )) cfg.hostKeys)
+        ];
+
+    in lib.mkIf cfg.enable (lib.mkMerge [ ({
         environment.systemPackages = (with pkgs; [ dropbear ]);
 
         networking.firewall.allowedTCPPorts = [ 22 ];
-        #environment.etc."dropbear/.mkdir".text = "";
-        environment.etc.dropbear.source = "/run/user/0"; # allow for readonly /etc
 
     }) (lib.mkIf (!cfg.socketActivation) {
 
         systemd.services."dropbear" = {
             description = "dropbear SSH server (listening)";
             wantedBy = [ "multi-user.target" ]; after = [ "network.target" ];
-            serviceConfig.ExecStart = lib.concatStringsSep "" [
-                "${pkgs.dropbear}/bin/dropbear"
-                " -F -E" # don't fork, use stderr
-                " -p 22" # listen on TCP/22
-                " -R" # generate host keys on connection
-                #" -r .../dropbear_rsa_host_key"
-            ];
+            serviceConfig.PreExec = lib.mkIf (cfg.hostKeys == [ ]) "${pkgs.coreutils}/bin/mkdir -p /etc/dropbear/";
+            serviceConfig.ExecStart = defaultArgs + " -F -E"; # don't fork, use stderr
             #serviceConfig.PIDFile = "/var/run/dropbear.pid"; serviceConfig.Type = "forking"; after = [ "network.target" ]; # alternative to »-E -F« (?)
         };
 
@@ -55,12 +60,11 @@ in {
         systemd.services."dropbear@" = {
             description = "dropbear SSH server (per-connection)";
             after = [ "syslog.target" ];
+            serviceConfig.PreExec = lib.mkIf (cfg.hostKeys == [ ]) "${pkgs.coreutils}/bin/mkdir -p /etc/dropbear/"; # or before socket?
             serviceConfig.ExecStart = lib.concatStringsSep "" [
                 "-"  # for the most part ignore exit != 0
-                "${pkgs.dropbear}/bin/dropbear"
+                defaultArgs
                 " -i" # handle a single connection on stdio
-                " -R" # generate host keys on connection
-                #" -r .../dropbear_rsa_host_key"
             ];
         };
 

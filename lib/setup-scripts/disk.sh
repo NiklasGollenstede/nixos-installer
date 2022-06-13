@@ -46,13 +46,15 @@ function partition-disks { { # 1: diskPaths
 
     local name ; for name in "@{!config.wip.fs.disks.devices[@]}" ; do
         if [[ ! ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name not provided" ; exit 1 ; fi
+        eval 'local -A disk='"@{config.wip.fs.disks.devices[$name]}"
         if [[ ${blockDevs[$name]} != /dev/* ]] ; then
-            local outFile=${blockDevs[$name]} ; ( set -eu
-                eval 'declare -A disk='"@{config.wip.fs.disks.devices[$name]}"
-                install -o root -g root -m 640 -T /dev/null "$outFile" && truncate -s "${disk[size]}" "$outFile"
-            ) && blockDevs[$name]=$(losetup --show -f "$outFile") && prepend_trap "losetup -d '${blockDevs[$name]}'" EXIT # NOTE: this must not be inside a sub-shell!
+            local outFile=${blockDevs[$name]} &&
+            install -o root -g root -m 640 -T /dev/null "$outFile" && truncate -s "${disk[size]}" "$outFile" &&
+            blockDevs[$name]=$(losetup --show -f "$outFile") && prepend_trap "losetup -d '${blockDevs[$name]}'" EXIT # NOTE: this must not be inside a sub-shell!
         else
-            if [[ ! "$(blockdev --getsize64 "${blockDevs[$name]}")" ]] ; then echo "Block device $name does not exist at ${blockDevs[$name]}" ; exit 1 ; fi
+            local size=$( blockdev --getsize64 "${blockDevs[$name]}" || : )
+            if [[ ! $size ]] ; then echo "Block device $name does not exist at ${blockDevs[$name]}" ; exit 1 ; fi
+            if [[ $size != "${disk[size]}" ]] ; then echo "Block device ${blockDevs[$name]}'s size $size does not match the size ${disk[size]} declared for $name" ; exit 1 ; fi
             blockDevs[$name]=$(realpath "${blockDevs[$name]}")
         fi
     done
@@ -67,10 +69,12 @@ function partition-disks { { # 1: diskPaths
     for name in "@{!config.wip.fs.disks.devices[@]}" ; do
         eval 'declare -A disk='"@{config.wip.fs.disks.devices[$name]}"
         if [[ ${disk[serial]:-} ]] ; then
-            actual=$(udevadm info --query=property --name="$blockDev" | grep -oP 'ID_SERIAL_SHORT=\K.*')
-            if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev does not match the serial declared for ${disk[name]}" ; exit 1 ; fi
+            actual=$( udevadm info --query=property --name="$blockDev" | grep -oP 'ID_SERIAL_SHORT=\K.*' || echo '<none>' )
+            if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev's serial ($actual) does not match the serial (${disk[serial]}) declared for ${disk[name]}" ; exit 1 ; fi
         fi
-        partition-disk "${disk[name]}" "${blockDevs[${disk[name]}]}"
+        # can (and probably should) restore the backup:
+        ( PATH=@{native.gptfdisk}/bin ; set -x ; sgdisk --load-backup=@{config.wip.fs.disks.partitioning}/"${disk[name]}".backup "${blockDevs[${disk[name]}]}" >$beQuiet )
+        #partition-disk "${disk[name]}" "${blockDevs[${disk[name]}]}"
     done
     @{native.parted}/bin/partprobe "${blockDevs[@]}"
     @{native.systemd}/bin/udevadm settle -t 15 || true # sometimes partitions aren't quite made available yet
@@ -83,16 +87,28 @@ function partition-disks { { # 1: diskPaths
 function partition-disk {( set -eu # 1: name, 2: blockDev, 3?: devSize
     name=$1 ; blockDev=$2
     eval 'declare -A disk='"@{config.wip.fs.disks.devices[$name]}"
-    devSize=${3:-$(@{native.util-linux}/bin/blockdev --getsize64 "$blockDev")}
+    devSize=${3:-$( @{native.util-linux}/bin/blockdev --getsize64 "$blockDev" )}
 
     declare -a sgdisk=( --zap-all ) # delete existing part tables
+    if [[ ${disk[gptOffset]} != 0 ]] ; then
+        sgdisk+=( --move-main-table=$(( 2 + ${disk[gptOffset]} )) ) # this is incorrectly documented as --adjust-main-table in the man pages (at least versions 1.05 to 1.09 incl)
+        sgdisk+=( --move-secondary-table=$(( devSize/512 - 1 - 32 - ${disk[gptOffset]} )) )
+    fi
+    sgdisk+=( --disk-guid="${disk[guid]}" )
+
     for partDecl in "@{config.wip.fs.disks.partitionList[@]}" ; do
         eval 'declare -A part='"$partDecl"
         if [[ ${part[disk]} != "${disk[name]}" ]] ; then continue ; fi
         if [[ ${part[size]:-} =~ ^[0-9]+%$ ]] ; then
             part[size]=$(( $devSize / 1024 * ${part[size]:0:(-1)} / 100 ))K
         fi
-        sgdisk+=( -a "${part[alignment]:-${disk[alignment]}}" -n "${part[index]:-0}":"${part[position]}":+"${part[size]:-}" -t 0:"${part[type]}" -c 0:"${part[name]}" )
+        sgdisk+=(
+            --set-alignment="${part[alignment]:-${disk[alignment]}}"
+            --new="${part[index]:-0}":"${part[position]}":+"${part[size]:-}"
+            --partition-guid=0:"${part[guid]}"
+            --typecode=0:"${part[type]}"
+            --change-name=0:"${part[name]}"
+        )
     done
 
     if [[ ${disk[mbrParts]:-} ]] ; then

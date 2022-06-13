@@ -108,7 +108,7 @@ dirname: inputs: specialArgs@{ config, pkgs, lib, ... }: let inherit (inputs.sel
         mounts = lib.mkOption {
             description = "Locations (for »temp« in addition to »/«) where a ${desc} filesystem should be mounted. Some are declared by default but may be removed by setting them to »null«.";
             type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
-                target = lib.mkOption { description = "Attribute name as the mount target path."; type = lib.types.addCheck lib.types.str (name: (builtins.match ''^/.*[^/]$'' name) != null); default = name; readOnly = true; };
+                target = lib.mkOption { description = "Attribute name as the mount target path."; type = lib.types.strMatching ''^/.*[^/]$''; default = name; readOnly = true; };
                 source = lib.mkOption { description = "Relative source path of the mount. (Irrelevant for »tmpfs«.)"; type = lib.types.str; default = builtins.substring 1 (builtins.stringLength name - 1) name; };
                 uid = lib.mkOption { description = "UID owning the mounted target."; type = lib.types.ints.unsigned; default = 0; };
                 gid = lib.mkOption { description = "GID owning the mounted target."; type = lib.types.ints.unsigned; default = 0; };

@@ -67,8 +67,12 @@ function run-qemu {( set -eu # 1: diskImages
         qemu+=( -drive format=raw,file="${decl/*=/}" ) #,if=none,index=0,media=disk,id=disk0 -device "virtio-blk-pci,drive=disk0,disable-modern=on,disable-legacy=off" )
     done
 
-    if [[ @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then
-        qemu+=( -bios @{pkgs.OVMF.fd}/FV/OVMF.fd ) # UEFI. Otherwise it boots something much like a classic BIOS?
+    if [[ @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots something much like a classic BIOS?
+        #qemu+=( -bios @{pkgs.OVMF.fd}/FV/OVMF.fd ) # This works, but is a legacy fallback that stores the EFI vars in /NvVars on the EFI partition (which is really bad).
+        qemu+=( -drive file=@{pkgs.OVMF.fd}/FV/OVMF_CODE.fd,if=pflash,format=raw,unit=0,readonly=on )
+        qemu+=( -drive file=/tmp/qemu-@{config.networking.hostName}-VARS.fd,if=pflash,format=raw,unit=1 )
+        if [[ ! -e /tmp/qemu-@{config.networking.hostName}-VARS.fd ]] ; then cat @{pkgs.OVMF.fd}/FV/OVMF_VARS.fd > /tmp/qemu-@{config.networking.hostName}-VARS.fd ; fi
+        # https://lists.gnu.org/archive/html/qemu-discuss/2018-04/msg00045.html
     fi
     if [[ @{config.preface.hardware} == aarch64 ]] ; then
         qemu+=( -kernel @{config.system.build.kernel}/Image -initrd @{config.system.build.initialRamdisk}/initrd -append "$(echo -n "@{config.boot.kernelParams[@]}")" )
@@ -79,7 +83,7 @@ function run-qemu {( set -eu # 1: diskImages
     fi ; done
 
     if [[ ! ${args[no-nat]:-} ]] ; then
-        qemu+=( -nic user,model=virtio-net-pci ) # NATed, IPs: 10.0.2.15+/32, gateway: 10.0.2.2
+        qemu+=( -nic user,model=virtio-net-pci${args[nat-fw]:+,hostfwd=tcp::${args[nat-fw]//,/,hostfwd=tcp::}} ) # NATed, IPs: 10.0.2.15+/32, gateway: 10.0.2.2
     fi
 
     # TODO: network bridging:
@@ -91,7 +95,11 @@ function run-qemu {( set -eu # 1: diskImages
         qemu+=( -usb -device usb-host,hostbus="${decl/-*/}",hostport="${decl/*-/}" )
     done ; fi
 
-    ( set -x ; "${qemu[@]}" )
+    if [[ ${args[dry-run]:-} ]] ; then
+        ( echo "${qemu[@]}" )
+    else
+        ( set -x ; "${qemu[@]}" )
+    fi
 
     # https://askubuntu.com/questions/54814/how-can-i-ctrl-alt-f-to-get-to-a-tty-in-a-qemu-session
 
@@ -106,7 +114,6 @@ function add-bootkey-to-keydev {( set -eu # 1: blockDev, 2?: hostHash
     @{native.parted}/bin/partprobe "$blockDev" ; @{native.systemd}/bin/udevadm settle -t 15 # wait for partitions to update
     </dev/urandom tr -dc 0-9a-f | head -c 512 >/dev/disk/by-partlabel/"$bootkeyPartlabel"
 )}
-
 
 ## Tries to open and mount the systems keystore from its LUKS partition. If successful, adds the traps to close it when the parent shell exits.
 #  See »open-system«'s implementation for some example calls to this function.
@@ -141,7 +148,7 @@ function open-system { # 1?: diskImages
     ( @{native.systemd}/bin/udevadm settle -t 15 || true ) && # sometimes partitions aren't quite made available yet
 
     if [[ @{config.wip.fs.keystore.enable} && ! -e /dev/mapper/keystore-@{config.networking.hostName!hashString.sha256:0:8} ]] ; then # Try a bunch of approaches for opening the keystore:
-        mount-keystore-luks --key-file=<(printf %s "@{config.networking.hostName}") ||
+        mount-keystore-luks --key-file=<( printf %s "@{config.networking.hostName}" ) ||
         mount-keystore-luks --key-file=/dev/disk/by-partlabel/bootkey-@{config.networking.hostName!hashString.sha256:0:8} ||
         mount-keystore-luks --key-file=<( read -s -p PIN: pin && echo ' touch!' >&2 && ykchalresp -2 "$pin" ) ||
         # TODO: try static yubikey challenge

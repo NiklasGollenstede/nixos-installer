@@ -121,5 +121,7 @@ in { imports = [ ({ ## Hardware
     wip.services.dropbear.enable = true;
     #wip.services.dropbear.rootKeys = [ ''${lib.readFile "${dirname}/....pub"}'' ];
 
+    #wip.fs.disks.devices.primary.gptOffset = 64;
+    #wip.fs.disks.devices.primary.size = "250059096K"; # 256GB Intel H10
 
 })  ]; }

@@ -95,11 +95,11 @@ On a less beefy system, but also with less data to manage, `tmpfs` works fine fo
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: specialArgs@{ config, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
+dirname: inputs: specialArgs@{ config, pkgs, lib, utils, ... }: let inherit (inputs.self) lib; in let
     prefix = inputs.config.prefix;
     cfg = config.${prefix}.fs.temproot;
-    utils = import "${inputs.nixpkgs.outPath}/nixos/lib/utils.nix" { inherit (specialArgs) lib config pkgs; };
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
+    keep = if cfg.remote.type == "none" then "local" else "remote"; # preferred place for data that should be kept
 
     optionsFor = type: desc: {
         bind.source = lib.mkOption { description = "Prefix for bind-mount targets."; type = lib.types.str; default = "/.${type}"; };
@@ -151,7 +151,8 @@ in {
             type = lib.mkOption { description = ''
                 "bind": Expects a filesystem to be mounted at ».bind.target« that gets backed. Bind-mounts any additional mounts to ».bind.source+"/"+<mount.source>« (creating those paths if necessary).
                 "zfs": ...
-            ''; type = lib.types.enum [ "bind" "zfs" ]; default = "bind"; };
+                "none": Don't provide a »/remote«. For hosts that have no secrets or important state.
+            ''; type = lib.types.enum [ "bind" "zfs" "none" ]; default = "bind"; };
         } // (optionsFor "remote" "remotely backed-up");
 
         swap = {
@@ -172,9 +173,9 @@ in {
                 "/tmp" = { mode = "1777"; };
             };
             fs.temproot.local.mounts = {
+                "/local" = { source = "system"; mode = "755"; };
                 "/nix" = { zfsProps = zfsNoSyncProps; mode = "755"; }; # this (or /nix/store) is required
                 "/var/log" = { source = "logs"; mode = "755"; };
-                "/local" = { source = "system"; mode = "755"; };
                 # »/swap« is used by »cfg.swap.asPartition = false«
             };
             fs.temproot.remote.mounts = {
@@ -187,17 +188,17 @@ in {
 
     }) (lib.mkIf cfg.persistenceFixes { # Cope with the consequences of having »/« (including »/{etc,var,root,...}«) cleared on every reboot.
 
+        environment.etc.nixos.source = "/local/etc/nixos";
+
         systemd.tmpfiles.rules = [ # keep in mind: this does not get applied super early ...
-            # nixos config
-            "L+ /etc/nixos/                          - - - -         ../../remote/etc/nixos/"
             # »/root/.nix-channels« is already being restored.
             # »/var/lib/nixos« remains ephemeral. Where it matters, explicitly define a U/GID!
 
             # root's command history
-            "f                                                            /remote/root/.bash_history                     0600  root  root  -"
-            "L+ /root/.bash_history                  - - - -            ../remote/root/.bash_history"
-            "f                                                            /remote/root/.local/share/nix/repl-history     0600  root  root  -"
-            "L+ /root/.local/share/nix/repl-history  - - - -   ../../../../remote/root/.local/share/nix/repl-history"
+            "f                                                            /${keep}/root/.bash_history                     0600  root  root  -"
+            "L+ /root/.bash_history                  - - - -            ../${keep}/root/.bash_history"
+            "f                                                            /${keep}/root/.local/share/nix/repl-history     0600  root  root  -"
+            "L+ /root/.local/share/nix/repl-history  - - - -   ../../../../${keep}/root/.local/share/nix/repl-history"
         ];
         fileSystems = { # this does get applied early
             # (on systems without hardware clock, this allows systemd to provide an at least monolithic time after restarts)
@@ -252,7 +253,7 @@ in {
         ${prefix} = {
             fs.keystore.keys."luks/local-${hash}/0" = lib.mkIf (cfg.local.bind.base == "f2fs-encrypted") (lib.mkOptionDefault "random");
             fs.disks.partitions."local-${hash}" = {
-                type = "8300"; order = 1000; disk = "primary"; size = "50%";
+                type = "8300"; order = lib.mkDefault 1000; disk = lib.mkDefault "primary"; size = lib.mkDefault (if cfg.remote.type == "none" then null else "50%");
             };
         };
         fileSystems.${cfg.local.bind.source} = { fsType = "f2fs"; device = "/dev/${if useLuks then "mapper" else "disk/by-partlabel"}/local-${hash}"; formatOptions = lib.mkDefault (lib.concatStrings [

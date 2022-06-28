@@ -32,6 +32,7 @@ in {
             hash = "sha256-6cHkr3s7/2BVXBTn9bUfPFbYAfv9VYh6C9GAbWILNjs=";
         };
         nativeBuildInputs = [ pkgs.cmake pkgs.zlib ];
+        outputs = [ "out" "lib" ];
 
         meta = {
             homepage = "https://github.com/sbabic/libubootenv";

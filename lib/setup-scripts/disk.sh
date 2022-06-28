@@ -73,7 +73,7 @@ function partition-disks { { # 1: diskPaths
             if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev's serial ($actual) does not match the serial (${disk[serial]}) declared for ${disk[name]}" ; exit 1 ; fi
         fi
         # can (and probably should) restore the backup:
-        ( PATH=@{native.gptfdisk}/bin ; set -x ; sgdisk --load-backup=@{config.wip.fs.disks.partitioning}/"${disk[name]}".backup "${blockDevs[${disk[name]}]}" >$beQuiet )
+        ( PATH=@{native.gptfdisk}/bin ; set -x ; sgdisk --zap-all --load-backup=@{config.wip.fs.disks.partitioning}/"${disk[name]}".backup "${blockDevs[${disk[name]}]}" >$beQuiet )
         #partition-disk "${disk[name]}" "${blockDevs[${disk[name]}]}"
     done
     @{native.parted}/bin/partprobe "${blockDevs[@]}"
@@ -92,7 +92,7 @@ function partition-disk {( set -eu # 1: name, 2: blockDev, 3?: devSize
     declare -a sgdisk=( --zap-all ) # delete existing part tables
     if [[ ${disk[gptOffset]} != 0 ]] ; then
         sgdisk+=( --move-main-table=$(( 2 + ${disk[gptOffset]} )) ) # this is incorrectly documented as --adjust-main-table in the man pages (at least versions 1.05 to 1.09 incl)
-        sgdisk+=( --move-secondary-table=$(( devSize/512 - 1 - 32 - ${disk[gptOffset]} )) )
+        sgdisk+=( --move-backup-table=$(( devSize/512 - 1 - 32 - ${disk[gptOffset]} )) )
     fi
     sgdisk+=( --disk-guid="${disk[guid]}" )
 
@@ -124,13 +124,13 @@ function partition-disk {( set -eu # 1: name, 2: blockDev, 3?: devSize
 
             # move the selected »mbrParts« to slots 1[2[3]] instead of 2[3[4]] (by re-creating part1 in the last sector, then sorting)
             n;p;1                            # new ; primary ; part1
-            $(( ($devSize/512) - 1)) # start (size 1sec)
+            $(( ($devSize/512) - 1))         # start (size 1sec)
             x;f;r                            # expert mode ; fix order ; return
             d;$(( (${#disk[mbrParts]} + 1) / 2 + 1 )) # delete ; part(last)
 
-            # create GPT part (spanning primary GPT area) as last part
+            # create GPT part (spanning primary GPT area and its padding) as last part
             n;p;4                            # new ; primary ; part4
-            1;33                             # start ; end
+            1;$(( 33 + ${disk[gptOffset]} )) # start ; end
             t;4;ee                           # type ; part4 ; GPT
 
             ${disk[extraFDiskCommands]}

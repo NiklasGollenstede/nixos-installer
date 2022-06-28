@@ -69,6 +69,7 @@ function install-system-to {( set -eu # 1: mnt, 2?: topLevel
     mkdir -p -m 755 $mnt/nix/var/nix ; mkdir -p -m 1775 $mnt/nix/store
     if [[ ${SUDO_USER:-} ]] ; then chown -R $SUDO_USER: $mnt/nix/store $mnt/nix/var ; fi
     ( set -x ; time nix copy --no-check-sigs --to $mnt ${topLevel:-$targetSystem} ) ; rm -rf $mnt/nix/var/nix/gcroots
+    # TODO: if the target has @{config.nix.autoOptimiseStore} and the host doesn't (there is no .links dir?), optimize now
     if [[ ${SUDO_USER:-} ]] ; then chown -R root:root $mnt/nix $mnt/nix/var ; chown :30000 $mnt/nix/store ; fi
 
     # Link/create files that some tooling expects:
@@ -83,9 +84,9 @@ function install-system-to {( set -eu # 1: mnt, 2?: topLevel
     mkdir -p -m 755 $mnt/nix/var/nix/profiles ; ln -sT $(realpath $targetSystem) $mnt/nix/var/nix/profiles/system-1-link ; ln -sT system-1-link $mnt/nix/var/nix/profiles/system
 
     # Support cross architecture installation (not sure if this is actually required)
-    if [[ $(cat /run/current-system/system 2>/dev/null || echo "x86_64-linux") != "@{config.preface.hardware}"-linux ]] ; then
-        mkdir -p $mnt/run/binfmt ; cp -a {,$mnt}/run/binfmt/"@{config.preface.hardware}"-linux || true
-        # Ubuntu (by default) expects the "interpreter" at »/usr/bin/qemu-@{config.preface.hardware}-static«.
+    if [[ $(cat /run/current-system/system 2>/dev/null || echo "x86_64-linux") != "@{config.wip.preface.hardware}"-linux ]] ; then
+        mkdir -p $mnt/run/binfmt ; cp -a {,$mnt}/run/binfmt/"@{config.wip.preface.hardware}"-linux || true
+        # Ubuntu (by default) expects the "interpreter" at »/usr/bin/qemu-@{config.wip.preface.hardware}-static«.
     fi
 
     # Run the main install command (primarily for the bootloader):

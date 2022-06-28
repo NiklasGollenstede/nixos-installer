@@ -105,7 +105,7 @@ in rec {
     parseSizeSuffix = decl: let
         match = builtins.match ''^([0-9]+)(K|M|G|T|P)?(i)?(B)?$'' decl;
         num = lib.toInt (builtins.head match); unit = builtins.elemAt match 1;
-        exponent = if unit == null then 0 else { K = 1; M = 2; G = 3; t = 4; P = 5; }.${unit};
+        exponent = if unit == null then 0 else { K = 1; M = 2; G = 3; T = 4; P = 5; }.${unit};
         base = if (builtins.elemAt match 3) == null || (builtins.elemAt match 2) != null then 1024 else 1000;
     in if builtins.isInt decl then decl else if match != null then num * (pow base exponent) else throw "${decl} is not a number followed by a size suffix";
 

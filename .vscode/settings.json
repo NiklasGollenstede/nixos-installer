@@ -80,6 +80,7 @@
 		"keystatus", // zfs
 		"kmod", // linux
 		"lazytime", // f2fs
+		"libblockdev", // package
 		"libubootenv", // package
 		"logbias", // zfs
 		"losetup", // program / function
@@ -88,6 +89,7 @@
 		"luks", // linux
 		"macaddr", // cli arg
 		"mkdir", // program / function
+		"mkenvimage", // program
 		"mktemp", // program / function
 		"modifyvm", // virtual box
 		"mountpoint", // program / function
@@ -109,10 +111,12 @@
 		"noheadings", // cli arg
 		"nosuid", // mount option
 		"oneshot", // systemd
+		"optimise", // B/E
 		"ostype", // virtual box
 		"OVMF", // package
 		"partlabel", // linux
 		"partprobe", // program / function
+		"passthru", // nix
 		"pbkdf", // cli arg
 		"pflash", // cli arg
 		"pkgs", // nix
@@ -155,6 +159,7 @@
 		"typecode", // cli arg
 		"uart", "uarts", // serial protocol
 		"uartmode", // virtual box
+		"uboot", // program
 		"udev", // program
 		"udevadm", // program
 		"udptunnel", // program

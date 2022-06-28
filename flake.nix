@@ -17,10 +17,10 @@
        # ./patches/nixpkgs-fix-systemd-boot-install.patch
     ];
 
-}; in (import "${./.}/lib/flakes.nix" "${./.}/lib" inputs).patchFlakeInputsAndImportRepo inputs patches ./. (inputs@ { self, nixpkgs, ... }: repo@{ overlays, lib, ... }: let
+}; in (import "${./.}/lib/flakes.nix" "${./.}/lib" inputs).patchFlakeInputsAndImportRepo inputs patches ./. (inputs@{ self, nixpkgs, ... }: repo@{ overlays, lib, ... }: let
 
     systemsFlake = lib.wip.mkSystemsFlake (rec {
-        #systems = { dir = "${inputs.self}/hosts"; exclude = [ ]; }; # (implicit)
+        #systems = { dir = "${self}/hosts"; exclude = [ ]; }; # (implicit)
         inherit inputs;
         scripts = (lib.attrValues lib.wip.setup-scripts) ++ [ ./example/install.sh.md ];
     });
@@ -29,8 +29,8 @@ in [ # Run »nix flake show --allow-import-from-derivation« to see what this me
     repo
     (if true then systemsFlake else { })
     (lib.wip.forEachSystem [ "aarch64-linux" "x86_64-linux" ] (localSystem: {
-        packages = lib.wip.getModifiedPackages (lib.wip.importPkgs inputs { system = localSystem; }) overlays;
+        packages = builtins.removeAttrs (lib.wip.getModifiedPackages (lib.wip.importPkgs inputs { system = localSystem; }) overlays) [ "libblockdev" ];
         defaultPackage = systemsFlake.packages.${localSystem}.all-systems;
     }))
-    { patches = import "${inputs.self}/patches" "${inputs.self}/patches" inputs; }
+    { patches = (lib.wip.importWrapped inputs "${self}/patches").result; }
 ]); }

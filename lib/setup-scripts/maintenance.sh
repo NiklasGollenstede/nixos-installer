@@ -51,12 +51,12 @@ function run-qemu {( set -eu # 1: diskImages
     diskImages=${argv[0]}
     if [[ ${args[debug]:-} ]] ; then set -x ; fi
 
-    qemu=( @{native.qemu_full}/bin/qemu-system-@{config.preface.hardware} )
+    qemu=( @{native.qemu_full}/bin/qemu-system-@{config.wip.preface.hardware} )
     qemu+=( -m ${args[mem]:-2048} -smp ${args[smp]:-4} )
 
-    if [[ @{config.preface.hardware}-linux == "@{native.system}" && ! ${args[no-kvm]:-} ]] ; then
+    if [[ @{config.wip.preface.hardware}-linux == "@{native.system}" && ! ${args[no-kvm]:-} ]] ; then
         qemu+=( -cpu host -enable-kvm ) # For KVM to work vBox may not be running anything at the same time (and vBox hangs on start if qemu runs). Pass »--no-kvm« and accept ~10x slowdown, or stop vBox.
-    elif [[ @{config.preface.hardware} == aarch64 ]] ; then # assume it's a raspberry PI (or compatible)
+    elif [[ @{config.wip.preface.hardware} == aarch64 ]] ; then # assume it's a raspberry PI (or compatible)
         # TODO: this does not work yet:
         qemu+=( -machine type=raspi3b -m 1024 ) ; args[no-nat]=1
         # ... and neither does this:
@@ -74,7 +74,7 @@ function run-qemu {( set -eu # 1: diskImages
         if [[ ! -e /tmp/qemu-@{config.networking.hostName}-VARS.fd ]] ; then cat @{pkgs.OVMF.fd}/FV/OVMF_VARS.fd > /tmp/qemu-@{config.networking.hostName}-VARS.fd ; fi
         # https://lists.gnu.org/archive/html/qemu-discuss/2018-04/msg00045.html
     fi
-    if [[ @{config.preface.hardware} == aarch64 ]] ; then
+    if [[ @{config.wip.preface.hardware} == aarch64 ]] ; then
         qemu+=( -kernel @{config.system.build.kernel}/Image -initrd @{config.system.build.initialRamdisk}/initrd -append "$(echo -n "@{config.boot.kernelParams[@]}")" )
     fi
 

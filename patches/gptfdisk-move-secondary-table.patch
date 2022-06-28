@@ -1,5 +1,5 @@
 diff --git a/gpt.cc b/gpt.cc
-index 76cd9ad..375c216 100644
+index 76cd9ad..d61064f 100644
 --- a/gpt.cc
 +++ b/gpt.cc
 @@ -1500,7 +1500,7 @@ int GPTData::DestroyGPT(void) {
@@ -17,7 +17,7 @@ index 76cd9ad..375c216 100644
  
 +// Change the start sector for the secondary partition table.
 +// Returns 1 on success, 0 on failure
-+int GPTData::MoveSecondaryTable(uint64_t pteSector) {
++int GPTData::MoveSecondTable(uint64_t pteSector) {
 +   uint64_t pteSize = GetTableSizeInSectors();
 +   int retval = 1;
 +
@@ -30,7 +30,7 @@ index 76cd9ad..375c216 100644
 +      retval = 0;
 +   } // if/else
 +   return retval;
-+} // GPTData::MoveSecondaryTable()
++} // GPTData::MoveSecondTable()
 +
  // Blank the partition array
  void GPTData::BlankPartitions(void) {
@@ -66,14 +66,14 @@ index 76cd9ad..375c216 100644
  // space on the disk. Returns 0 if there are no available blocks left
  uint64_t GPTData::FindFirstInLargest(void) {
 diff --git a/gpt.h b/gpt.h
-index 5d19372..c272d65 100644
+index 5d19372..17b3380 100644
 --- a/gpt.h
 +++ b/gpt.h
 @@ -142,6 +142,7 @@ public:
     // Adjust GPT structures WITHOUT user interaction...
     int SetGPTSize(uint32_t numEntries, int fillGPTSectors = 1);
     int MoveMainTable(uint64_t pteSector);
-+   int MoveSecondaryTable(uint64_t pteSector);
++   int MoveSecondTable(uint64_t pteSector);
     void BlankPartitions(void);
     int DeletePartition(uint32_t partNum);
     uint32_t CreatePartition(uint32_t partNum, uint64_t startSector, uint64_t endSector);
@@ -95,7 +95,7 @@ index 5d19372..c272d65 100644
     uint64_t FindLastAvailable();
     uint64_t FindLastInFree(uint64_t start, bool align = false);
 diff --git a/gptcl.cc b/gptcl.cc
-index 34c9421..f6517e4 100644
+index 34c9421..232285a 100644
 --- a/gptcl.cc
 +++ b/gptcl.cc
 @@ -68,7 +68,7 @@ int GPTDataCL::DoOptions(int argc, char* argv[]) {
@@ -107,13 +107,22 @@ index 34c9421..f6517e4 100644
     uint64_t temp; // temporary variable; free to use in any case
     char *device;
     string cmd, typeGUID, name;
+@@ -85,7 +85,7 @@ int GPTDataCL::DoOptions(int argc, char* argv[]) {
+       {"recompute-chs", 'C', POPT_ARG_NONE, NULL, 'C', "recompute CHS values in protective/hybrid MBR", ""},
+       {"delete", 'd', POPT_ARG_INT, &deletePartNum, 'd', "delete a partition", "partnum"},
+       {"display-alignment", 'D', POPT_ARG_NONE, NULL, 'D', "show number of sectors per allocation block", ""},
+-      {"move-second-header", 'e', POPT_ARG_NONE, NULL, 'e', "move second header to end of disk", ""},
++      {"move-second-header", 'e', POPT_ARG_NONE, NULL, 'e', "move second/backup header to end of disk", ""},
+       {"end-of-largest", 'E', POPT_ARG_NONE, NULL, 'E', "show end of largest free block", ""},
+       {"first-in-largest", 'f', POPT_ARG_NONE, NULL, 'f', "show start of the largest free block", ""},
+       {"first-aligned-in-largest", 'F', POPT_ARG_NONE, NULL, 'F', "show start of the largest free block, aligned", ""},
 @@ -94,7 +94,8 @@ int GPTDataCL::DoOptions(int argc, char* argv[]) {
        {"hybrid", 'h', POPT_ARG_STRING, &hybrids, 'h', "create hybrid MBR", "partnum[:partnum...][:EE]"},
        {"info", 'i', POPT_ARG_INT, &infoPartNum, 'i', "show detailed information on partition", "partnum"},
        {"align-end", 'I', POPT_ARG_NONE, NULL, 'I', "align partition end points", ""},
 -      {"move-main-table", 'j', POPT_ARG_INT, &mainTableLBA, 'j', "adjust the location of the main partition table", "sector"},
 +      {"move-main-table", 'j', POPT_ARG_INT, &mainTableLBA, 'j', "change the start sector of the main partition table", "sector"},
-+      {"move-secondary-table", 'k', POPT_ARG_INT, &secondTableLBA, 'k', "change the start sector of the secondary partition table", "sector"},
++      {"move-backup-table", 'k', POPT_ARG_INT, &secondTableLBA, 'k', "change the start sector of the second/backup partition table", "sector"},
        {"load-backup", 'l', POPT_ARG_STRING, &backupFile, 'l', "load GPT backup from file", "file"},
        {"list-types", 'L', POPT_ARG_NONE, NULL, 'L', "list known partition types", ""},
        {"gpttombr", 'm', POPT_ARG_STRING, &mbrParts, 'm', "convert GPT to MBR", "partnum[:partnum...]"},
@@ -144,7 +153,7 @@ index 34c9421..f6517e4 100644
 +                  } // if/else
 +                  break;
 +               case 'k':
-+                  if (MoveSecondaryTable(secondTableLBA)) {
++                  if (MoveSecondTable(secondTableLBA)) {
 +                     JustLooking(0);
 +                     saveData = 1;
 +                  } else {

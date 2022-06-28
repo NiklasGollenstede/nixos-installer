@@ -3,6 +3,8 @@ dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (import "${dirname}/vars.nix"    dirname inputs) mapMerge mergeAttrsUnique flipNames;
     inherit (import "${dirname}/imports.nix" dirname inputs) getModifiedPackages getNixFiles importWrapped;
     inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit;
+    setup-scripts = (import "${dirname}/setup-scripts" "${dirname}/setup-scripts"  inputs);
+    prefix = inputs.config.prefix;
 in rec {
 
     # Simplified implementation of »flake-utils.lib.eachSystem«.
@@ -10,7 +12,7 @@ in rec {
 
     # Sooner or later this should be implemented in nix itself, for now require »inputs.nixpkgs« and a system that can run »x86_64-linux« (native or through qemu).
     patchFlakeInputs = inputs: patches: outputs: let
-        inherit ((import inputs.nixpkgs { system = "x86_64-linux"; }).pkgs) applyPatches fetchpatch;
+        inherit ((import inputs.nixpkgs { overlays = [ ]; config = { }; system = "x86_64-linux"; }).pkgs) applyPatches fetchpatch;
     in outputs (builtins.mapAttrs (name: input: if name != "self" && patches?${name} && patches.${name} != [ ] then (let
         patched = applyPatches {
             name = "${name}-patched"; src = input;
@@ -26,22 +28,31 @@ in rec {
         in { inherit (input) inputs; inherit outputs; inherit sourceInfo; } // outputs // sourceInfo)
     )) else input) inputs);
 
-    # Generates implicit flake outputs by importing conventional paths in the local repo.
+    # Generates implicit flake outputs by importing conventional paths in the local repo. E.g.:
+    # outputs = inputs@{ self, nixpkgs, wiplib, ... }: wiplib.lib.wip.importRepo inputs ./. (repo@{ overlays, lib, ... }: let ... in [ repo ... ])
     importRepo = inputs: repoPath': outputs: let
         repoPath = builtins.path { path = repoPath'; name = "source"; }; # referring to the current flake directory as »./.« is quite intuitive (and »inputs.self.outPath« causes infinite recursion), but without this it adds another hash to the path (because it copies it)
-    in let list = (outputs inputs ((if builtins.pathExists "${repoPath}/lib/default.nix" then {
-        lib           = import "${repoPath}/lib"      "${repoPath}/lib"      inputs;
-    } else { }) // (if builtins.pathExists "${repoPath}/overlays/default.nix" then rec {
-        overlays      = import "${repoPath}/overlays" "${repoPath}/overlays" inputs;
-        overlay       = final: prev: builtins.foldl' (prev: overlay: prev // (overlay final prev)) prev (builtins.attrValues overlays);
-    } else { }) // (if builtins.pathExists "${repoPath}/modules/default.nix" then rec {
-        nixosModules  = import "${repoPath}/modules"  "${repoPath}/modules"  inputs;
-        nixosModule   = { imports = builtins.attrValues nixosModules; };
-    } else { }))); in if (builtins.isList list) then mergeOutputs list else list;
+    in let result = (outputs (
+        (let it                = importWrapped inputs "${repoPath}/lib";      in if it.exists then rec {
+            lib           = it.result;
+        } else { }) // (let it = importWrapped inputs "${repoPath}/overlays"; in if it.exists then rec {
+            overlays      = it.result;
+            overlay       = final: prev: builtins.foldl' (prev: overlay: prev // (overlay final prev)) prev (builtins.attrValues overlays);
+        } else { }) // (let it = importWrapped inputs "${repoPath}/modules";  in if it.exists then rec {
+            nixosModules  = it.result;
+            nixosModule   = { imports = builtins.attrValues nixosModules; };
+        } else { })
+    )); in if (builtins.isList result) then mergeOutputs result else result;
 
-    # Combines »patchFlakeInputs« and »importRepo« in a single call.
+    # Combines »patchFlakeInputs« and »importRepo« in a single call. E.g.:
+    # outputs = inputs: let patches = {
+    #     nixpkgs = [
+    #         # remote: { url = "https://github.com/NixOS/nixpkgs/pull/###.diff"; sha256 = inputs.nixpkgs.lib.fakeSha256; }
+    #         # local: ./overlays/patches/nixpkgs-###.patch # (use long native path to having the path change if any of the other files in ./. change)
+    #     ]; # ...
+    # }; in inputs.wiplib.lib.wip.patchFlakeInputsAndImportRepo inputs patches ./. (inputs@{ self, nixpkgs, ... }: repo@{ nixosModules, overlays, lib, ... }: let ... in [ repo ... ])
     patchFlakeInputsAndImportRepo = inputs: patches: repoPath: outputs: (
-        patchFlakeInputs inputs patches (inputs: importRepo inputs repoPath outputs)
+        patchFlakeInputs inputs patches (inputs: importRepo inputs repoPath (outputs inputs))
     );
 
     # Merges a list of flake output attribute sets.
@@ -53,11 +64,11 @@ in rec {
 
     # Given a path to a host config file, returns some properties defined in its first inline module (to be used where accessing them via »nodes.${name}.config...« isn't possible).
     getSystemPreface = inputs: entryPath: args: let
-        imported = (importWrapped inputs entryPath) ({ config = null; pkgs = null; lib = null; name = null; nodes = null; } // args);
-        module = builtins.elemAt imported.imports 0; props = module.preface;
+        imported = (importWrapped inputs entryPath).required ({ config = null; pkgs = null; lib = null; name = null; nodes = null; } // args);
+        module = builtins.elemAt imported.imports 0; props = module.${prefix}.preface;
     in if (
-        imported?imports && (builtins.isList imported.imports) && (imported.imports != [ ]) && module?preface && props?hardware
-    ) then (props) else throw "File ${entryPath} must fulfill the structure: dirname: inputs: { ... }: { imports = [ { preface = { hardware = str; ... } } ]; }";
+        imported?imports && (builtins.isList imported.imports) && (imported.imports != [ ]) && module?${prefix} && module.${prefix}?preface && props?hardware
+    ) then (props) else throw "File ${entryPath} must fulfill the structure: dirname: inputs: { ... }: { imports = [ { ${prefix}.preface = { hardware = str; ... } } ]; }";
 
     # Builds the System Configuration for a single host. Since each host depends on the context of all other host (in the same "network"), this is essentially only callable through »mkNixosConfigurations«.
     # See »mkSystemsFlake« for documentation of the arguments.
@@ -72,13 +83,13 @@ in rec {
     in { inherit preface; } // (nixosSystem {
         system = targetSystem;
         modules = [ (
-            { _file = entryPath; imports = [ (importWrapped inputs entryPath) ]; } # (preserve the location of reported errors)
+            (importWrapped inputs entryPath).module
         ) {
             # The system architecture (often referred to as »system«).
-            options.preface.hardware = lib.mkOption { type = lib.types.str; readOnly = true; };
+            options.${prefix}.preface.hardware = lib.mkOption { type = lib.types.str; readOnly = true; };
         } {
             # List of host names to instantiate this host config for, instead of just for the file name.
-            options.preface.instances = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ name ]; };
+            options.${prefix}.preface.instances = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ name ]; };
         } ({ config, ... }: {
 
             imports = modules; nixpkgs = { inherit overlays; }
@@ -95,13 +106,13 @@ in rec {
     });
 
     # Given either a list (or attr set) of »files« (paths to ».nix« or ».nix.md« files for dirs with »default.nix« files in them) or a »dir« path (and optionally a list of file names to »exclude« from it), this builds the NixOS configuration for each host (per file) in the context of all configs provided.
-    # If »files« is an attr set, exactly one host with the attribute's name as hostname is built for each attribute. Otherwise the default is to build for one host per configuration file, named as the file name without extension or the sub-directory name. Setting »preface.instances« can override this to build the same configuration for those multiple names instead (the specific »name« is passed as additional »specialArgs« to the modules and can thus be used to adjust the config per instance).
+    # If »files« is an attr set, exactly one host with the attribute's name as hostname is built for each attribute. Otherwise the default is to build for one host per configuration file, named as the file name without extension or the sub-directory name. Setting »${prefix}.preface.instances« can override this to build the same configuration for those multiple names instead (the specific »name« is passed as additional »specialArgs« to the modules and can thus be used to adjust the config per instance).
     # All other arguments are as specified by »mkSystemsFlake« and are passed to »mkNixosConfiguration«.
     mkNixosConfigurations = args: let # { files, dir, exclude, ... }
         files = args.files or (getNixFiles args.dir (args.exclude or [ ]));
         files' = if builtins.isAttrs files then files else (builtins.listToAttrs (map (entryPath: let
             stripped = builtins.match ''^(.*)[.]nix[.]md$'' (builtins.baseNameOf entryPath);
-            name = if stripped != null then (builtins.elemAt stripped 0) else (builtins.baseNameOf entryPath);
+            name = builtins.unsafeDiscardStringContext (if stripped != null then (builtins.elemAt stripped 0) else (builtins.baseNameOf entryPath));
         in { inherit name; value = entryPath; }) files));
 
         configs = mapMerge (name: entryPath: (let
@@ -118,7 +129,7 @@ in rec {
         ids = mapMerge (name: node: { "${toString node.preface.id}" = name; }) withId;
         duplicate = builtins.removeAttrs withId (builtins.attrValues ids);
     in if duplicate != { } then (
-        throw "»my.system.id«s are not unique! The following hosts share their IDs with some other host: ${builtins.concatStringsSep ", " (builtins.attrNames duplicate)}"
+        throw "»${prefix}.preface.id«s are not unique! The following hosts share their IDs with some other host: ${builtins.concatStringsSep ", " (builtins.attrNames duplicate)}"
     ) else configs;
 
     # Builds a system of NixOS hosts and exports them plus managing functions as flake outputs.
@@ -129,7 +140,7 @@ in rec {
         # Root path of the NixOS configuration. »./.« in the »flake.nix«
         configPath ? inputs.self.outPath,
         # Arguments »{ files, dir, exclude, }« to »mkNixosConfigurations«, see there for details. May also be a list of those attrsets, in which case those multiple sets of hosts will be built separately by »mkNixosConfigurations«, allowing for separate sets of »peers« passed to »mkNixosConfiguration«. Each call will receive all other arguments, and the resulting sets of hosts will be merged.
-        systems ? ({ dir = "${configPath}/hosts/"; exclude = [ ]; }),
+        systems ? ({ dir = "${configPath}/hosts"; exclude = [ ]; }),
         # List of overlays to set as »config.nixpkgs.overlays«. Defaults to the ».overlay(s)« of all »overlayInputs«/»inputs« (incl. »inputs.self«).
         overlays ? (builtins.concatLists (map (input: if input?overlay then [ input.overlay ] else if input?overlays then builtins.attrValues input.overlays else [ ]) (builtins.attrValues overlayInputs))),
         # (Subset of) »inputs« that »overlays« will be used from. Example: »{ inherit (inputs) self flakeA flakeB; }«.
@@ -140,11 +151,11 @@ in rec {
         moduleInputs ? (builtins.removeAttrs inputs [ "nixpkgs" ]),
         # Additional arguments passed to each module evaluated for the host config (if that module is defined as a function).
         specialArgs ? { },
-        # List of bash scripts defining functions that do installation and maintenance operations. See »apps« below for more information.
-        scripts ? [ ],
-        # The function of that name as defined in »<nixpkgs>/flake.nix«, or equivalent.
+        # Optional list of bash scripts defining functions that do installation and maintenance operations. See »./setup-scripts/README.md« below for more information. To define additional functions (or overwrite individual default ones), use »(lib.attrValues lib.wip.setup-scripts) ++ [ ]« and place any extra scripts in the array.
+        scripts ? (lib.attrValues setup-scripts),
+        # The »nixosSystem« function defined in »<nixpkgs>/flake.nix«, or equivalent.
         nixosSystem ? inputs.nixpkgs.lib.nixosSystem,
-        # If provided, then cross compilation is enabled for all hosts whose target architecture is different from this. Since cross compilation currently fails for (some stuff in) NixOS, better don't set »localSystem«. Without it, building for other platforms works fine (just slowly) if »boot.binfmt.emulatedSystems« is configured on the building system for the respective target(s).
+        # If provided, then cross compilation is enabled for all hosts whose target architecture is different from this. Since cross compilation currently fails for (some stuff in) NixOS, better don't set »localSystem«. Without it, building for other platforms works fine (just slowly) if »boot.binfmt.emulatedSystems« on the building system is configured for the respective target(s).
         localSystem ? null,
     ... }: let
         otherArgs = (builtins.removeAttrs args [ "systems" ]) // { inherit systems overlays modules specialArgs scripts inputs configPath nixosSystem localSystem; };
@@ -155,7 +166,7 @@ in rec {
         pkgs = (import inputs.nixpkgs { inherit overlays; system = localSystem; });
         nix = if lib.versionOlder pkgs.nix.version "2.4" then pkgs.nix_2_4 else pkgs.nix;
         nix_wrapped = pkgs.writeShellScriptBin "nix" ''exec ${nix}/bin/nix --extra-experimental-features nix-command "$@"'';
-    in (if scripts == [ ] then { } else {
+    in (if scripts == [ ] || scripts == null then { } else {
 
         # E.g.: $ nix run .#$target -- install-system /tmp/system-$target.img
         # E.g.: $ nix run /etc/nixos/#$(hostname) -- sudo

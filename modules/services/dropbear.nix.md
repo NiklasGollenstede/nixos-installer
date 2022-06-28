@@ -42,7 +42,7 @@ in {
         systemd.services."dropbear" = {
             description = "dropbear SSH server (listening)";
             wantedBy = [ "multi-user.target" ]; after = [ "network.target" ];
-            serviceConfig.PreExec = lib.mkIf (cfg.hostKeys == [ ]) "${pkgs.coreutils}/bin/mkdir -p /etc/dropbear/";
+            serviceConfig.ExecStartPre = lib.mkIf (cfg.hostKeys == [ ]) "${pkgs.coreutils}/bin/mkdir -p /etc/dropbear/";
             serviceConfig.ExecStart = defaultArgs + " -F -E"; # don't fork, use stderr
             #serviceConfig.PIDFile = "/var/run/dropbear.pid"; serviceConfig.Type = "forking"; after = [ "network.target" ]; # alternative to »-E -F« (?)
         };

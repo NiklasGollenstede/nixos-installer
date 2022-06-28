@@ -28,11 +28,28 @@ in rec {
     #  Any function with two (usually unnamed) arguments returning an attrset could be an overlay, so that's rather vague.
     couldBeOverlay = thing: let result1 = thing (builtins.functionArgs thing);  result2 = result1 (builtins.functionArgs result1); in builtins.isFunction thing && builtins.isFunction result1 && builtins.isAttrs result2;
 
-    # Builds an attrset that, for each folder or ».nix« or ».nix.md« file (other than »default.nix«) in this folder, as the name of that folder or the name of the file without extension(s), exports the result of importing that file/folder.
+    # Builds an attrset that, for each folder (containing a »default.nix«) or ».nix« or ».nix.md« file (other than »./default.nix«) in this folder, as the name of that folder or the name of the file without extension(s), exports the result of importing that file/folder.
     importAll = inputs: dir: builtins.mapAttrs (name: path: import path (if endsWith "/default.nix" path then "${dir}/${name}" else dir) inputs) (getNamedNixFiles dir [ "default.nix" ]);
 
-    # Import a Nix file that expects the standard `dirname: inputs: ` arguments.
-    importWrapped = inputs: path: import path (if (builtins.match ''^(.*)[.]nix([.]md)?$'' path) != null then builtins.dirOf path else path) inputs;
+    # Import a Nix file that expects the standard `dirname: inputs: ` arguments, providing some additional information and error handling.
+    importWrapped = inputs: path: rec {
+        # Whether the file is imported by an explicit full path (or one omitting ».nix« or »/default.nix«):
+        isExplicit = (builtins.match ''^(.*)[.]nix([.]md)?$'' path) != null;
+        # Whether the import path _implicitly_ refers to the »/default.nix« in a directory:
+        isImplicitDir = !isExplicit && builtins.pathExists "${path}/default.nix";
+        # The resolved path that will be imported:
+        fullPath = if isImplicitDir then "${path}/default.nix" else if isExplicit then path else "${path}.nix";
+        # The imported nix value:
+        result = import fullPath (if isImplicitDir then path else builtins.dirOf path) inputs;
+        # Whether the import path points to an existing file:
+        exists = isImplicitDir || (builtins.pathExists (if isExplicit then path else "${path}.nix"));
+        # Return »null« if not ».exists«:
+        optional = if exists then result else null;
+        # Throw if not ».exists«:
+        required = if exists then result else throw (if isExplicit then "File ${path} does not exist" else "Neither ${path}/default.nix nor ${path}.nix exist");
+        # ».result« interpreted as NixOS module, wrapped to preserve the import path:
+        module = { _file = fullPath; imports = [ required ]; };
+    };
 
     ## Returns an attrset that, for each file in »dir« (except »default.nix« and as filtered and named by »getNamedNixFiles dir except«), imports that file and exposes only if the result passes »filter«. If provided, the imported value is »wrapped« after filtering.
     #  If a file/folder' import that is rejected by »filter« is an attrset (for example because it results from a call to this function), then all attributes whose values pass »filter« are prefixed with the file/folders name plus a slash and merged into the overall attrset.
@@ -72,7 +89,7 @@ in rec {
     # Given a list of »overlays« and »pkgs« with them applied, returns the subset of »pkgs« that was directly modified by the overlays.
     getModifiedPackages = pkgs: overlays: let
         names = builtins.concatLists (map (overlay: builtins.attrNames (overlay { } { })) (builtins.attrValues overlays));
-    in mapMerge (name: { ${name} = pkgs.${name}; }) names;
+    in mapMerge (name: if lib.isDerivation pkgs.${name} then { ${name} = pkgs.${name}; } else { }) names;
 
     ## Given a path to a module in »nixpkgs/nixos/modules/«, when placed in another module's »imports«, this adds an option »disableModule.${modulePath}« that defaults to being false, but when explicitly set to »true«, disables all »config« values set by the module.
     #  Every module should, but not all modules do, provide such an option themselves.
@@ -101,7 +118,7 @@ in rec {
         moduleArgs = { utils = import "${specialArgs.inputs.nixpkgs.outPath}/nixos/lib/utils.nix" { inherit (specialArgs) lib config pkgs; }; } // specialArgs;
         module = import fullPath moduleArgs;
     in { _file = fullPath; imports = [
-        (mergeAttrsRecursive (([ { imports = module.imports or [ ]; options = module.options or { }; config = module.config or { }; } ]) ++ (lib.toList (override module))))
+        (mergeAttrsRecursive ([ { imports = module.imports or [ ]; options = module.options or { }; config = module.config or { }; } ] ++ (lib.toList (override module))))
         { disabledModules = [ modulePath ]; }
     ]; };
 }

@@ -9,9 +9,7 @@ Filesystem related "patches" of options in nixpkgs, i.e. additions of options th
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: specialArgs@{ config, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
-    utils = import "${inputs.nixpkgs.outPath}/nixos/lib/utils.nix" { inherit (specialArgs) lib config pkgs; };
-
+dirname: inputs: specialArgs@{ config, pkgs, lib, utils, ... }: let inherit (inputs.self) lib; in let
 in {
 
     options = {

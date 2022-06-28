@@ -28,12 +28,12 @@ Alternative to running directly as `root` (esp. if `nix` is not installed for ro
 ```nix
 #*/# end of MarkDown, beginning of NixOS config flake input:
 dirname: inputs: { config, pkgs, lib, name, ... }: let inherit (inputs.self) lib; in let
-    #suffix = builtins.head (builtins.match ''example-(.*)'' name); # make differences in config based on this when using »preface.instances«
+    #suffix = builtins.head (builtins.match ''example-(.*)'' name); # make differences in config based on this when using »wip.preface.instances«
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
 in { imports = [ ({ ## Hardware
-    preface.instances = [ "example" "example-raidz" ];
+    wip.preface.instances = [ "example" "example-minimal" "example-raidz" ];
 
-    preface.hardware = "x86_64"; system.stateVersion = "22.05";
+    wip.preface.hardware = "x86_64"; system.stateVersion = "22.05";
 
     ## What follows is a whole bunch of boilerplate-ish stuff, most of which multiple hosts would have in common and which would thus be moved to one or more modules:
 
@@ -81,6 +81,16 @@ in { imports = [ ({ ## Hardware
     wip.fs.temproot.local.mounts."/var/log" = lib.mkForce null; # example: don't keep logs
 
 
+}) (lib.mkIf (name == "example-minimal") { ## Minimal automatic FS setup
+
+    wip.fs.boot.enable = true;
+    wip.fs.temproot.enable = true;
+    wip.fs.temproot.temp.type = "tmpfs";
+    wip.fs.temproot.local.type = "bind";
+    wip.fs.temproot.local.bind.base = "f2fs";
+    wip.fs.temproot.remote.type = "none";
+
+
 }) (lib.mkIf (name == "example-raidz") { ## Multi-disk ZFS setup
 
     #wip.fs.disks.devices.primary.size = "16G"; # (default)
@@ -104,7 +114,7 @@ in { imports = [ ({ ## Hardware
 }) ({ ## Actual Config
 
     # Some base config:
-    wip.base.enable = true; wip.base.includeNixpkgs = inputs.nixpkgs;
+    wip.base.enable = true;
     documentation.enable = false; # sometimes takes quite long to build
 
 

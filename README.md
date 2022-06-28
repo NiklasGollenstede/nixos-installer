@@ -25,7 +25,7 @@ The modules are inactive by default, and are, where possible, designed to be ind
 [`patches/`](./patches/) contains patches which are either applied to the flake's inputs in [`flake.nix`](./flake.nix) or to packages in one of the [`overlays/`](./overlays/).
 
 [`hosts/`](./hosts/) contains the main NixOS config modules for each host. Generally, there is one file for each host, but the [flake](./flake.nix) can be instructed to reuse the config for multiple hosts (in which case the module should probably interpret the `name` argument passed to it).
-Any `preface.*` options have to be set in the first sub-module in these files (`## Hardware` section). \
+Any `wip.preface.*` options have to be set in the first sub-module in these files (`## Hardware` section). \
 This flake only defines a single [`example`](./hosts/example.nix.md) host meant to demonstrate how other flakes can use the (NixOS) flake library framework.
 
 [`example/`](./example/) contains an example of adjusting the [installation](./example/install.sh.md) script for the hosts and this flake's [default config](./example/defaultConfig/) (see [Namespacing](#namespacing-in-nixos)).

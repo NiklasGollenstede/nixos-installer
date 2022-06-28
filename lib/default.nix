@@ -3,4 +3,4 @@ dirname: inputs@{ self, nixpkgs, ...}: let
     #categories = fix (wip: (import "${dirname}/imports.nix" dirname inputs).importAll (inputs // { self = inputs.self // { lib = nixpkgs.lib // { inherit wip; }; }; })) dirname;
     categories = (import "${dirname}/imports.nix" dirname inputs).importAll inputs dirname;
     wip = (builtins.foldl' (a: b: a // b) { } (builtins.attrValues (builtins.removeAttrs categories [ "setup-scripts" ]))) // categories;
-in nixpkgs.lib // { inherit wip; }
+in nixpkgs.lib // { wip = wip // { prefix = inputs.config.prefix; }; }

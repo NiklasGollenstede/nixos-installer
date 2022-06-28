@@ -24,4 +24,7 @@ in {
             ../patches/gptfdisk-move-secondary-table.patch
         ];
     });
+
+    libblockdev = prev.libblockdev.override { inherit (prev) gptfdisk; };
+
 }

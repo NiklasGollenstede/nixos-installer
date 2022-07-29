@@ -17,6 +17,8 @@ in {
     options.${prefix} = { base = {
         enable = lib.mkEnableOption "saner defaults";
         includeInputs = lib.mkOption { description = "Whether to include all build inputs to the configuration in the final system, such that they are available for self-rebuilds, in the flake registry, and on the »NIX_PATH« entry (e.g. as »pkgs« on the CLI)."; type = lib.types.bool; default = specialArgs?inputs && specialArgs.inputs?self && specialArgs.inputs?nixpkgs; };
+        panic_on_fail = lib.mkEnableOption "Kernel parameter »boot.panic_on_fail«" // { default = true; }; # It's stupidly hard to remove items from lists ...
+        makeNoExec = lib.mkEnableOption "(almost) all filesystems being mounted as »noexec« (and »nosuid« and »nodev«)" // { default = false; };
     }; };
 
     # Bugfix:
@@ -36,10 +38,54 @@ in {
         documentation.man.enable = lib.mkDefault config.documentation.enable;
 
 
+    }) (lib.mkIf cfg.makeNoExec { ## Hardening
+
+        # This was the only "special" mount that did not have »nosuid« and »nodev« set:
+        systemd.packages = [ (lib.wip.mkSystemdOverride pkgs "dev-hugepages.mount" "[Mount]\nOptions=nosuid,nodev,noexec\n") ];
+        # And these were missing »noexec«:
+        boot.specialFileSystems."/dev".options = [ "noexec" ];
+        boot.specialFileSystems."/dev/shm".options = [ "noexec" ];
+        boot.specialFileSystems."/run/keys".options = [ "noexec" ];
+        # "Exceptions":
+        # /dev /dev/pts need »dev«
+        # /run/wrappers needs »exec« »suid«
+        # /run/binfmt needs »exec«
+        # /run /run/user/* may need »exec« (TODO: test)
+
+        # Ensure that the /nix/store is not »noexec«, even if the FS it is on is:
+        boot.initrd.postMountCommands = ''
+            if ! mountpoint -q $targetRoot/nix/store ; then
+                mount --bind $targetRoot/nix/store $targetRoot/nix/store
+            fi
+            mount -o remount,exec $targetRoot/nix/store
+        '';
+        # Nix has no (direct) settings to change where the builders have their »/build« bound to, but many builds will need it to be »exec«:
+        systemd.services.nix-daemon = { # TODO: while noexec on /tmp is the problem, neither of this solve it:
+            serviceConfig.PrivateTmp = true;
+            #serviceConfig.PrivateMounts = true; serviceConfig.ExecStartPre = "/run/wrappers/bin/mount -o remount,exec /tmp";
+        };
+
+        # And now make all "real" FSs »noexec« (if »wip.fs.temproot.enable = true«):
+        ${prefix}.fs.temproot = let
+            it = { mountOptions = { nosuid = true; noexec = true; nodev = true; }; };
+        in { temp = it; local = it; remote = it; };
+
+        nix.allowedUsers = [ "root" "@wheel" ]; # This goes hand-in-hand with setting mounts as »noexec«. Cases where a user other than root should build stuff are probably fairly rare. A "real" user might want to, but that is either already in the wheel(sudo) group, or explicitly adding that user is pretty reasonable.
+
+        boot.postBootCommands = ''
+            # Make the /nix/store non-iterable, to make it harder for unprivileged programs to search the store for programs they should not have access to:
+            unshare --fork --mount --uts --mount-proc --pid -- ${pkgs.bash}/bin/bash -euc '
+                mount --make-rprivate / ; mount --bind /nix/store /nix/store ; mount -o remount,rw /nix/store
+                chmod -f 1771 /nix/store
+                chmod -f  751 /nix/store/.links
+            '
+        '';
+
+
     }) ({
         # Robustness/debugging:
 
-        boot.kernelParams = [ "panic=10" "boot.panic_on_fail" ]; # Reboot on kernel panic (showing the printed messages for 10s), panic if boot fails.
+        boot.kernelParams = [ "panic=10" ] ++ (lib.optional cfg.panic_on_fail "boot.panic_on_fail"); # Reboot on kernel panic (showing the printed messages for 10s), panic if boot fails.
         # might additionally want to do this: https://stackoverflow.com/questions/62083796/automatic-reboot-on-systemd-emergency-mode
         systemd.extraConfig = "StatusUnitFormat=name"; # Show unit names instead of descriptions during boot.
 
@@ -55,7 +101,6 @@ in {
         ''; # (use this indirection so that all open shells update automatically)
 
         nix.nixPath = [ "nixpkgs=/run/current-system/pkgs" ]; # this intentionally replaces the defaults: nixpkgs is here, /etc/nixos/flake.nix is implicit, channels are impure
-        # TODO: decide whether to put any other flake inputs also on the nix path: con: they may very well not even have a »./default.nix«
         nix.autoOptimiseStore = true; # because why not ...
         environment.shellAliases = { "with" = ''nix-shell --run "bash --login" -p''; }; # »with« doesn't seem to be a common linux command yet, and it makes sense here: with $package => do stuff in shell
 

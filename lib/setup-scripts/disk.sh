@@ -52,9 +52,11 @@ function partition-disks { { # 1: diskPaths
             install -o root -g root -m 640 -T /dev/null "$outFile" && truncate -s "${disk[size]}" "$outFile" &&
             blockDevs[$name]=$(losetup --show -f "$outFile") && prepend_trap "losetup -d '${blockDevs[$name]}'" EXIT # NOTE: this must not be inside a sub-shell!
         else
-            local size=$( blockdev --getsize64 "${blockDevs[$name]}" || : )
+            local size=$( blockdev --getsize64 "${blockDevs[$name]}" || : ) ; local waste=$(( size - ${disk[size]} ))
             if [[ ! $size ]] ; then echo "Block device $name does not exist at ${blockDevs[$name]}" ; exit 1 ; fi
-            if [[ $size != "${disk[size]}" ]] ; then echo "Block device ${blockDevs[$name]}'s size $size does not match the size ${disk[size]} declared for $name" ; exit 1 ; fi
+            if (( waste < 0 )) ; then echo "Block device ${blockDevs[$name]}'s size $size is smaller than the size ${disk[size]} declared for $name" ; exit 1 ; fi
+            if (( waste > 0 )) && [[ ! ${disk[allowLarger]:-} ]] ; then echo "Block device ${blockDevs[$name]}'s size $size is bigger than the size ${disk[size]} declared for $name" ; exit 1 ; fi
+            if (( waste > 0 )) ; then echo "Wasting $(( waste / 1024))K of ${blockDevs[$name]} due to the size declared for $name (should be ${size}b)" ; fi
             blockDevs[$name]=$(realpath "${blockDevs[$name]}")
         fi
     done
@@ -73,7 +75,7 @@ function partition-disks { { # 1: diskPaths
             if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev's serial ($actual) does not match the serial (${disk[serial]}) declared for ${disk[name]}" ; exit 1 ; fi
         fi
         # can (and probably should) restore the backup:
-        ( PATH=@{native.gptfdisk}/bin ; set -x ; sgdisk --zap-all --load-backup=@{config.wip.fs.disks.partitioning}/"${disk[name]}".backup "${blockDevs[${disk[name]}]}" >$beQuiet )
+        ( PATH=@{native.gptfdisk}/bin ; set -x ; sgdisk --zap-all --load-backup=@{config.wip.fs.disks.partitioning}/"${disk[name]}".backup ${disk[allowLarger]:+--move-second-header} "${blockDevs[${disk[name]}]}" >$beQuiet )
         #partition-disk "${disk[name]}" "${blockDevs[${disk[name]}]}"
     done
     @{native.parted}/bin/partprobe "${blockDevs[@]}"

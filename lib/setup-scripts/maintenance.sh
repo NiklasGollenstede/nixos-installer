@@ -26,7 +26,7 @@ function register-vbox {( set -eu # 1: diskImages, 2?: bridgeTo
         $VBoxManage modifyvm "$vmName" --nic2 bridged --bridgeadapter2 $bridgeTo
     fi
 
-    # TODO: The serial settings between qemu and vBox seem incompatible. With a simple »console=ttyS0«, vBox hangs on start. So just disable this for now an use qemu for headless setups. The UX here is awful anyway.
+    # The serial settings between qemu and vBox seem incompatible. With a simple »console=ttyS0«, vBox hangs on start. So just disable this for now an use qemu for headless setups. The UX here is awful anyway.
    #$VBoxManage modifyvm "$vmName" --uart1 0x3F8 4 --uartmode1 server /run/user/$(id -u)/$vmName.socket # (guest sets speed)
 
     set +x # avoid double-echoing
@@ -63,8 +63,14 @@ function run-qemu {( set -eu # 1: diskImages
         #qemu+=( -M virt -m 1024 -smp 4 -cpu cortex-a53  ) ; args[no-nat]=1
     fi # else things are going to be quite slow
 
-    for decl in ${diskImages//:/ } ; do
-        qemu+=( -drive format=raw,file="${decl/*=/}" ) #,if=none,index=0,media=disk,id=disk0 -device "virtio-blk-pci,drive=disk0,disable-modern=on,disable-legacy=off" )
+    disks=( ${diskImages//:/ } ) ; for index in ${!disks[@]} ; do
+#       qemu+=( -drive format=raw,if=ide,file="${disks[$index]/*=/}" ) # »if=ide« is the default, which these days isn't great for driver support inside the VM
+        qemu+=( # not sure how correct the interpretations if the command are, and whether this works for more than one disk
+            -drive format=raw,file="${disks[$index]/*=/}",media=disk,if=none,index=${index},id=drive${index} # create the disk drive, without attaching it, name it driveX
+            -device ahci,acpi-index=${index},id=ahci${index} # create an (ich9-)AHCI bus named »ahciX«
+            -device ide-hd,drive=drive${index},bus=ahci${index}.${index} # attach IDE?! disk driveX as device X on bus »ahciX«
+            #-device virtio-blk-pci,drive=drive${index},disable-modern=on,disable-legacy=off # alternative to the two lines above (implies to be faster, but seems to require guest drivers)
+        )
     done
 
     if [[ @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots something much like a classic BIOS?
@@ -78,11 +84,18 @@ function run-qemu {( set -eu # 1: diskImages
         qemu+=( -kernel @{config.system.build.kernel}/Image -initrd @{config.system.build.initialRamdisk}/initrd -append "$(echo -n "@{config.boot.kernelParams[@]}")" )
     fi
 
-    for param in "@{config.boot.kernelParams[@]}" ; do if [[ $param == 'console=ttyS0' || $param == 'console=ttyS0',* ]] ; then
-        qemu+=( -nographic ) # »-nographic« by default only shows output once th system reaches the login prompt. Add »config.boot.kernelParams = [ "console=tty1" "console=ttyS0" ]« to log to serial (»-nographic«) and the display (if there is one), preferring the last »console« option for the initrd shell (if enabled and requested).
-    fi ; done
+    # Add »config.boot.kernelParams = [ "console=tty1" "console=ttyS0" ]« to log to serial (»ttyS0«) and/or the display (»tty1«), preferring the last »console« option for the initrd shell (if enabled and requested).
+    logSerial= ; if [[ ' '"@{config.boot.kernelParams[@]}"' ' == *' console=ttyS0'@( |,)* ]] ; then logSerial=1 ; fi
+    logScreen= ; if [[ ' '"@{config.boot.kernelParams[@]}"' ' == *' console=tty1 '* ]] ; then logScreen=1 ; fi
+    if [[ $logSerial ]] ; then
+        if [[ $logScreen || ${args[graphic]:-} ]] ; then
+            qemu+=( -serial mon:stdio )
+        else
+            qemu+=( -nographic ) # Without »console=tty1« or no »console=...« parameter, boot messages won't be on the screen.
+        fi
+    fi
 
-    if [[ ! ${args[no-nat]:-} ]] ; then
+    if [[ ! ${args[no-nat]:-} ]] ; then # e.g. --nat-fw=8000-:8000,8001-:8001
         qemu+=( -nic user,model=virtio-net-pci${args[nat-fw]:+,hostfwd=tcp::${args[nat-fw]//,/,hostfwd=tcp::}} ) # NATed, IPs: 10.0.2.15+/32, gateway: 10.0.2.2
     fi
 

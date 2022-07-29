@@ -12,11 +12,11 @@ The default functions in [`lib/setup-scripts`](../../lib/setup-scripts/README.md
 What keys are used for is derived from the attribute name in the `.keys` specification, which (plus a `.key` suffix) also becomes their storage path in the keystore:
 * Keys in `luks/` are used for LUKS devices, where the second path label is both the target device name and source device GPT partition label, and the third and final label is the LUKS key slot (`0` is required to be specified, `1` to `7` are optional).
 * Keys in `zfs/` are used for ZFS datasets, where the further path is that of the dataset. Datasets implicitly inherit their parent's encryption by default. An empty key (created by method `unencrypted`) explicitly disables encryption on a dataset. Other keys are by default used with `keyformat=hex` and must thus be exactly 64 (lowercase) hex digits.
-* Keys in `home/` are used as composites for home directory encryption, where the second and only other path label us the user name. TODO: this is not completely implemented yet.
+* Keys in `home/` are meant to be used as composites for home directory encryption, where the second and only other path label us the user name.
 
 The attribute value in the `.keys` keys specification dictates how the key is acquired, primarily initially during installation, but (depending on the keys usage) also during boot unlocking, etc.
 The format of the key specification is `method[=args]`, where `method` is the suffix of a bash function call `gen-key-<method>` (the default functions are in [`add-key.sh`](../../lib/setup-scripts/add-key.sh), but others could be added to the installer), and `args` is the second argument to the respective function (often a `:` separated list of arguments, but some methods don't need any arguments at all).
-Most key generation methods only make sense in some key usage contexts. A `random` key is impossible to provide to unlock the keystore (which it is stored in), but is well suited to unlock other devices (if the keystore has backups (TODO!)); conversely a USB-partition can be used to headlessly unlock the keystore, but would be redundant for any further devices, as it would also be copied in the keystore.
+Most key generation methods only make sense in some key usage contexts. A `random` key is impossible to provide to unlock the keystore (which it is stored in), but is well suited to unlock other devices (if the keystore has backups); conversely a USB-partition can be used to headlessly unlock the keystore, but would be redundant for any further devices, as it would also be copied into the keystore.
 
 If the module is `enable`d, a partition and LUKS device `keystore-...` gets configured and the contents of the installation time keystore is copied to it (in its entirety, including intermediate or derived keys and those unlocking the keystore itself (TODO: this could be optimized)).
 This LUKS device is then configured to be unlocked (using any ot the key methods specified for it) before anything else during boot, and closed before leaving the initramfs phase.
@@ -70,7 +70,6 @@ in let module = {
     }) ({
 
         boot.initrd.supportedFilesystems = [ "vfat" ];
-        #boot.supportedFilesystems = [ "vfat" ]; # TODO: this should not be necessary
 
         boot.initrd.luks.devices."keystore-${hash}" = {
             device = "/dev/disk/by-partlabel/keystore-${hash}";
@@ -89,7 +88,7 @@ in let module = {
         };
 
         # Create and populate keystore during installation:
-        fileSystems.${keystore} = { fsType = "vfat"; device = "/dev/mapper/keystore-${hash}"; options = [ "ro" "noatime" "umask=0277" "noauto" ]; formatOptions = ""; };
+        fileSystems.${keystore} = { fsType = "vfat"; device = "/dev/mapper/keystore-${hash}"; options = [ "ro" "nosuid" "nodev" "noexec" "noatime" "umask=0277" "noauto" ]; formatOptions = ""; };
 
         ${prefix} = {
             fs.disks.partitions."keystore-${hash}" = { type = lib.mkDefault "8309"; order = lib.mkDefault 1375; disk = lib.mkDefault "primary"; size = lib.mkDefault "32M"; };

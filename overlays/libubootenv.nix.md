@@ -38,8 +38,8 @@ in {
             homepage = "https://github.com/sbabic/libubootenv";
             description = "Generic library and tools to access and modify U-Boot environment from User Space";
             license = [ lib.licenses.lgpl21Plus lib.licenses.mit lib.licenses.cc0 ];
-            maintainers = with lib.maintainers; [ ];
-            platforms = with lib.platforms; linux;
+            maintainers = [ ];
+            platforms = lib.platforms.linux;
         };
     };
 }

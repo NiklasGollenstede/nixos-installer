@@ -12,6 +12,7 @@ Options to declare devices and partitions to be picked up by the installer scrip
 dirname: inputs: { config, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
     prefix = inputs.config.prefix;
     cfg = config.${prefix}.fs.disks;
+    globalConfig = config;
     types.guid = lib.types.strMatching ''^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'';
 in {
 
@@ -20,8 +21,9 @@ in {
             description = "Set of disk devices that this host will be installed on.";
             type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
                 name = lib.mkOption { description = "Name that this device is being referred to as in other places."; type = lib.types.str; default = name; readOnly = true; };
-                guid = lib.mkOption { description = "GPT disk GUID of the disk."; type = types.guid; default = lib.wip.sha256guid ("gpt-disk:${name}"+":${config.networking.hostName}"); };
+                guid = lib.mkOption { description = "GPT disk GUID of the disk."; type = types.guid; default = lib.wip.sha256guid ("gpt-disk:${name}"+":${globalConfig.networking.hostName}"); };
                 size = lib.mkOption { description = "The size of the disk, either as number in bytes or as argument to »parseSizeSuffix«. When installing to a physical device, its size must match; images are created with this size."; type = lib.types.either lib.types.ints.unsigned lib.types.str; apply = lib.wip.parseSizeSuffix; default = "16G"; };
+                allowLarger = lib.mkOption { description = "Whether to allow installation to a physical disk that is larger than the declared size."; type = lib.types.bool; default = true; };
                 serial = lib.mkOption { description = "Serial number of the specific hardware device to use. If set the device path passed to the installer must point to the device with this serial. Use » udevadm info --query=property --name=$DISK | grep -oP 'ID_SERIAL_SHORT=\K.*' || echo '<none>' « to get the serial."; type = lib.types.nullOr lib.types.str; default = null; };
                 alignment = lib.mkOption { description = "Default alignment quantifier for partitions on this device. Should be at least the optimal physical write size of the device, but going larger at worst wastes this many times the number of partitions disk sectors."; type = lib.types.int; default = 16384; };
                 gptOffset = lib.mkOption { description = "Offset of the partition tables, inwards from where (third / 2nd last) they usually are."; type = lib.types.ints.unsigned; default = 0; };
@@ -31,21 +33,21 @@ in {
                     a;1    # active/boot ; part1
                 ''; };
             }; })));
-            default = { };
+            default = { primary = { }; };
             apply = lib.filterAttrs (k: v: v != null);
         };
         partitions = lib.mkOption {
             description = "Set of disks disk partitions that the system will need/use. Partitions will be created on their respective ».disk«s in ».order« using »sgdisk -n X:+0+$size«.";
-            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
+            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, config, ... }: { options = {
                 name = lib.mkOption { description = "Name/partlabel that this partition can be referred to as once created."; type = lib.types.str; default = name; readOnly = true; };
-                guid = lib.mkOption { description = "GPT partition GUID of the partition."; type = types.guid; default = lib.wip.sha256guid ("gpt-part:${name}"+":${config.networking.hostName}"); };
+                guid = lib.mkOption { description = "GPT partition GUID of the partition."; type = types.guid; default = lib.wip.sha256guid ("gpt-part:${name}"+":${globalConfig.networking.hostName}"); };
                 disk = lib.mkOption { description = "Name of the disk that this partition resides on, which will automatically be declared with default options."; type = lib.types.str; default = "primary"; };
                 type = lib.mkOption { description = "»gdisk« partition type of this partition."; type = lib.types.str; };
                 size = lib.mkOption { description = "Partition size, either as integer suffixed with »K«, »M«, »G«, etc for sizes in XiB, or an integer suffixed with »%« for that portion of the size of the actual disk the partition gets created on. Or »null« to fill the remaining disk space."; type = lib.types.nullOr lib.types.str; default = null; };
                 position = lib.mkOption { description = "Position at which to create the partition. The default »+0« means the beginning of the largest free block."; type = lib.types.str; default = "+0"; };
                 alignment = lib.mkOption { description = "Adjusted alignment quantifier for this partition only."; type = lib.types.nullOr lib.types.int; default = null; example = 1; };
                 index = lib.mkOption { description = "Optionally explicit partition table index to place this partition in. Use ».order« to make sure that this index hasn't been used yet.."; type = lib.types.nullOr lib.types.int; default = null; };
-                order = lib.mkOption { description = "Creation order ranking of this partition. Higher orders will be created first, and will thus be placed earlier in the partition table (if ».index« isn't explicitly set) and also further to the front of the disk space."; type = lib.types.int; default = 1000; };
+                order = lib.mkOption { description = "Creation order ranking of this partition. Higher orders will be created first, and will thus be placed earlier in the partition table (if ».index« isn't explicitly set) and also further to the front of the disk space."; type = lib.types.int; default = if config.size == null then 500 else (1000 - (if config.index == null then 0 else 256 - config.index)); };
             }; })));
             default = { };
             apply = lib.filterAttrs (k: v: v != null);
@@ -58,13 +60,13 @@ in {
         postPartitionCommands = lib.mkOption { description = ""; type = lib.types.lines; default = ""; };
         postFormatCommands = lib.mkOption { description = ""; type = lib.types.lines; default = ""; };
         postMountCommands = lib.mkOption { description = ""; type = lib.types.lines; default = ""; };
-        initSystemCommands = lib.mkOption { description = ""; type = lib.types.lines; default = ""; };
-        restoreSystemCommands = lib.mkOption { description = ""; type = lib.types.lines; default = ""; };
+        preInstallCommands = lib.mkOption { description = ""; type = lib.types.lines; default = ""; };
+        postInstallCommands = lib.mkOption { description = ""; type = lib.types.lines; default = ""; };
     }; };
 
     config.${prefix} = {
-        # Create all devices referenced by partitions:
-        fs.disks.devices = lib.wip.mapMerge (name: { ${name} = { }; }) (lib.catAttrs "disk" config.${prefix}.fs.disks.partitionList);
+        # (Don't) create all devices referenced by partitions: (The problem with this is that all device attributes depend on the partition attributes, and it would thus be impossible to have a dependency in reverse (e.g. a partition's size based on the disk size).)
+        #fs.disks.devices = lib.genAttrs (lib.catAttrs "disk" config.${prefix}.fs.disks.partitionList) (name: { });
 
         fs.disks.partitioning = let
             partition-disk = { name = "partition-disk"; text = lib.wip.extractBashFunction (builtins.readFile lib.wip.setup-scripts.disk) "partition-disk"; };

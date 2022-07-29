@@ -33,6 +33,11 @@ function prepend_trap { # 1: command, ...: trapNames
 }
 declare -f -t prepend_trap # required to modify DEBUG or RETURN traps
 
+## Given the name to an existing bash function, this creates a copy of that function with a new name (in the current scope).
+function copy-function { # 1: existingName, 2: newName
+    local original=$(declare -f "${1?existingName not provided}") ; if [[ ! $original ]] ; then echo "Function $1 is not defined" ; return 1 ; fi
+    eval "${original/$1/${2?newName not provided}}" # run the code declaring the function again, replacing only the first occurrence of the name
+}
 
 ## Writes a »$name«d secret from stdin to »$targetDir«, ensuring proper file permissions.
 function write-secret {( set -eu # 1: path, 2?: owner[:[group]], 3?: mode

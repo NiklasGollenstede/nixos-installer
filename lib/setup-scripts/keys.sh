@@ -34,16 +34,16 @@ function populate-keystore { { # (void)
         methods[$usage]=${methods[$from]} ; options[$usage]=${options[$from]}
     done
     for usage in "${!methods[@]}" ; do
-        if [[ "${methods[$usage]}" == home-pw || "${methods[$usage]}" == copy ]] ; then continue ; fi
-        add-key-"${methods[$usage]}" "$usage" "${options[$usage]}" || return 1
+        if [[ "${methods[$usage]}" == home-composite || "${methods[$usage]}" == copy ]] ; then continue ; fi
+        gen-key-"${methods[$usage]}" "$usage" "${options[$usage]}" | write-secret "$keystore"/"$usage".key || return 1
     done
     for usage in "${!methods[@]}" ; do
-        if [[ "${methods[$usage]}" != home-pw ]] ; then continue ; fi
-        add-key-"${methods[$usage]}" "$usage" "${options[$usage]}" || return 1
+        if [[ "${methods[$usage]}" != home-composite ]] ; then continue ; fi
+        gen-key-"${methods[$usage]}" "$usage" "${options[$usage]}" | write-secret "$keystore"/"$usage".key || return 1
     done
     for usage in "${!methods[@]}" ; do
         if [[ "${methods[$usage]}" != copy ]] ; then continue ; fi
-        add-key-"${methods[$usage]}" "$usage" "${options[$usage]}" || return 1
+        gen-key-"${methods[$usage]}" "$usage" "${options[$usage]}" | write-secret "$keystore"/"$usage".key || return 1
     done
 )}
 

@@ -8,14 +8,14 @@ Patches for `nixpkgs` are applied in `../flake.nix`.
 
 To create/"commit" a patch of the current directory vs its latest commit:
 ```bash
- git diff >.../overlays/patches/....patch
+ git diff >.../patches/....patch
 ```
 
 To test a patch against the repo in CWD, or to "check it out" to edit and then "commit" again:
 ```bash
  git reset --hard HEAD # destructively reset the working tree to the current commit
- patch --dry-run -p1 <.../overlays/patches/....patch # test only
- patch           -p1 <.../overlays/patches/....patch # apply to CWD
+ patch --dry-run -p1 <.../patches/....patch # test only
+ patch           -p1 <.../patches/....patch # apply to CWD
 ```
 
 

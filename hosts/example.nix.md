@@ -39,6 +39,9 @@ in { imports = [ ({ ## Hardware
 
     boot.loader.systemd-boot.enable = true; boot.loader.grub.enable = false;
 
+    # Example of adding and/or overwriting setup/maintenance functions:
+    wip.setup.scripts.install-overwrite = { path = ../example/install.sh.md; order = 1000; };
+
 
 }) (lib.mkIf false { ## Minimal explicit FS setup
 
@@ -93,7 +96,7 @@ in { imports = [ ({ ## Hardware
 
 }) (lib.mkIf (name == "example-raidz") { ## Multi-disk ZFS setup
 
-    #wip.fs.disks.devices.primary.size = "16G"; # (default)
+    wip.fs.disks.devices = lib.genAttrs ([ "primary" "raidz1" "raidz2" "raidz3" ]) (name: { size = "16G"; });
     wip.fs.boot.enable = true; wip.fs.boot.size = "512M";
 
     wip.fs.keystore.enable = true;
@@ -126,12 +129,14 @@ in { imports = [ ({ ## Hardware
 
     services.getty.autologinUser = "root"; users.users.root.password = "root";
 
-    boot.kernelParams = lib.mkForce [ "console=tty1" "console=ttyS0" "boot.shell_on_fail" ];
+    boot.kernelParams = [ /* "console=tty1" */ "console=ttyS0" "boot.shell_on_fail" ]; wip.base.panic_on_fail = false;
 
     wip.services.dropbear.enable = true;
     #wip.services.dropbear.rootKeys = [ ''${lib.readFile "${dirname}/....pub"}'' ];
 
     #wip.fs.disks.devices.primary.gptOffset = 64;
     #wip.fs.disks.devices.primary.size = "250059096K"; # 256GB Intel H10
+
+    boot.binfmt.emulatedSystems = [ "aarch64-linux" ];
 
 })  ]; }

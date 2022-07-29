@@ -75,9 +75,8 @@ in rec {
         captures = map ctxify (lib.sublist 3 (builtins.length matches) matches);
         after = ctxify (get 2);
         without = ctxify (before + after);
-    }; # (TODO: The string context stuff is actually required, but why? Shouldn't »builtins.split« propagate the context?)
+    }; # (The string context stuff is actually required, but why? Shouldn't »builtins.split« propagate the context?)
     extractLine = exp: text: extractLineAnchored exp false false text;
-    #extractLine = exp: text: let split = builtins.split "([^\n]*${exp}[^\n]*\n)" (builtins.unsafeDiscardStringContext (if (lastChar text) == "\n" then text else text + "\n")); get = builtins.elemAt split; ctxify = str: lib.addContextFrom text str; in if builtins.length split != 3 then null else rec { before = ctxify (get 0); line = ctxify (builtins.head (get 1)); captures = map ctxify (builtins.tail (get 1)); after = ctxify (get 2); without = ctxify (before + after); }; # (TODO: The string context stuff is actually required, but why? Shouldn't »builtins.split« propagate the context?)
 
     # Given a string, returns its first/last char (or last utf-8(?) byte?).
     firstChar = string: builtins.substring                                (0) 1 string;

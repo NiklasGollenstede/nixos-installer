@@ -3,6 +3,8 @@
 	"cSpell.words": [
 		"aarch64", // processor architecture
 		"acltype", // zfs
+		"acpi", // abbr
+		"ahci", // abbr
 		"ashift", // zfs
 		"askpass", // program
 		"attrset", "attrsets", // nix/abbr (attribute set)
@@ -70,6 +72,7 @@
 		"hostfwd", // cli arg
 		"hostiocache", // virtual box
 		"hostport", // cli arg
+		"hugepages", // linux
 		"inetutils", // package
 		"inodes", // plural
 		"internalcommands", // virtual box
@@ -109,6 +112,7 @@
 		"nofail", // cli arg
 		"nographic", // cli arg
 		"noheadings", // cli arg
+		"nohibernate", // kernel param
 		"nosuid", // mount option
 		"oneshot", // systemd
 		"optimise", // B/E
@@ -136,9 +140,11 @@
 		"refreservation", // zfs
 		"relatime", // mount option
 		"rpool", // zfs
+		"rprivate", // linux
 		"sata", // storage protocol
 		"sbabic", // name
 		"screenshotpng", // virtual box
+		"setsid", // program / function
 		"setuid", // cli arg
 		"sgdisk", // program
 		"showvminfo", // virtual box
@@ -149,6 +155,7 @@
 		"storageattach", // virtual box
 		"stty", // program / function
 		"sublist", // Nix
+		"swsuspend", // parameter
 		"syncoid", // program
 		"temproot", // abbr (temporary root (FS))
 		"timesync", // systemd

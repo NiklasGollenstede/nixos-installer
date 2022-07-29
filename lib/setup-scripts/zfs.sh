@@ -1,6 +1,4 @@
 
-# These functions have »pkgs.zfs« as undeclared dependency (so that they can alternatively use initramfs' »extraUtils«).
-
 ## Creates the system's ZFS pools and their datasets.
 function create-zpools { # 1: mnt
     local mnt=$1 ; local poolName ; for poolName in "@{!config.wip.fs.zfs.pools[@]}" ; do ( set -eu
@@ -22,9 +20,9 @@ function create-zpools { # 1: mnt
                 if ! is-partition-on-disks "$part" "${blockDevs[@]}" ; then echo "Partition alias $part used by zpool ${pool[name]} does not point at one of the target disks ${blockDevs[@]}" ; exit 1 ; fi
             fi
         done
-        ( set -x ; zpool create "${args[@]}" -R "$mnt" "${pool[name]}" "${vdevs[@]}" )
+        ( PATH=@{native.zfs}/bin ; set -x ; zpool create "${args[@]}" -R "$mnt" "${pool[name]}" "${vdevs[@]}" )
     ) && {
-        prepend_trap "zpool export '$poolName'" EXIT
+        prepend_trap "@{native.zfs}/bin/zpool export '$poolName'" EXIT
     } ; done &&
 
     ensure-datasets $mnt
@@ -38,6 +36,7 @@ function ensure-datasets {( set -eu # 1: mnt, 2?: filterExp
     mnt=$1 ; while [[ "$mnt" == */ ]] ; do mnt=${mnt:0:(-1)} ; done # (remove any tailing slashes)
     filterExp=${2:-'^'}
     tmpMnt=$(mktemp -d) ; trap "rmdir $tmpMnt" EXIT
+    zfs=@{native.zfs}/bin/zfs
 
     : 'Step-through is very verbose and breaks the loop, disabling it for this function' ; trap - debug
     printf '%s\0' "@{!config.wip.fs.zfs.datasets[@]}" | LC_ALL=C sort -z | while IFS= read -r -d $'\0' name ; do
@@ -49,10 +48,10 @@ function ensure-datasets {( set -eu # 1: mnt, 2?: filterExp
         explicitKeylocation=${props[keylocation]:-}
         get-zfs-crypt-props "${dataset[name]}" props cryptKey cryptRoot
 
-        if zfs get -o value -H name "${dataset[name]}" &>/dev/null ; then # dataset exists: check its properties
+        if $zfs get -o value -H name "${dataset[name]}" &>/dev/null ; then # dataset exists: check its properties
 
             if [[ ${props[mountpoint]:-} ]] ; then # don't set the current mount point again (no-op), cuz that fails if the dataset is mounted
-                current=$(zfs get -o value -H mountpoint "${dataset[name]}") ; current=${current/$mnt/}
+                current=$($zfs get -o value -H mountpoint "${dataset[name]}") ; current=${current/$mnt/}
                 if [[ ${props[mountpoint]} == "${current:-/}" ]] ; then unset props[mountpoint] ; fi
             fi
             if [[ ${props[keyformat]:-} == ephemeral ]] ; then
@@ -61,54 +60,54 @@ function ensure-datasets {( set -eu # 1: mnt, 2?: filterExp
             if [[ $explicitKeylocation ]] ; then props[keylocation]=$explicitKeylocation ; fi
             unset props[encryption] ; unset props[keyformat] # can't change these anyway
             names=$(IFS=, ; echo "${!props[*]}") ; values=$(IFS=$'\n' ; echo "${props[*]}")
-            if [[ $values != "$(zfs get -o value -H "$names" "${dataset[name]}")" ]] ; then (
+            if [[ $values != "$($zfs get -o value -H "$names" "${dataset[name]}")" ]] ; then (
                 declare -a args=( ) ; for name in "${!props[@]}" ; do args+=( "${name}=${props[$name]}" ) ; done
-                ( set -x ; zfs set "${args[@]}" "${dataset[name]}" )
+                ( PATH=@{native.zfs}/bin ; set -x ; zfs set "${args[@]}" "${dataset[name]}" )
             ) ; fi
 
-            if [[ $cryptRoot && $(zfs get -o value -H encryptionroot "${dataset[name]}") != "$cryptRoot" ]] ; then ( # inherit key from parent (which the parent would also already have done if necessary)
-                if [[ $(zfs get -o value -H keystatus "$cryptRoot") != available ]] ; then
-                    zfs load-key -L file://"$cryptKey" "$cryptRoot" ; trap "zfs unload-key $cryptRoot || true" EXIT
+            if [[ $cryptRoot && $($zfs get -o value -H encryptionroot "${dataset[name]}") != "$cryptRoot" ]] ; then ( # inherit key from parent (which the parent would also already have done if necessary)
+                if [[ $($zfs get -o value -H keystatus "$cryptRoot") != available ]] ; then
+                    $zfs load-key -L file://"$cryptKey" "$cryptRoot" ; trap "$zfs unload-key $cryptRoot || true" EXIT
                 fi
-                if [[ $(zfs get -o value -H keystatus "${dataset[name]}") != available ]] ; then
-                    zfs load-key -L file://"$cryptKey" "${dataset[name]}" # will unload with cryptRoot
+                if [[ $($zfs get -o value -H keystatus "${dataset[name]}") != available ]] ; then
+                    $zfs load-key -L file://"$cryptKey" "${dataset[name]}" # will unload with cryptRoot
                 fi
-                ( set -x ; zfs change-key -i "${dataset[name]}" )
+                ( PATH=@{native.zfs}/bin ; set -x ; zfs change-key -i "${dataset[name]}" )
             ) ; fi
 
         else ( # create dataset
             if [[ ${props[keyformat]:-} == ephemeral ]] ; then
                 props[encryption]=aes-256-gcm ; props[keyformat]=hex ; props[keylocation]=file:///dev/stdin ; explicitKeylocation=file:///dev/null
                 declare -a args=( ) ; for name in "${!props[@]}" ; do args+=( -o "${name}=${props[$name]}" ) ; done
-                </dev/urandom tr -dc 0-9a-f | head -c 64 | ( set -x ; zfs create "${args[@]}" "${dataset[name]}" )
-                zfs unload-key "${dataset[name]}"
+                </dev/urandom tr -dc 0-9a-f | head -c 64 | ( PATH=@{native.zfs}/bin ; set -x ; zfs create "${args[@]}" "${dataset[name]}" )
+                $zfs unload-key "${dataset[name]}"
             else
-                if [[ $cryptRoot && $cryptRoot != ${dataset[name]} && $(zfs get -o value -H keystatus "$cryptRoot") != available ]] ; then
-                    zfs load-key -L file://"$cryptKey" "$cryptRoot" ; trap "zfs unload-key $cryptRoot || true" EXIT
+                if [[ $cryptRoot && $cryptRoot != ${dataset[name]} && $($zfs get -o value -H keystatus "$cryptRoot") != available ]] ; then
+                    $zfs load-key -L file://"$cryptKey" "$cryptRoot" ; trap "$zfs unload-key $cryptRoot || true" EXIT
                 fi
                 declare -a args=( ) ; for name in "${!props[@]}" ; do args+=( -o "${name}=${props[$name]}" ) ; done
-                ( set -x ; zfs create "${args[@]}" "${dataset[name]}" )
+                ( PATH=@{native.zfs}/bin ; set -x ; zfs create "${args[@]}" "${dataset[name]}" )
             fi
             if [[ ${props[canmount]} != off ]] ; then (
                 mount -t zfs -o zfsutil "${dataset[name]}" $tmpMnt ; trap "umount '${dataset[name]}'" EXIT
                 chmod 000 "$tmpMnt" ; ( chown "${dataset[uid]}:${dataset[gid]}" -- "$tmpMnt" ; chmod "${dataset[mode]}" -- "$tmpMnt" )
             ) ; fi
             if [[ $explicitKeylocation && $explicitKeylocation != "${props[keylocation]:-}" ]] ; then
-                ( set -x ; zfs set keylocation="$explicitKeylocation" "${dataset[name]}" )
+                ( PATH=@{native.zfs}/bin ; set -x ; zfs set keylocation="$explicitKeylocation" "${dataset[name]}" )
             fi
-            zfs snapshot -r "${dataset[name]}"@empty
+            $zfs snapshot -r "${dataset[name]}"@empty
         ) ; fi
 
         eval 'declare -A allows='"${dataset[permissions]}"
         for who in "${!allows[@]}" ; do
             # »zfs allow $dataset« seems to be the only way to view permissions, and that is not very parsable -.-
-            ( set -x ; zfs allow -$who "${allows[$who]}" "${dataset[name]}" >&2 )
+            ( PATH=@{native.zfs}/bin ; set -x ; zfs allow -$who "${allows[$who]}" "${dataset[name]}" >&2 )
         done
     done
 
 )}
 
-## TODO
+## Given the name (»datasetPath«) of a ZFS dataset, this deducts crypto-related options from the declared keys (»config.wip.fs.keystore.keys."zfs/..."«).
 function get-zfs-crypt-props { # 1: datasetPath, 2: name_cryptProps, 3: name_cryptKey, 4: name_cryptRoot
     local hash=@{config.networking.hostName!hashString.sha256:0:8}
     local keystore=/run/keystore-$hash

@@ -80,7 +80,7 @@ in rec {
         } // (args.specialArgs or { }) // {
             inherit name; nodes = peers; # NixOPS
         };
-    in { inherit preface; } // (nixosSystem {
+    in let system = { inherit preface; } // (nixosSystem {
         system = targetSystem;
         modules = [ (
             (importWrapped inputs entryPath).module
@@ -90,7 +90,24 @@ in rec {
         } {
             # List of host names to instantiate this host config for, instead of just for the file name.
             options.${prefix}.preface.instances = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ name ]; };
-        } ({ config, ... }: {
+        } {
+            options.${prefix}.setup.scripts = lib.mkOption {
+                description = ''Attrset of bash scripts defining functions that do installation and maintenance operations. See »./setup-scripts/README.md« below for more information.'';
+                type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, config, ... }: { options = {
+                    name = lib.mkOption { description = "Name that this device is being referred to as in other places."; type = lib.types.str; default = name; readOnly = true; };
+                    path = lib.mkOption { description = "Path of file for ».text« to be loaded from."; type = lib.types.nullOr lib.types.path; default = null; };
+                    text = lib.mkOption { description = "Script text to process."; type = lib.types.str; default = builtins.readFile config.path; };
+                    order = lib.mkOption { description = "Parsing order of the scripts. Higher orders will be parsed later, and can thus overwrite earlier definitions."; type = lib.types.int; default = 1000; };
+                }; })));
+                apply = lib.filterAttrs (k: v: v != null);
+            }; config.${prefix}.setup.scripts = lib.mapAttrs (name: path: lib.mkOptionDefault { inherit path; }) (setup-scripts);
+        } ({ config, pkgs, ... }: {
+            options.${prefix}.setup.appliedScripts = lib.mkOption {
+                type = lib.types.functionTo lib.types.str; readOnly = true;
+                default = context: substituteImplicit { inherit pkgs; scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues config.${prefix}.setup.scripts); context = system // context; }; # inherit (builtins) trace;
+            };
+
+        }) ({ config, ... }: {
 
             imports = modules; nixpkgs = { inherit overlays; }
             // (if buildSystem != targetSystem then { localSystem.system = buildSystem; crossSystem.system = targetSystem; } else { system = targetSystem; });
@@ -103,7 +120,7 @@ in rec {
 
         }) ];
         specialArgs = specialArgs; # explicitly passing »pkgs« here breaks »config.nixpkgs.overlays«!
-    });
+    }); in system;
 
     # Given either a list (or attr set) of »files« (paths to ».nix« or ».nix.md« files for dirs with »default.nix« files in them) or a »dir« path (and optionally a list of file names to »exclude« from it), this builds the NixOS configuration for each host (per file) in the context of all configs provided.
     # If »files« is an attr set, exactly one host with the attribute's name as hostname is built for each attribute. Otherwise the default is to build for one host per configuration file, named as the file name without extension or the sub-directory name. Setting »${prefix}.preface.instances« can override this to build the same configuration for those multiple names instead (the specific »name« is passed as additional »specialArgs« to the modules and can thus be used to adjust the config per instance).
@@ -137,10 +154,8 @@ in rec {
     mkSystemsFlake = args@{
         # An attrset of imported Nix flakes, for example the argument(s) passed to the flake »outputs« function. All other arguments are optional (and have reasonable defaults) if this is provided and contains »self« and the standard »nixpkgs«. This is also the second argument passed to the individual host's top level config files.
         inputs ? { },
-        # Root path of the NixOS configuration. »./.« in the »flake.nix«
-        configPath ? inputs.self.outPath,
         # Arguments »{ files, dir, exclude, }« to »mkNixosConfigurations«, see there for details. May also be a list of those attrsets, in which case those multiple sets of hosts will be built separately by »mkNixosConfigurations«, allowing for separate sets of »peers« passed to »mkNixosConfiguration«. Each call will receive all other arguments, and the resulting sets of hosts will be merged.
-        systems ? ({ dir = "${configPath}/hosts"; exclude = [ ]; }),
+        systems ? ({ dir = "${inputs.self}/hosts"; exclude = [ ]; }),
         # List of overlays to set as »config.nixpkgs.overlays«. Defaults to the ».overlay(s)« of all »overlayInputs«/»inputs« (incl. »inputs.self«).
         overlays ? (builtins.concatLists (map (input: if input?overlay then [ input.overlay ] else if input?overlays then builtins.attrValues input.overlays else [ ]) (builtins.attrValues overlayInputs))),
         # (Subset of) »inputs« that »overlays« will be used from. Example: »{ inherit (inputs) self flakeA flakeB; }«.
@@ -151,31 +166,35 @@ in rec {
         moduleInputs ? (builtins.removeAttrs inputs [ "nixpkgs" ]),
         # Additional arguments passed to each module evaluated for the host config (if that module is defined as a function).
         specialArgs ? { },
-        # Optional list of bash scripts defining functions that do installation and maintenance operations. See »./setup-scripts/README.md« below for more information. To define additional functions (or overwrite individual default ones), use »(lib.attrValues lib.wip.setup-scripts) ++ [ ]« and place any extra scripts in the array.
-        scripts ? (lib.attrValues setup-scripts),
         # The »nixosSystem« function defined in »<nixpkgs>/flake.nix«, or equivalent.
         nixosSystem ? inputs.nixpkgs.lib.nixosSystem,
         # If provided, then cross compilation is enabled for all hosts whose target architecture is different from this. Since cross compilation currently fails for (some stuff in) NixOS, better don't set »localSystem«. Without it, building for other platforms works fine (just slowly) if »boot.binfmt.emulatedSystems« on the building system is configured for the respective target(s).
         localSystem ? null,
     ... }: let
-        otherArgs = (builtins.removeAttrs args [ "systems" ]) // { inherit systems overlays modules specialArgs scripts inputs configPath nixosSystem localSystem; };
+        otherArgs = (builtins.removeAttrs args [ "systems" ]) // { inherit inputs systems overlays modules specialArgs nixosSystem localSystem; };
         nixosConfigurations = if builtins.isList systems then mergeAttrsUnique (map (systems: mkNixosConfigurations (otherArgs // systems)) systems) else mkNixosConfigurations (otherArgs // systems);
     in let outputs = {
         inherit nixosConfigurations;
     } // (forEachSystem [ "aarch64-linux" "x86_64-linux" ] (localSystem: let
         pkgs = (import inputs.nixpkgs { inherit overlays; system = localSystem; });
-        nix = if lib.versionOlder pkgs.nix.version "2.4" then pkgs.nix_2_4 else pkgs.nix;
-        nix_wrapped = pkgs.writeShellScriptBin "nix" ''exec ${nix}/bin/nix --extra-experimental-features nix-command "$@"'';
-    in (if scripts == [ ] || scripts == null then { } else {
+        tools = lib.unique (map (p: p.outPath) (lib.filter lib.isDerivation pkgs.stdenv.allowedRequisites));
+        PATH = lib.concatMapStringsSep ":" (pkg: "${pkg}/bin") tools;
+    in {
 
-        # E.g.: $ nix run .#$target -- install-system /tmp/system-$target.img
-        # E.g.: $ nix run /etc/nixos/#$(hostname) -- sudo
-        # If the first argument (after  »--«) is »sudo«, then the program will re-execute itself with sudo as root (minus that »sudo« argument).
-        # If the first/next argument is »bash«, it will execute an interactive shell with the variables and functions sourced (largely equivalent to »nix develop .#$host«).
-        apps = lib.mapAttrs (name: system: let
-            appliedScripts = substituteImplicit { inherit pkgs scripts; context = system // { native = pkgs; }; };
-
-        in { type = "app"; program = "${pkgs.writeShellScript "scripts-${name}" ''
+        # Do per-host setup and maintenance things:
+        # SYNOPSIS: nix run REPO#HOST [-- [sudo] [bash | -x [-c SCRIPT | FUNC ...ARGS]]]
+        # Where »REPO« is the path to a flake repo using »mkSystemsFlake« for it's »apps« output, and »HOST« is the name of a host it defines.
+        # If the first argument (after  »--«) is »sudo«, then the program will re-execute itself as root using sudo (minus that »sudo« argument).
+        # If the (then) first argument is »bash«, or if there are no (more) arguments, it will execute an interactive shell with the variables and functions sourced (largely equivalent to »nix develop .#$host«).
+        # »-x« as next argument runs »set -x«. If the next argument is »-c«, it will evaluate (only) the following argument as bash script, otherwise the argument will be called as command, with all following arguments as arguments tot he command.
+        # Examples:
+        # Install the host named »$target« to the image file »/tmp/system-$target.img«:
+        # $ nix run .#$target -- install-system /tmp/system-$target.img
+        # Run an interactive bash session with the setup functions in the context of the current host:
+        # $ nix run /etc/nixos/#$(hostname)
+        # Run an root session in the context of a different host (useful if Nix is not installed for root on the current host):
+        # $ nix run /etc/nixos/#other-host -- sudo
+        apps = lib.mapAttrs (name: system: { type = "app"; program = "${pkgs.writeShellScript "scripts-${name}" ''
 
             # if first arg is »sudo«, re-execute this script with sudo (as root)
             if [[ $1 == sudo ]] ; then shift ; exec sudo --preserve-env=SSH_AUTH_SOCK -- "$0" "$@" ; fi
@@ -195,48 +214,41 @@ in rec {
             fi
 
             # provide installer tools (native to localSystem, not targetSystem)
-            hostPath=$PATH
-            PATH=${pkgs.nixos-install-tools}/bin:${nix_wrapped}/bin:${nix}/bin:${pkgs.util-linux}/bin:${pkgs.coreutils}/bin:${pkgs.gnused}/bin:${pkgs.gnugrep}/bin:${pkgs.findutils}/bin:${pkgs.tree}/bin:${pkgs.gawk}/bin:${pkgs.zfs}/bin
+            hostPath=$PATH ; PATH=${PATH}
 
-            ${appliedScripts}
+            ${system.config.${prefix}.setup.appliedScripts { native = pkgs; }}
 
             # either call »$1« with the remaining parameters as arguments, or if »$1« is »-c« eval »$2«.
             if [[ ''${1:-} == -x ]] ; then shift ; set -x ; fi
             if [[ ''${1:-} == -c ]] ; then eval "$2" ; else "$@" ; fi
         ''}"; }) nixosConfigurations;
 
-
         # E.g.: $ nix develop /etc/nixos/#$(hostname)
-        # ... and then call any of the functions in ./utils/functions.sh (in the context of »$(hostname)«, where applicable).
+        # ... and then call any of the functions in ./utils/setup-scripts/ (in the context of »$(hostname)«, where applicable).
         # To get an equivalent root shell: $ nix run /etc/nixos/#functions-$(hostname) -- sudo bash
-        devShells = lib.mapAttrs (name: system: pkgs.mkShell (let
-            appliedScripts = substituteImplicit { inherit pkgs scripts; context = system // { native = pkgs; }; };
-        in {
-            nativeBuildInputs = [ pkgs.nixos-install-tools nix_wrapped pkgs.nix ];
+        devShells = lib.mapAttrs (name: system: pkgs.mkShell {
+            nativeBuildInputs = tools ++ [ pkgs.nixos-install-tools ];
             shellHook = ''
-                ${appliedScripts}
+                ${system.config.${prefix}.setup.appliedScripts { native = pkgs; }}
                 # add active »hostName« to shell prompt
                 PS1=''${PS1/\\$/\\[\\e[93m\\](${name})\\[\\e[97m\\]\\$}
             '';
-        })) nixosConfigurations;
-
-    }) // {
+        }) nixosConfigurations;
 
         # dummy that just pulls in all system builds
         packages.all-systems = pkgs.runCommandLocal "all-systems" { } ''
-            mkdir -p $out/systems
-            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: (
-                "ln -sT ${system.config.system.build.toplevel} $out/systems/${name}"
-            )) nixosConfigurations)}
-            ${lib.optionalString (scripts != [ ]) ''
+            ${''
+                mkdir -p $out/systems
+                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${system.config.system.build.toplevel} $out/systems/${name}") nixosConfigurations)}
+            ''}
+            ${''
                 mkdir -p $out/scripts
-                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: _: "ln -sT ${outputs.apps.${localSystem}.${name}.program} $out/scripts/${name}") nixosConfigurations)}
+                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${outputs.apps.${localSystem}.${name}.program} $out/scripts/${name}") nixosConfigurations)}
             ''}
             ${lib.optionalString (inputs != { }) ''
                 mkdir -p $out/inputs
                 ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: { outPath, ... }: "ln -sT ${outPath} $out/inputs/${name}") inputs)}
             ''}
-            ${lib.optionalString (configPath != null) "ln -sT ${configPath} $out/config"}
         '';
 
     })); in outputs;

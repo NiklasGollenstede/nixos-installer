@@ -3,16 +3,15 @@
 
 This is a library of bash functions, mostly for NixOS system installation.
 
-The (paths to these) scripts are meant to be passed in the `scripts` argument to [`mkSystemsFlake`](../flakes.nix#mkSystemsFlake) (see [`flake.nix`](../../flake.nix) for an example), which makes their functions available in the per-host [`devShells`/`apps`](../flakes.nix#mkSystemsFlake).
+The (paths to these) scripts are meant to be (and by default are) set as `config.wip.setup.scripts.*` (see [`../flakes.nix`](../flakes.nix)), which makes their functions available in the per-host [`devShells`/`apps`](../flakes.nix#mkSystemsFlake).
 Host-specific nix variables are available to the bash functions as `@{...}` through [`substituteImplicit`](../scripts.nix#substituteImplicit) with the respective host as root context.
 Any script passed later in `scripts` can overwrite the functions of these (earlier) default scripts.
 
-With the functions from here, [a simple four-liner](../install.sh) is enough to do a completely automated NixOS installation:
+With the functions from here, [a simple three-liner](../install.sh) is enough to do a completely automated NixOS installation:
 ```bash
 function install-system {( set -eu # 1: diskPaths
     prepare-installer "$@"
     do-disk-setup "${argv[0]}"
-    init-or-restore-system
     install-system-to $mnt
 )}
 ```

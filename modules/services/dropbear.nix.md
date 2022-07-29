@@ -33,7 +33,7 @@ in {
         ];
 
     in lib.mkIf cfg.enable (lib.mkMerge [ ({
-        environment.systemPackages = (with pkgs; [ dropbear ]);
+        environment.systemPackages = [ pkgs.dropbear ];
 
         networking.firewall.allowedTCPPorts = [ 22 ];
 

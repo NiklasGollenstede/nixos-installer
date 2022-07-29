@@ -28,7 +28,7 @@ The modules are inactive by default, and are, where possible, designed to be ind
 Any `wip.preface.*` options have to be set in the first sub-module in these files (`## Hardware` section). \
 This flake only defines a single [`example`](./hosts/example.nix.md) host meant to demonstrate how other flakes can use the (NixOS) flake library framework.
 
-[`example/`](./example/) contains an example of adjusting the [installation](./example/install.sh.md) script for the hosts and this flake's [default config](./example/defaultConfig/) (see [Namespacing](#namespacing-in-nixos)).
+[`example/`](./example/) contains an example of adjusting the [installation](./example/install.sh.md) script for the hosts, and this flake's [default config](./example/defaultConfig/) (see [Namespacing](#namespacing-in-nixos)).
 
 
 ## Namespacing in NixOS
@@ -81,7 +81,6 @@ Technically, Nix (and most other code files) don't need to have any specific fil
 pkgs = import <nixpkgs> { }
 :lf . # load CWD's flake's outputs as variables
 pkgs = nixosConfigurations.target.pkgs
-lib = lib { inherit pkgs; inherit (pkgs) lib; }
 ```
 
 

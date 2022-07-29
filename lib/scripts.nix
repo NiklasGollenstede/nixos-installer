@@ -23,7 +23,7 @@ in rec {
     # Bash does not support any nested data structures. Lists or attrsets in within lists or attrsets are therefore (recursively) encoded and escaped as strings, such that calling »eval« on them is safe if (but only if) they are known to be encoded from nested lists/attrsets. Example: »eval 'declare -A fs='"@{config.fileSystems['/']}" ; root=${fs[device]}«.
     # Any other value (functions), and things that »builtins.toString« doesn't like, will throw here.
     substituteImplicit = args@{
-        scripts, # List of paths to scripts to process and then source in the returned script. Can also be an attrset, of which (only) the values will be used, and each script may also be an attrset »{ name; text; }« instead of a path.
+        scripts, # List of paths to scripts to process and then source in the returned script. Each script may also be an attrset »{ name; text; }« instead of a path.
         context, # The root attrset for the resolution of substitutions.
         pkgs, # Instantiated »nixpkgs«, as fallback location for helpers, and to grab »writeScript« etc from.
         helpers ? { }, # Attrset of (highest priority) helper functions.
@@ -32,7 +32,7 @@ in rec {
         scripts = map (source: rec {
             text = if builtins.isAttrs source then source.text else builtins.readFile source; name = if builtins.isAttrs source then source.name else builtins.baseNameOf source;
             parsed = builtins.split ''@\{([#!]?)([a-zA-Z][a-zA-Z0-9_.-]*[a-zA-Z0-9](![a-zA-Z][a-zA-Z0-9_.-]*[a-zA-Z0-9])?)([:*@\[#%/^,\}])'' text; # (first part of a bash parameter expansion, with »@« instead of »$«)
-        }) (if builtins.isAttrs args.scripts then builtins.attrValues args.scripts else args.scripts);
+        }) args.scripts;
         decls = lib.unique (map (match: builtins.elemAt match 1) (builtins.filter builtins.isList (builtins.concatMap (script: script.parsed) scripts)));
         vars = pkgs.writeText "vars" ("#!/usr/bin/env bash\n" + (lib.concatMapStringsSep "\n" (decl: let
             call = let split = builtins.split "!" decl; in if (builtins.length split) == 1 then null else builtins.elemAt split 2;

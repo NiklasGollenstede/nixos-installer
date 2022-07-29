@@ -15,7 +15,6 @@ See its [README](../lib/setup-scripts/README.md) for more documentation.
 function install-system {( set -eu # 1: blockDevs
     prepare-installer "$@"
     do-disk-setup "${argv[0]}"
-    init-or-restore-system
     install-system-to $mnt
 )}
 

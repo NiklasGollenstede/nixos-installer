@@ -7,11 +7,10 @@
 function install-system {( set -eu # 1: blockDev
     prepare-installer "$@"
     do-disk-setup "${argv[0]}"
-    init-or-restore-system
     install-system-to $mnt
 )}
 
-## Does very simple argument passing and validation, performs some sanity checks, includes a hack to make installation work when nix isn't installed for root, and enables debugging (if requested).
+## Does very simple argument paring and validation, performs some sanity checks, includes a hack to make installation work when nix isn't installed for root, and enables debugging (if requested).
 function prepare-installer { # ...
 
     generic-arg-parse "$@"
@@ -30,32 +29,21 @@ function prepare-installer { # ...
         if [[ -e "/dev/mapper/$luksName" ]] ; then echo "LUKS device mapping »$luksName« is already open. Close it before running the installer." ; exit 1 ; fi
     done
     local poolName ; for poolName in "@{!config.wip.fs.zfs.pools[@]}" ; do
-        if zfs get -o value -H name "$poolName" &>/dev/null ; then echo "ZFS pool »$poolName« is already imported. Export the pool before running the installer." ; exit 1 ; fi
+        if @{native.zfs}/bin/zfs get -o value -H name "$poolName" &>/dev/null ; then echo "ZFS pool »$poolName« is already imported. Export the pool before running the installer." ; exit 1 ; fi
     done
 
     if [[ ${SUDO_USER:-} ]] ; then function nix {( set +x ; declare -a args=("$@") ; PATH=$hostPath su - "$SUDO_USER" -c "$(declare -p args)"' ; nix "${args[@]}"' )} ; fi
 
     if [[ ${args[debug]:-} ]] ; then set +e ; set -E ; trap 'code= ; cat 2>/dev/null || true ; @{native.bashInteractive}/bin/bash --init-file @{config.environment.etc.bashrc.source} || code=$? ; if [[ $code ]] ; then exit $code ; fi' ERR ; fi # On error, instead of exiting straight away, open a shell to allow diagnosing/fixing the issue. Only exit if that shell reports failure (e.g. CtrlC + CtrlD). Unfortunately, the exiting has to be repeated for level of each nested sub-shells. The cat eats anything lined up on stdin, which would otherwise be run in the shell (TODO: but it blocks if there is nothing on stdin, requiring Ctrl+D to be pressed).
 
-}
+    export PATH=$PATH:@{native.util-linux}/bin # Doing a system installation requires a lot of stuff from »util-linux«. This should probably be moved into the individual functions that actually use the tools ...
 
-## Depending on the presence or absence of the »--restore« CLI flag, either runs the system's initialization or restore commands.
-#  The initialization commands are expected to create files that can't be stored in the (host's or target system's) nix store (i.e. secrets).
-#  The restore commands are expected to pull in a backup of the systems secrets and state from somewhere, and need to acknowledge that something happened by running »restore-supported-callback«.
-function init-or-restore-system {( set -eu # (void)
-    if [[ ! ${args[restore]:-} ]] ; then
-        run-hook-script 'System Initialization' @{config.wip.fs.disks.initSystemCommands!writeText.initSystemCommands} # TODO: Do this later inside the chroot?
-        return # usually, this would be it ...
-    fi
-    requiresRestoration=$(mktemp) ; trap "rm -f '$requiresRestoration'" EXIT ; function restore-supported-callback {( rm -f "$requiresRestoration" )}
-    run-hook-script 'System Restoration' @{config.wip.fs.disks.restoreSystemCommands!writeText.restoreSystemCommands}
-    if [[ -e $requiresRestoration ]] ; then echo 'The »restoreSystemCommands« did not call »restore-supported-callback« to mark backup restoration as supported for this system. Assuming incomplete configuration.' 1>&2 ; exit 1 ; fi
-)}
+}
 
 ## The default command that will activate the system and install the bootloader. In a separate function to make it easy to replace.
 function nixos-install-cmd {( set -eu # 1: mnt, 2: topLevel
     # »nixos-install« by default does some stateful things (see the »--no« options below), builds and copies the system config (but that's already done), and then calls »NIXOS_INSTALL_BOOTLOADER=1 nixos-enter -- $topLevel/bin/switch-to-configuration boot«, which is essentially the same as »NIXOS_INSTALL_BOOTLOADER=1 nixos-enter -- @{config.system.build.installBootLoader} $targetSystem«, i.e. the side effects of »nixos-enter« and then calling the bootloader-installer.
-    PATH=@{config.systemd.package}/bin:$PATH TMPDIR=/tmp LC_ALL=C nixos-install --system "$2" --no-root-passwd --no-channel-copy --root "$1" #--debug
+    PATH=@{config.systemd.package}/bin:@{native.nix}/bin:$PATH TMPDIR=/tmp LC_ALL=C @{native.nixos-install-tools}/bin/nixos-install --system "$2" --no-root-passwd --no-channel-copy --root "$1" #--debug
 )}
 
 ## Copies the system's dependencies to the disks mounted at »$mnt« and installs the bootloader. If »$inspect« is set, a root shell will be opened in »$mnt« afterwards.
@@ -65,14 +53,8 @@ function install-system-to {( set -eu # 1: mnt, 2?: topLevel
     targetSystem=@{config.system.build.toplevel}
     trap - EXIT # start with empty traps for sub-shell
 
-    # Copy system closure to new nix store:
-    mkdir -p -m 755 $mnt/nix/var/nix ; mkdir -p -m 1775 $mnt/nix/store
-    if [[ ${SUDO_USER:-} ]] ; then chown -R $SUDO_USER: $mnt/nix/store $mnt/nix/var ; fi
-    ( set -x ; time nix copy --no-check-sigs --to $mnt ${topLevel:-$targetSystem} ) ; rm -rf $mnt/nix/var/nix/gcroots
-    # TODO: if the target has @{config.nix.autoOptimiseStore} and the host doesn't (there is no .links dir?), optimize now
-    if [[ ${SUDO_USER:-} ]] ; then chown -R root:root $mnt/nix $mnt/nix/var ; chown :30000 $mnt/nix/store ; fi
-
     # Link/create files that some tooling expects:
+    mkdir -p -m 755 $mnt/nix/var/nix ; mkdir -p -m 1775 $mnt/nix/store
     mkdir -p $mnt/etc $mnt/run ; mkdir -p -m 1777 $mnt/tmp
     mount tmpfs -t tmpfs $mnt/run ; prepend_trap "umount -l $mnt/run" EXIT # If there isn't anything mounted here, »activate« will mount a tmpfs (inside »nixos-enter«'s private mount namespace). That would hide the additions below.
     [[ -e $mnt/etc/NIXOS ]] || touch $mnt/etc/NIXOS # for »switch-to-configuration«
@@ -80,19 +62,32 @@ function install-system-to {( set -eu # 1: mnt, 2?: topLevel
     ln -sT $(realpath $targetSystem) $mnt/run/current-system
     #mkdir -p /nix/var/nix/db # »nixos-containers« requires this but nothing creates it before nix is used. BUT »nixos-enter« screams: »/nix/var/nix/db exists and is not a regular file.«
 
+    # If the system configuration is supposed to be somewhere on the system, might as well initialize that:
+    if [[ @{config.environment.etc.nixos.source:-} && @{config.environment.etc.nixos.source} != /nix/store/* && @{config.environment.etc.nixos.source} != /run/current-system/config && ! -e $mnt/@{config.environment.etc.nixos.source} && -e $targetSystem/config ]] ; then
+        mkdir -p -- $mnt/@{config.environment.etc.nixos.source} ; cp -at $mnt/@{config.environment.etc.nixos.source} -- $targetSystem/config/*
+        chown -R 0:0 $mnt/@{config.environment.etc.nixos.source} ; chmod -R u+w $mnt/@{config.environment.etc.nixos.source}
+    fi
+
     # Set this as the initial system generation:
     mkdir -p -m 755 $mnt/nix/var/nix/profiles ; ln -sT $(realpath $targetSystem) $mnt/nix/var/nix/profiles/system-1-link ; ln -sT system-1-link $mnt/nix/var/nix/profiles/system
 
     # Support cross architecture installation (not sure if this is actually required)
     if [[ $(cat /run/current-system/system 2>/dev/null || echo "x86_64-linux") != "@{config.wip.preface.hardware}"-linux ]] ; then
-        mkdir -p $mnt/run/binfmt ; cp -a {,$mnt}/run/binfmt/"@{config.wip.preface.hardware}"-linux || true
+        mkdir -p $mnt/run/binfmt ; [[ ! -e /run/binfmt/"@{config.wip.preface.hardware}"-linux ]] || cp -a {,$mnt}/run/binfmt/"@{config.wip.preface.hardware}"-linux
         # Ubuntu (by default) expects the "interpreter" at »/usr/bin/qemu-@{config.wip.preface.hardware}-static«.
     fi
 
+    # Copy system closure to new nix store:
+    if [[ ${SUDO_USER:-} ]] ; then chown -R $SUDO_USER: $mnt/nix/store $mnt/nix/var ; fi
+    ( set -x ; time nix --extra-experimental-features nix-command copy --no-check-sigs --to $mnt ${topLevel:-$targetSystem} ) ; rm -rf $mnt/nix/var/nix/gcroots
+    # TODO: if the target has @{config.nix.autoOptimiseStore} and the host doesn't (there is no .links dir?), optimize now
+    if [[ ${SUDO_USER:-} ]] ; then chown -R root:root $mnt/nix $mnt/nix/var ; chown :30000 $mnt/nix/store ; fi
+
     # Run the main install command (primarily for the bootloader):
-    mount -o bind,ro /nix/store $mnt/nix/store ; prepend_trap '! mountpoint -q $mnt/nix/store || umount -l $mnt/nix/store' EXIT # all the things required to _run_ the system are copied, but (may) need some more things to initially install it
+    mount -o bind,ro /nix/store $mnt/nix/store ; prepend_trap '! mountpoint -q $mnt/nix/store || umount -l $mnt/nix/store' EXIT # all the things required to _run_ the system are copied, but (may) need some more things to initially install it and/or enter the chroot (like qemu, see above)
+    run-hook-script 'Pre Installation' @{config.wip.fs.disks.preInstallCommands!writeText.preInstallCommands}
     code=0 ; nixos-install-cmd $mnt "${topLevel:-$targetSystem}" || code=$?
-    #umount -l $mnt/nix/store # »nixos-enter« below still needs the bind mount, if installing cross-arch
+    run-hook-script 'post Installation' @{config.wip.fs.disks.postInstallCommands!writeText.postInstallCommands}
 
     # Done!
     if [[ ! ${args[no-inspect]:-} ]] ; then
@@ -101,7 +96,7 @@ function install-system-to {( set -eu # 1: mnt, 2?: topLevel
         else
             ( set +x ; echo "Installation done! This shell is in a chroot in the mounted system for inspection. Exiting the shell will unmount the system." )
         fi
-        PATH=@{config.systemd.package}/bin:$PATH nixos-enter --root $mnt
+        PATH=@{config.systemd.package}/bin:$PATH @{native.nixos-install-tools}/bin/nixos-enter --root $mnt # TODO: construct path as it would be at login
         #( cd $mnt ; mnt=$mnt @{native.bashInteractive}/bin/bash --init-file @{config.environment.etc.bashrc.source} )
     elif (( code != 0 )) ; then
         exit $code

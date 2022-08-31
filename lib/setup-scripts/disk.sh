@@ -36,7 +36,8 @@ function do-disk-setup { # 1: diskPaths
 ## Partitions the »diskPaths« instances of all »config.wip.fs.disks.devices« to ensure that all specified »config.wip.fs.disks.partitions« exist.
 #  Parses »diskPaths«, creates and loop-mounts images for non-/dev/ paths, and tries to abort if any partition already exists on the host.
 function partition-disks { { # 1: diskPaths
-    beQuiet=/dev/null ; if [[ ${args[debug]:-} ]] ; then beQuiet=/dev/stdout ; fi
+    beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
+    beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
     declare -g -A blockDevs=( ) # this ends up in the caller's scope
     local path ; for path in ${1//:/ } ; do
         local name=${path/=*/} ; if [[ $name != "$path" ]] ; then path=${path/$name=/} ; else name=primary ; fi
@@ -75,26 +76,28 @@ function partition-disks { { # 1: diskPaths
             if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev's serial ($actual) does not match the serial (${disk[serial]}) declared for ${disk[name]}" ; exit 1 ; fi
         fi
         # can (and probably should) restore the backup:
-        ( PATH=@{native.gptfdisk}/bin ; set -x ; sgdisk --zap-all --load-backup=@{config.wip.fs.disks.partitioning}/"${disk[name]}".backup ${disk[allowLarger]:+--move-second-header} "${blockDevs[${disk[name]}]}" >$beQuiet )
+        ( PATH=@{native.gptfdisk}/bin ; ${_set_x:-:} ; sgdisk --zap-all --load-backup=@{config.wip.fs.disks.partitioning}/"${disk[name]}".backup ${disk[allowLarger]:+--move-second-header} "${blockDevs[${disk[name]}]}" >$beLoud 2>$beSilent )
         #partition-disk "${disk[name]}" "${blockDevs[${disk[name]}]}"
     done
-    @{native.parted}/bin/partprobe "${blockDevs[@]}"
+    @{native.parted}/bin/partprobe "${blockDevs[@]}" &>$beLoud
     @{native.systemd}/bin/udevadm settle -t 15 || true # sometimes partitions aren't quite made available yet
 
     # ensure that filesystem creation does not complain about the devices already being occupied by a previous filesystem
-    wipefs --all "@{config.wip.fs.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" >$beQuiet
+    wipefs --all "@{config.wip.fs.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" >$beLoud 2>$beSilent
 )}
 
 ## Given a declared disk device's »name« and a path to an actual »blockDev« (or image) file, partitions the device as declared in the config.
 function partition-disk {( set -eu # 1: name, 2: blockDev, 3?: devSize
     name=$1 ; blockDev=$2
+    beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
+    beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
     eval 'declare -A disk='"@{config.wip.fs.disks.devices[$name]}"
     devSize=${3:-$( @{native.util-linux}/bin/blockdev --getsize64 "$blockDev" )}
 
     declare -a sgdisk=( --zap-all ) # delete existing part tables
     if [[ ${disk[gptOffset]} != 0 ]] ; then
         sgdisk+=( --move-main-table=$(( 2 + ${disk[gptOffset]} )) ) # this is incorrectly documented as --adjust-main-table in the man pages (at least versions 1.05 to 1.09 incl)
-        sgdisk+=( --move-backup-table=$(( devSize/512 - 1 - 32 - ${disk[gptOffset]} )) )
+        sgdisk+=( --move-backup-table=$(( devSize/${disk[sectorSize]} - 1 - 32 - ${disk[gptOffset]} )) )
     fi
     sgdisk+=( --disk-guid="${disk[guid]}" )
 
@@ -117,7 +120,7 @@ function partition-disk {( set -eu # 1: name, 2: blockDev, 3?: devSize
         sgdisk+=( --hybrid "${disk[mbrParts]}" ) # --hybrid: create MBR in addition to GPT; ${disk[mbrParts]}: make these GPT part 1 MBR parts 2[3[4]]
     fi
 
-    ( PATH=@{native.gptfdisk}/bin ; set -x ; sgdisk "${sgdisk[@]}" "$blockDev" >$beQuiet ) # running all at once is much faster
+    ( PATH=@{native.gptfdisk}/bin ; ${_set_x:-:} ; sgdisk "${sgdisk[@]}" "$blockDev" >$beLoud ) # running all at once is much faster
 
     if [[ ${disk[mbrParts]:-} ]] ; then
         printf "
@@ -126,7 +129,7 @@ function partition-disk {( set -eu # 1: name, 2: blockDev, 3?: devSize
 
             # move the selected »mbrParts« to slots 1[2[3]] instead of 2[3[4]] (by re-creating part1 in the last sector, then sorting)
             n;p;1                            # new ; primary ; part1
-            $(( ($devSize/512) - 1))         # start (size 1sec)
+            $(( ($devSize/${disk[sectorSize]}) - 1)) # start (size 1sec)
             x;f;r                            # expert mode ; fix order ; return
             d;$(( (${#disk[mbrParts]} + 1) / 2 + 1 )) # delete ; part(last)
 
@@ -137,7 +140,7 @@ function partition-disk {( set -eu # 1: name, 2: blockDev, 3?: devSize
 
             ${disk[extraFDiskCommands]}
             p;w;q                            # print ; write ; quit
-        " | @{native.gnused}/bin/sed -E 's/^ *| *(#.*)?$//g' | @{native.gnused}/bin/sed -E 's/\n\n+| *; */\n/g' | tee >((echo -n '++ ' ; tr $'\n' '|' ; echo) 1>&2) | ( PATH=@{native.util-linux}/bin ; set -x ; fdisk "$blockDev" &>$beQuiet )
+        " | @{native.gnused}/bin/sed -E 's/^ *| *(#.*)?$//g' | @{native.gnused}/bin/sed -E 's/\n\n+| *; */\n/g' | tee >((echo -n '++ ' ; tr $'\n' '|' ; echo) 1>&2) | ( PATH=@{native.util-linux}/bin ; ${_set_x:-:} ; fdisk "$blockDev" &>$beLoud )
     fi
 )}
 
@@ -154,7 +157,8 @@ function is-partition-on-disks {( set -eu # 1: partition, ...: blockDevs
 
 ## For each filesystem in »config.fileSystems« whose ».device« is in »/dev/disk/by-partlabel/«, this creates the specified file system on that partition.
 function format-partitions {( set -eu
-    beQuiet=/dev/null ; if [[ ${args[debug]:-} ]] ; then beQuiet=/dev/stdout ; fi
+    beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
+    beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
     for fsDecl in "@{config.fileSystems[@]}" ; do
         eval 'declare -A fs='"$fsDecl"
         if [[ ${fs[device]} == /dev/disk/by-partlabel/* ]] ; then
@@ -162,7 +166,7 @@ function format-partitions {( set -eu
         elif [[ ${fs[device]} == /dev/mapper/* ]] ; then
             if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${fs[device]/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device ${fs[device]} used by mount ${fs[mountPoint]} does not point at one of the device mappings ${!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ; exit 1 ; fi
         else continue ; fi
-        ( PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH ; set -x ; mkfs.${fs[fsType]} ${fs[formatOptions]} "${fs[device]}" >$beQuiet )
+        ( PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH ; ${_set_x:-:} ; mkfs.${fs[fsType]} ${fs[formatOptions]} "${fs[device]}" >$beLoud 2>$beSilent )
         @{native.parted}/bin/partprobe "${fs[device]}" || true
     done
     for swapDev in "@{config.swapDevices!catAttrs.device[@]}" ; do
@@ -171,7 +175,7 @@ function format-partitions {( set -eu
         elif [[ $swapDev == /dev/mapper/* ]] ; then
             if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${swapDev/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device $swapDev used for SWAP does not point at one of the device mappings @{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ; exit 1 ; fi
         else continue ; fi
-        ( set -x ; mkswap "$swapDev" >$beQuiet )
+        ( set -x ; mkswap "$swapDev" >$beLoud 2>$beSilent )
     done
 )}
 

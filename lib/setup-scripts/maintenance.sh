@@ -74,10 +74,11 @@ function run-qemu {( set -eu # 1: diskImages
     done
 
     if [[ @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots something much like a classic BIOS?
-        #qemu+=( -bios @{pkgs.OVMF.fd}/FV/OVMF.fd ) # This works, but is a legacy fallback that stores the EFI vars in /NvVars on the EFI partition (which is really bad).
-        qemu+=( -drive file=@{pkgs.OVMF.fd}/FV/OVMF_CODE.fd,if=pflash,format=raw,unit=0,readonly=on )
-        qemu+=( -drive file=/tmp/qemu-@{config.networking.hostName}-VARS.fd,if=pflash,format=raw,unit=1 )
-        if [[ ! -e /tmp/qemu-@{config.networking.hostName}-VARS.fd ]] ; then cat @{pkgs.OVMF.fd}/FV/OVMF_VARS.fd > /tmp/qemu-@{config.networking.hostName}-VARS.fd ; fi
+        ovmf=$( @{native.nixVersions.nix_2_9}/bin/nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths @{inputs.nixpkgs}'#'legacyPackages.@{pkgs.system}.OVMF.fd )
+        #qemu+=( -bios ${ovmf}/FV/OVMF.fd ) # This works, but is a legacy fallback that stores the EFI vars in /NvVars on the EFI partition (which is really bad).
+        qemu+=( -drive file=${ovmf}/FV/OVMF_CODE.fd,if=pflash,format=raw,unit=0,readonly=on )
+        qemu+=( -drive file="${args[efi-vars]:-/tmp/qemu-@{config.networking.hostName}-VARS.fd}",if=pflash,format=raw,unit=1 )
+        if [[ ! -e "${args[efi-vars]:-/tmp/qemu-@{config.networking.hostName}-VARS.fd}" ]] ; then cat ${ovmf}/FV/OVMF_VARS.fd > "${args[efi-vars]:-/tmp/qemu-@{config.networking.hostName}-VARS.fd}" ; fi
         # https://lists.gnu.org/archive/html/qemu-discuss/2018-04/msg00045.html
     fi
     if [[ @{config.wip.preface.hardware} == aarch64 ]] ; then
@@ -87,7 +88,7 @@ function run-qemu {( set -eu # 1: diskImages
     # Add »config.boot.kernelParams = [ "console=tty1" "console=ttyS0" ]« to log to serial (»ttyS0«) and/or the display (»tty1«), preferring the last »console« option for the initrd shell (if enabled and requested).
     logSerial= ; if [[ ' '"@{config.boot.kernelParams[@]}"' ' == *' console=ttyS0'@( |,)* ]] ; then logSerial=1 ; fi
     logScreen= ; if [[ ' '"@{config.boot.kernelParams[@]}"' ' == *' console=tty1 '* ]] ; then logScreen=1 ; fi
-    if [[ $logSerial ]] ; then
+    if [[ ! ${args[no-serial]:-} && $logSerial ]] ; then
         if [[ $logScreen || ${args[graphic]:-} ]] ; then
             qemu+=( -serial mon:stdio )
         else

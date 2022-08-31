@@ -35,7 +35,10 @@ function populate-keystore { { # (void)
     done
     for usage in "${!methods[@]}" ; do
         if [[ "${methods[$usage]}" == home-composite || "${methods[$usage]}" == copy ]] ; then continue ; fi
-        gen-key-"${methods[$usage]}" "$usage" "${options[$usage]}" | write-secret "$keystore"/"$usage".key || return 1
+        for attempt in 2 3 x ; do
+            if gen-key-"${methods[$usage]}" "$usage" "${options[$usage]}" | write-secret "$keystore"/"$usage".key ; then break ; fi
+            if [[ $attempt == x ]] ; then return 1 ; fi ; echo "Retrying ($attempt/3):"
+        done
     done
     for usage in "${!methods[@]}" ; do
         if [[ "${methods[$usage]}" != home-composite ]] ; then continue ; fi
@@ -57,10 +60,10 @@ function create-luks-layers {( set -eu # (void)
         primaryKey="$keystore"/luks/"$luksName"/0.key
 
         keyOptions=( --pbkdf=pbkdf2 --pbkdf-force-iterations=1000 )
-        ( PATH=@{native.cryptsetup}/bin ; set -x ; cryptsetup --batch-mode luksFormat --key-file="$primaryKey" "${keyOptions[@]}" -c aes-xts-plain64 -s 512 -h sha256 "$rawDev" )
+        ( PATH=@{native.cryptsetup}/bin ; ${_set_x:-:} ; cryptsetup --batch-mode luksFormat --key-file="$primaryKey" "${keyOptions[@]}" -c aes-xts-plain64 -s 512 -h sha256 "$rawDev" )
         for index in 1 2 3 4 5 6 7 ; do
             if [[ -e "$keystore"/luks/"$luksName"/"$index".key ]] ; then
-                ( PATH=@{native.cryptsetup}/bin ; set -x ; cryptsetup luksAddKey --key-file="$primaryKey" "${keyOptions[@]}" "$rawDev" "$keystore"/luks/"$luksName"/"$index".key )
+                ( PATH=@{native.cryptsetup}/bin ; ${_set_x:-:} ; cryptsetup luksAddKey --key-file="$primaryKey" "${keyOptions[@]}" "$rawDev" "$keystore"/luks/"$luksName"/"$index".key )
             fi
         done
     done
@@ -74,7 +77,7 @@ function open-luks-layers { # (void)
         rawDev=@{config.boot.initrd.luks.devices!catAttrSets.device[$luksName]}
         primaryKey="$keystore"/luks/"$luksName"/0.key
 
-        ( PATH=@{native.cryptsetup}/bin ; set -x ; cryptsetup --batch-mode luksOpen --key-file="$primaryKey" "$rawDev" "$luksName" ) &&
+        ( PATH=@{native.cryptsetup}/bin ; ${_set_x:-:} ; cryptsetup --batch-mode luksOpen --key-file="$primaryKey" "$rawDev" "$luksName" ) &&
         prepend_trap "@{native.cryptsetup}/bin/cryptsetup close $luksName" EXIT
     done
 }

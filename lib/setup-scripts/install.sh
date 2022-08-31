@@ -5,6 +5,7 @@
 
 ## Entry point to the installation, see »./README.md«.
 function install-system {( set -eu # 1: blockDev
+    trap - EXIT # start with empty traps for sub-shell
     prepare-installer "$@"
     do-disk-setup "${argv[0]}"
     install-system-to $mnt
@@ -15,7 +16,7 @@ function prepare-installer { # ...
 
     generic-arg-parse "$@"
 
-    beQuiet=/dev/null ; if [[ ${args[debug]:-} ]] ; then set -x ; beQuiet=/dev/stdout ; fi
+    if [[ ${args[debug]:-} ]] ; then set -x ; fi
 
     : ${argv[0]:?"Required: Target disk or image paths."}
 
@@ -32,9 +33,15 @@ function prepare-installer { # ...
         if @{native.zfs}/bin/zfs get -o value -H name "$poolName" &>/dev/null ; then echo "ZFS pool »$poolName« is already imported. Export the pool before running the installer." ; exit 1 ; fi
     done
 
-    if [[ ${SUDO_USER:-} ]] ; then function nix {( set +x ; declare -a args=("$@") ; PATH=$hostPath su - "$SUDO_USER" -c "$(declare -p args)"' ; nix "${args[@]}"' )} ; fi
+    if [[ ${SUDO_USER:-} ]] ; then # use Nix as the user who called this script, as Nix may not be set up for root
+        function nix {( set +x ; declare -a args=("$@") ; PATH=$hostPath su - "$SUDO_USER" -c "$(declare -p args)"' ; nix "${args[@]}"' )}
+    else # use Nix by absolute path, as it won't be on »$PATH«
+        PATH=$PATH:@{native.nix}/bin
+    fi
 
-    if [[ ${args[debug]:-} ]] ; then set +e ; set -E ; trap 'code= ; cat 2>/dev/null || true ; @{native.bashInteractive}/bin/bash --init-file @{config.environment.etc.bashrc.source} || code=$? ; if [[ $code ]] ; then exit $code ; fi' ERR ; fi # On error, instead of exiting straight away, open a shell to allow diagnosing/fixing the issue. Only exit if that shell reports failure (e.g. CtrlC + CtrlD). Unfortunately, the exiting has to be repeated for level of each nested sub-shells. The cat eats anything lined up on stdin, which would otherwise be run in the shell (TODO: but it blocks if there is nothing on stdin, requiring Ctrl+D to be pressed).
+    _set_x='set -x' ; if [[ ${args[quiet]:-} ]] ; then _set_x=: ; fi
+
+    if [[ ${args[debug]:-} ]] ; then set +e ; set -E ; trap 'code= ; timeout .2s cat &>/dev/null || true ; @{native.bashInteractive}/bin/bash --init-file @{config.environment.etc.bashrc.source} || code=$? ; if [[ $code ]] ; then exit $code ; fi' ERR ; fi # On error, instead of exiting straight away, open a shell to allow diagnosing/fixing the issue. Only exit if that shell reports failure (e.g. CtrlC + CtrlD). Unfortunately, the exiting has to be repeated for each level of each nested sub-shells. The »timeout cat« eats anything lined up on stdin, which would otherwise be sent to bash and interpreted as commands.
 
     export PATH=$PATH:@{native.util-linux}/bin # Doing a system installation requires a lot of stuff from »util-linux«. This should probably be moved into the individual functions that actually use the tools ...
 
@@ -48,9 +55,9 @@ function nixos-install-cmd {( set -eu # 1: mnt, 2: topLevel
 
 ## Copies the system's dependencies to the disks mounted at »$mnt« and installs the bootloader. If »$inspect« is set, a root shell will be opened in »$mnt« afterwards.
 #  »$topLevel« may point to an alternative top-level dependency to install.
-function install-system-to {( set -eu # 1: mnt, 2?: topLevel
+function install-system-to {( set -eu # 1: mnt
     mnt=$1 ; topLevel=${2:-}
-    targetSystem=@{config.system.build.toplevel}
+    targetSystem=${args[toplevel]:-@{config.system.build.toplevel}}
     trap - EXIT # start with empty traps for sub-shell
 
     # Link/create files that some tooling expects:
@@ -79,7 +86,7 @@ function install-system-to {( set -eu # 1: mnt, 2?: topLevel
 
     # Copy system closure to new nix store:
     if [[ ${SUDO_USER:-} ]] ; then chown -R $SUDO_USER: $mnt/nix/store $mnt/nix/var ; fi
-    ( set -x ; time nix --extra-experimental-features nix-command copy --no-check-sigs --to $mnt ${topLevel:-$targetSystem} ) ; rm -rf $mnt/nix/var/nix/gcroots
+    ( cmd=( nix --extra-experimental-features nix-command --offline copy --no-check-sigs --to $mnt ${topLevel:-$targetSystem} ) ; if [[ ${args[quiet]:-} ]] ; then "${cmd[@]}" ; else set -x ; time "${cmd[@]}" ; fi ) ; rm -rf $mnt/nix/var/nix/gcroots
     # TODO: if the target has @{config.nix.autoOptimiseStore} and the host doesn't (there is no .links dir?), optimize now
     if [[ ${SUDO_USER:-} ]] ; then chown -R root:root $mnt/nix $mnt/nix/var ; chown :30000 $mnt/nix/store ; fi
 

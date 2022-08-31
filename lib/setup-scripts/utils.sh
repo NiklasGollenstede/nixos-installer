@@ -19,6 +19,40 @@ function generic-arg-parse { # ...
     shift ; done
 }
 
+## Shows the help text for a program and exits, if »--help« was passed as argument and parsed, or does nothing otherwise.
+#  Expects to be called between parsing and verifying the arguments.
+#  Uses »allowedArgs« for the list of the named arguments (the values are the descriptions).
+#  »name« should be the program name/path (usually »$0«), »args« the form/names of any positional arguments expected (e.g. »SOURCE... DEST«) and is included in the "Usage" description,
+#  »description« the introductory text shown before the "Usage", and »suffix« any text printed after the argument list.
+function generic-arg-help { # 1: name, 2?: args, 3?: description, 4?: suffix
+    if [[ ! ${args[help]:-} ]] ; then : ${allowedArgs[help]:=1} ; return 0 ; fi
+    [[ ! ${3:-} ]] || echo "$3"
+    printf 'Usage:\n    %s [ARG[=value]]... [--] %s\n\nWhere »ARG« may be any of:\n' "$1" "${2:-}"
+    local name ; while IFS= read -r name ; do
+        printf '    %s\n        %s\n' "$name" "${allowedArgs[$name]}"
+    done < <( printf '%s\n' "${!allowedArgs[@]}" | LC_ALL=C sort )
+    printf '    %s\n        %s\n' "--help" "Do nothing but print this message and exit with success."
+    [[ ! ${4:-} ]] || echo "$4"
+    exit 0
+}
+
+## Performs a basic verification of the named arguments passed by the user and parsed by »generic-arg-parse« against the names in »allowedArgs«.
+#  Entries in »allowedArgs« should have the form »[--name]="description"« for boolean flags, and »[--name=VAL]="description"« for string arguments.
+#  »description« is used by »generic-arg-help«. Boolean flags may only have the values »1« (as set by »generic-ags-parse« for flags without value) or be empty.
+#  »VAL« is purely nominal. Any argument passed that is not in »allowedArgs« raises an error.
+function generic-arg-verify { # 1: exitCode
+    local exitCode=${1:-1}
+    local names=' '"${!allowedArgs[@]}"
+    for name in "${!args[@]}" ; do
+        if [[ ${allowedArgs[--$name]:-} ]] ; then
+            if [[ ${args[$name]} == '' || ${args[$name]} == 1 ]] ; then continue ; fi
+            echo "Argument »--$name« should be a boolean, but its value is: ${args[$name]}" ; return $exitCode
+        fi
+        if [[ $names == *' --'"$name"'='* || $names == *' --'"$name"'[='* ]] ; then continue ; fi
+        echo "Unexpected argument »--$name«.${allowedArgs[help]:+ Call with »--help« for a list of valid arguments.}" ; return $exitCode
+    done
+}
+
 ## Prepends a command to a trap. Especially useful fo define »finally« commands via »prepend_trap '<command>' EXIT«.
 #  NOTE: When calling this in a sub-shell whose parents already has traps installed, make sure to do »trap - trapName« first. On a new shell, this should be a no-op, but without it, the parent shell's traps will be added to the sub-shell as well (due to strange behavior of »trap -p« (in bash ~5.1.8)).
 function prepend_trap { # 1: command, ...: trapNames

@@ -52,4 +52,8 @@ in {
             printf "%s\n%s\n" "#define CONFIG_EXTRA_ENV_SETTINGS $CONFIG_EXTRA_ENV_SETTINGS" "$(cat include/env_default.h)" >include/env_default.h
         '';
 	});
+
+	ubootTools = prev.ubootTools.overrideAttrs (old: {
+        buildInputs = (old.buildInputs or [ ]) ++ [ final.openssl ];
+	});
 }

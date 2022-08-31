@@ -23,6 +23,7 @@ in {
                 name = lib.mkOption { description = "Name that this device is being referred to as in other places."; type = lib.types.str; default = name; readOnly = true; };
                 guid = lib.mkOption { description = "GPT disk GUID of the disk."; type = types.guid; default = lib.wip.sha256guid ("gpt-disk:${name}"+":${globalConfig.networking.hostName}"); };
                 size = lib.mkOption { description = "The size of the disk, either as number in bytes or as argument to »parseSizeSuffix«. When installing to a physical device, its size must match; images are created with this size."; type = lib.types.either lib.types.ints.unsigned lib.types.str; apply = lib.wip.parseSizeSuffix; default = "16G"; };
+                sectorSize = lib.mkOption { description = "The disk's logical sector size in bytes. Used to convert (e.g.) partition sizes in sectors to bytes or vice versa."; type = lib.types.ints.unsigned; default = 512; };
                 allowLarger = lib.mkOption { description = "Whether to allow installation to a physical disk that is larger than the declared size."; type = lib.types.bool; default = true; };
                 serial = lib.mkOption { description = "Serial number of the specific hardware device to use. If set the device path passed to the installer must point to the device with this serial. Use » udevadm info --query=property --name=$DISK | grep -oP 'ID_SERIAL_SHORT=\K.*' || echo '<none>' « to get the serial."; type = lib.types.nullOr lib.types.str; default = null; };
                 alignment = lib.mkOption { description = "Default alignment quantifier for partitions on this device. Should be at least the optimal physical write size of the device, but going larger at worst wastes this many times the number of partitions disk sectors."; type = lib.types.int; default = 16384; };
@@ -73,7 +74,7 @@ in {
             esc = lib.escapeShellArg;
         in pkgs.runCommand "partitioning-${config.networking.hostName}" { } ''
             ${lib.wip.substituteImplicit { inherit pkgs; scripts = [ partition-disk ]; context = { inherit config; native = pkgs; }; }} # inherit (builtins) trace;
-            mkdir $out ; beQuiet=/dev/stdout
+            mkdir $out ; declare -A args=([debug]=1)
             ${lib.concatStrings (lib.mapAttrsToList (name: disk: ''
                 name=${esc name} ; img=$name.img
                 ${pkgs.coreutils}/bin/truncate -s ${esc disk.size} "$img"

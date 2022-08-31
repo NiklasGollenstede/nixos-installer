@@ -81,7 +81,7 @@ in rec {
             inherit name; nodes = peers; # NixOPS
         };
     in let system = { inherit preface; } // (nixosSystem {
-        system = targetSystem;
+        system = buildSystem;
         modules = [ (
             (importWrapped inputs entryPath).module
         ) {
@@ -101,10 +101,10 @@ in rec {
                 }; })));
                 apply = lib.filterAttrs (k: v: v != null);
             }; config.${prefix}.setup.scripts = lib.mapAttrs (name: path: lib.mkOptionDefault { inherit path; }) (setup-scripts);
-        } ({ config, pkgs, ... }: {
+        } ({ config, options, pkgs, inputs ? { }, ... }: {
             options.${prefix}.setup.appliedScripts = lib.mkOption {
                 type = lib.types.functionTo lib.types.str; readOnly = true;
-                default = context: substituteImplicit { inherit pkgs; scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues config.${prefix}.setup.scripts); context = system // context; }; # inherit (builtins) trace;
+                default = context: substituteImplicit { inherit pkgs; scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues config.${prefix}.setup.scripts); context = { inherit config options pkgs inputs preface; } // context; }; # inherit (builtins) trace;
             };
 
         }) ({ config, ... }: {
@@ -149,7 +149,7 @@ in rec {
         throw "»${prefix}.preface.id«s are not unique! The following hosts share their IDs with some other host: ${builtins.concatStringsSep ", " (builtins.attrNames duplicate)}"
     ) else configs;
 
-    # Builds a system of NixOS hosts and exports them plus managing functions as flake outputs.
+    # Builds a system of NixOS hosts and exports them, plus »apps« and »devShells« to manage them, as flake outputs.
     # All arguments are optional, as long as the default can be derived from the other arguments as passed.
     mkSystemsFlake = args@{
         # An attrset of imported Nix flakes, for example the argument(s) passed to the flake »outputs« function. All other arguments are optional (and have reasonable defaults) if this is provided and contains »self« and the standard »nixpkgs«. This is also the second argument passed to the individual host's top level config files.
@@ -170,8 +170,10 @@ in rec {
         nixosSystem ? inputs.nixpkgs.lib.nixosSystem,
         # If provided, then cross compilation is enabled for all hosts whose target architecture is different from this. Since cross compilation currently fails for (some stuff in) NixOS, better don't set »localSystem«. Without it, building for other platforms works fine (just slowly) if »boot.binfmt.emulatedSystems« on the building system is configured for the respective target(s).
         localSystem ? null,
+        ## If provided, then change the name of each output attribute by passing it through this function. Allows exporting of multiple variants of a repo's hosts from a single flake:
+        renameOutputs ? null,
     ... }: let
-        otherArgs = (builtins.removeAttrs args [ "systems" ]) // { inherit inputs systems overlays modules specialArgs nixosSystem localSystem; };
+        otherArgs = (builtins.removeAttrs args [ "systems" "renameOutputs" ]) // { inherit inputs systems overlays modules specialArgs nixosSystem localSystem; };
         nixosConfigurations = if builtins.isList systems then mergeAttrsUnique (map (systems: mkNixosConfigurations (otherArgs // systems)) systems) else mkNixosConfigurations (otherArgs // systems);
     in let outputs = {
         inherit nixosConfigurations;
@@ -179,7 +181,7 @@ in rec {
         pkgs = (import inputs.nixpkgs { inherit overlays; system = localSystem; });
         tools = lib.unique (map (p: p.outPath) (lib.filter lib.isDerivation pkgs.stdenv.allowedRequisites));
         PATH = lib.concatMapStringsSep ":" (pkg: "${pkg}/bin") tools;
-    in {
+    in rec {
 
         # Do per-host setup and maintenance things:
         # SYNOPSIS: nix run REPO#HOST [-- [sudo] [bash | -x [-c SCRIPT | FUNC ...ARGS]]]
@@ -250,7 +252,14 @@ in rec {
                 ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: { outPath, ... }: "ln -sT ${outPath} $out/inputs/${name}") inputs)}
             ''}
         '';
+        checks.all-systems = packages.all-systems;
 
-    })); in outputs;
-
+    })); in if renameOutputs == null then outputs else {
+        nixosConfigurations = mapMerge (k: v: { ${renameOutputs k} = v; }) outputs.nixosConfigurations;
+    } // (forEachSystem [ "aarch64-linux" "x86_64-linux" ] (localSystem: {
+        apps = mapMerge (k: v: { ${renameOutputs k} = v; }) outputs.apps.${localSystem};
+        devShells = mapMerge (k: v: { ${renameOutputs k} = v; }) outputs.devShells.${localSystem};
+        packages.${renameOutputs "all-systems"} = outputs.packages.${localSystem}.all-systems;
+        checks.${renameOutputs "all-systems"} = outputs.checks.${localSystem}.all-systems;
+    }));
 }

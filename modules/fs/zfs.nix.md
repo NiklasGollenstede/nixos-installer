@@ -23,13 +23,14 @@ in let module = {
             description = "ZFS pools created during this host's installation.";
             type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
                 name = lib.mkOption { description = "Attribute name as name of the pool."; type = lib.types.str; default = name; readOnly = true; };
-                vdevArgs = lib.mkOption { description = "List of arguments that specify the virtual devices (vdevs) used when initially creating the pool. Can consist of the device type keywords and partition labels. The latter are prefixed with »/dev/mapper/« if a mapping with that name is configured or »/dev/disk/by-partlabel/« otherwise, and then the resulting argument sequence is is used verbatim in »zpool create«."; type = lib.types.listOf lib.types.str; default = [ name ]; example = [ "raidz1 data1-..." "data2-..." "data3-..." "cache" "cache-..." ]; };
+                vdevArgs = lib.mkOption { description = "List of arguments that specify the virtual devices (vdevs) used when initially creating the pool. Can consist of the device type keywords and partition labels. The latter are prefixed with »/dev/mapper/« if a mapping with that name is configured or »/dev/disk/by-partlabel/« otherwise, and then the resulting argument sequence is is used verbatim in »zpool create«."; type = lib.types.listOf lib.types.str; default = [ name ]; example = [ "raidz1" "data1-..." "data2-..." "data3-..." "cache" "cache-..." ]; };
                 props = lib.mkOption { description = "Zpool properties to pass when creating the pool. May also set »feature@...« and »compatibility«."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; };
-                autoApplyDuringBoot = (lib.mkEnableOption "automatically re-applying changed dataset properties and create missing datasets in the initramfs phase during boot for this pool> This can be useful since the keystore is open but no datasets are mounted at that time") // { default = true; };
+                createDuringInstallation = (lib.mkEnableOption "creation of this pool during system installation. If disabled, the pool needs to exist already or be created manually and the pools disk devices are expected to be present from the first boot onwards") // { default = true; };
+                autoApplyDuringBoot = (lib.mkEnableOption "automatically re-applying changed dataset properties and create missing datasets in the initramfs phase during boot for this pool. This can be useful since the keystore is open but no datasets are mounted at that time") // { default = true; };
                 autoApplyOnActivation = (lib.mkEnableOption "automatically re-applying changed dataset properties and create missing datasets on system activation for this pool. This may fail for some changes since datasets may be mounted and the keystore is usually closed at this time. Enable ».autoApplyDuringBoot« and reboot to address this") // { default = true; };
             }; config = {
                 props.ashift = lib.mkOptionDefault "12"; # be explicit
-                props.comment = lib.mkOptionDefault "hostname=${config.networking.hostName};"; # This is just nice to know without needing to inspect the datasets.
+                props.comment = lib.mkOptionDefault "hostname=${config.networking.hostName};"; # This is just nice to know without needing to inspect the datasets (»zpool import« shows the comment).
                 props.cachefile = lib.mkOptionDefault "none"; # If it works on first boot without (stateful) cachefile, then it will also do so later.
             }; })));
             default = { };
@@ -70,6 +71,9 @@ in let module = {
             "${props.mountpoint}" = { fsType = "zfs"; device = path; options = [ "zfsutil" ] ++ (lib.optionals (mount == "noauto") [ "noauto" ]); };
         } else { }) cfg.datasets;
 
+        ## Load keys (only) for (all) datasets that are declared as encryption roots and aren't disabled:
+        boot.zfs.requestEncryptionCredentials = lib.attrNames (lib.filterAttrs (name: { props, ... }: if props?keylocation then props.keylocation != "file:///dev/null" else config.${prefix}.fs.keystore.keys?"zfs/${name}") cfg.datasets);
+
         ${prefix} = {
             # Set default root dataset properties for every pool:
             fs.zfs.datasets = lib.mapAttrs (name: { ... }: { props = {
@@ -98,6 +102,7 @@ in let module = {
 
 
     }) ({ ## Implement »cfg.extraInitrdPools«:
+
         boot.initrd.postDeviceCommands = (lib.mkAfter ''
             ${lib.concatStringsSep "\n" (map verbose.initrd-import-zpool cfg.extraInitrdPools)}
             ${verbose.initrd-load-keys}

@@ -9,14 +9,14 @@ Things that really should be (more like) this by default.
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: specialArgs@{ config, pkgs, lib, name, ... }: let inherit (inputs.self) lib; in let
+dirname: inputs: specialArgs@{ config, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
     prefix = inputs.config.prefix;
     cfg = config.${prefix}.base;
 in {
 
     options.${prefix} = { base = {
         enable = lib.mkEnableOption "saner defaults";
-        includeInputs = lib.mkOption { description = "Whether to include all build inputs to the configuration in the final system, such that they are available for self-rebuilds, in the flake registry, and on the »NIX_PATH« entry (e.g. as »pkgs« on the CLI)."; type = lib.types.bool; default = specialArgs?inputs && specialArgs.inputs?self && specialArgs.inputs?nixpkgs; };
+        includeInputs = lib.mkOption { description = "The system's build inputs, to be included in the flake registry, and on the »NIX_PATH« entry, such that they are available for self-rebuilds and e.g. as »pkgs« on the CLI."; type = lib.types.attrsOf lib.types.anything; apply = lib.filterAttrs (k: v: v != null); default = { }; };
         panic_on_fail = lib.mkEnableOption "Kernel parameter »boot.panic_on_fail«" // { default = true; }; # It's stupidly hard to remove items from lists ...
         makeNoExec = lib.mkEnableOption "(almost) all filesystems being mounted as »noexec« (and »nosuid« and »nodev«)" // { default = false; };
     }; };
@@ -36,6 +36,7 @@ in {
         networking.hostId = lib.mkDefault (builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName));
         environment.etc."machine-id".text = lib.mkDefault (builtins.substring 0 32 (builtins.hashString "sha256" "${config.networking.hostName}:machine-id")); # this works, but it "should be considered "confidential", and must not be exposed in untrusted environments" (not sure _why_ though)
         documentation.man.enable = lib.mkDefault config.documentation.enable;
+        nix.autoOptimiseStore = true; # because why not ...
 
 
     }) (lib.mkIf cfg.makeNoExec { ## Hardening
@@ -51,6 +52,7 @@ in {
         # /run/wrappers needs »exec« »suid«
         # /run/binfmt needs »exec«
         # /run /run/user/* may need »exec« (TODO: test)
+        # The Nix build dir (default: /tmp) needs »exec« (TODO)
 
         # Ensure that the /nix/store is not »noexec«, even if the FS it is on is:
         boot.initrd.postMountCommands = ''
@@ -90,38 +92,40 @@ in {
         systemd.extraConfig = "StatusUnitFormat=name"; # Show unit names instead of descriptions during boot.
 
 
-    }) (lib.mkIf cfg.includeInputs { # non-flake
+    }) (let
+        name = config.networking.hostName;
+    in lib.mkIf (cfg.includeInputs?self && cfg.includeInputs.self?nixosConfigurations && cfg.includeInputs.self.nixosConfigurations?${name}) { # non-flake
 
         # Importing »<nixpkgs>« as non-flake returns a lambda returning the evaluated Nix Package Collection (»pkgs«). The most accurate representation of what that should be on the target host is the »pkgs« constructed when building it:
         system.extraSystemBuilderCmds = ''
             ln -sT ${pkgs.writeText "pkgs.nix" ''
                 # Provide the exact same version of (nix)pkgs on the CLI as in the NixOS-configuration (but note that this ignores the args passed to it; and it'll be a bit slower, as it partially evaluates the host's configuration):
-                args: (builtins.getFlake ${builtins.toJSON specialArgs.inputs.self.outPath}).nixosConfigurations.${name}.pkgs
+                args: (builtins.getFlake ${builtins.toJSON cfg.includeInputs.self}).nixosConfigurations.${name}.pkgs
             ''} $out/pkgs # (nixpkgs with overlays)
         ''; # (use this indirection so that all open shells update automatically)
 
         nix.nixPath = [ "nixpkgs=/run/current-system/pkgs" ]; # this intentionally replaces the defaults: nixpkgs is here, /etc/nixos/flake.nix is implicit, channels are impure
-        nix.autoOptimiseStore = true; # because why not ...
-        environment.shellAliases = { "with" = ''nix-shell --run "bash --login" -p''; }; # »with« doesn't seem to be a common linux command yet, and it makes sense here: with $package => do stuff in shell
 
-    }) (lib.mkIf cfg.includeInputs { # flake things
+    }) (lib.mkIf (cfg.includeInputs != { }) { # flake things
 
         # "input" to the system build is definitely also a nix version that works with flakes:
         nix.extraOptions = "experimental-features = nix-command flakes"; # apparently, even nix 2.8 (in nixos-22.05) needs this
         environment.systemPackages = [ pkgs.git ]; # necessary as external dependency when working with flakes
 
         # »inputs.self« does not have a name (that is known here), so just register it as »/etc/nixos/« system config:
-        environment.etc.nixos.source = lib.mkDefault "/run/current-system/config"; # (use this indirection to prevent every change in the config to necessarily also change »/etc«)
-        system.extraSystemBuilderCmds = ''
-            ln -sT ${specialArgs.inputs.self.outPath} $out/config # (build input for reference)
+        environment.etc.nixos.source = lib.mkIf (cfg.includeInputs?self) (lib.mkDefault "/run/current-system/config"); # (use this indirection to prevent every change in the config to necessarily also change »/etc«)
+        system.extraSystemBuilderCmds = lib.mkIf (cfg.includeInputs?self) ''
+            ln -sT ${cfg.includeInputs.self} $out/config # (build input for reference)
         '';
 
         # Add all inputs to the flake registry:
-        nix.registry = lib.mapAttrs (name: input: lib.mkDefault { flake = input; }) (builtins.removeAttrs specialArgs.inputs [ "self" ]);
+        nix.registry = lib.mapAttrs (name: input: lib.mkDefault { flake = input; }) (builtins.removeAttrs cfg.includeInputs [ "self" ]);
 
 
     }) ({
         # Free convenience:
+
+        environment.shellAliases = { "with" = ''nix-shell --run "bash --login" -p''; }; # »with« doesn't seem to be a common linux command yet, and it makes sense here: with $package => do stuff in shell
 
         programs.bash.promptInit = lib.mkDefault ''
         # Provide a nice prompt if the terminal supports it.
@@ -145,6 +149,10 @@ in {
                 stty rows 34 cols 145 # Fairly large font on 1080p. Definitely a better default than 24x80.
             fi
         '';
+
+        system.extraSystemBuilderCmds = (if !config.boot.initrd.enable then "" else ''
+            ln -sT ${builtins.unsafeDiscardStringContext config.system.build.bootStage1} $out/boot-stage-1.sh # (this is super annoying to locate otherwise)
+        '');
 
     }) ]);
 

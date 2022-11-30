@@ -31,7 +31,7 @@ dirname: inputs: { config, pkgs, lib, name, ... }: let inherit (inputs.self) lib
     #suffix = builtins.head (builtins.match ''example-(.*)'' name); # make differences in config based on this when using »wip.preface.instances«
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
 in { imports = [ ({ ## Hardware
-    wip.preface.instances = [ "example" "example-minimal" "example-raidz" ];
+    wip.preface.instances = [ "example-explicit" "example" "example-minimal" "example-raidz" ];
 
     wip.preface.hardware = "x86_64"; system.stateVersion = "22.05";
 
@@ -43,7 +43,7 @@ in { imports = [ ({ ## Hardware
     wip.setup.scripts.install-overwrite = { path = ../example/install.sh.md; order = 1000; };
 
 
-}) (lib.mkIf false { ## Minimal explicit FS setup
+}) (lib.mkIf (name == "example-explicit") { ## Minimal explicit FS setup
 
     # Declare a boot and system partition. Though not required for EFI, make the boot part visible to boot loaders supporting only MBR.
     wip.fs.disks.partitions."boot-${hash}"   = { type = "ef00"; size = "64M"; index = 1; order = 1500; };

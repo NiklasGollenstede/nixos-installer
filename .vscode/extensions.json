@@ -1,6 +1,5 @@
 {
 	"recommendations": [
-		"jnoortheen.nix-ide",
 		"streetsidesoftware.code-spell-checker",
 	],
 }

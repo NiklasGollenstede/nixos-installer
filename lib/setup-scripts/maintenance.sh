@@ -96,7 +96,7 @@ function run-qemu {( set -eu # 1: diskImages
         fi
     fi
 
-    if [[ ! ${args[no-nat]:-} ]] ; then # e.g. --nat-fw=8000-:8000,8001-:8001
+    if [[ ! ${args[no-nat]:-} ]] ; then # e.g. --nat-fw=8000-:8000,8001-:8001,2022-:22
         qemu+=( -nic user,model=virtio-net-pci${args[nat-fw]:+,hostfwd=tcp::${args[nat-fw]//,/,hostfwd=tcp::}} ) # NATed, IPs: 10.0.2.15+/32, gateway: 10.0.2.2
     fi
 

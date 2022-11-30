@@ -31,7 +31,7 @@ As backed for `local`, which primarily holds the nix store, it benefits from tra
 With `fsync` disabled, and the ability to roll back snapshots, it also works to create very large storage areas for `temp` data.
 ZFS though struggles on lower-end systems. BtrFS could probably be configured to serve the roles with similar capability.
 
-F2FS also supports checksumming and compression, though it currently does not automatically reclaim space gained by the latter (but TODO: Nix could be tuned to do this explicitly).
+F2FS also supports checksumming and compression, though it currently does not automatically reclaim space gained by the latter (and "manually" enabling it per file prevents `mmap`ing those files).
 This and its design optimized for flash storage should make it an optimal backend for the `local` data, esp. on lower-end hardware.
 EXT4 supports checksumming only for metadata, and does not support compression. Block device layers could in principle be used for this.
 Using a sime filesystem with external backup tools is possible yet suboptimal for `remote` data, unless the system doesn't actually have any/much of it.
@@ -101,10 +101,13 @@ dirname: inputs: specialArgs@{ config, pkgs, lib, utils, ... }: let inherit (inp
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
     keep = if cfg.remote.type == "none" then "local" else "remote"; # preferred place for data that should be kept
 
-    optionsFor = type: desc: {
-        bind.source = lib.mkOption { description = "Prefix for bind-mount targets."; type = lib.types.str; default = "/.${type}"; };
-        bind.base = lib.mkOption { description = "Filesystem to automatically create as the ».source« for the bind mounts."; type = lib.types.enum ([ null ] ++ (lib.optionals (type == "local") [ "f2fs" "f2fs-encrypted" ])); default = null; };
+    optionsFor = type: desc: lib.wip.mergeAttrsRecursive [ ({
         zfs.dataset = lib.mkOption { description = "Dataset path under which to create the ${desc} »${type}« datasets."; type = lib.types.str; default = "rpool-${hash}/${type}"; };
+    }) (lib.optionalAttrs (type != "temp") {
+        bind.source = lib.mkOption { description = "Prefix for bind-mount targets."; type = lib.types.str; default = "/.${type}"; };
+    }) (lib.optionalAttrs (type == "local") {
+        bind.base = lib.mkOption { description = "Filesystem to automatically create as the ».source« for the bind mounts."; type = lib.types.enum [ null "f2fs" "f2fs-encrypted" "ext4" "ext4-encrypted" ]; default = null; };
+    }) ({
         mounts = lib.mkOption {
             description = "Locations (for »temp« in addition to »/«) where a ${desc} filesystem should be mounted. Some are declared by default but may be removed by setting them to »null«.";
             type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
@@ -113,15 +116,15 @@ dirname: inputs: specialArgs@{ config, pkgs, lib, utils, ... }: let inherit (inp
                 uid = lib.mkOption { description = "UID owning the mounted target."; type = lib.types.ints.unsigned; default = 0; };
                 gid = lib.mkOption { description = "GID owning the mounted target."; type = lib.types.ints.unsigned; default = 0; };
                 mode = lib.mkOption { description = "Permission mode of the mounted target."; type = lib.types.str; default = "750"; };
-                options = lib.mkOption { description = "Additional mount options to set. Note that not all mount types support all options, they may be silently ignored or cause errors. »bind« supports setting »nosuid«, »nodev«, »noexec«, »noatime«, »nodiratime«, and »relatime«. »zfs« will explicitly heed »noauto«, the other options are applied but may conflict with the ones implied by the ».zfsProps«."; type = lib.types.attrsOf (lib.types.either lib.types.bool lib.types.str); default = { }; };
+                options = lib.mkOption { description = "Additional mount options to set. Note that not all mount types support all options, they may be silently ignored or cause errors. »bind« supports setting »nosuid«, »nodev«, »noexec«, »noatime«, »nodiratime«, and »relatime«. »zfs« will explicitly heed »noauto«, the other options are applied but may conflict with the ones implied by the ».zfsProps«."; type = lib.types.attrsOf (lib.types.oneOf [ lib.types.bool lib.types.str lib.types.str lib.types.int ]); default = { }; };
                 extraFsConfig = lib.mkOption { description = "Extra config options to set on the generated »fileSystems.*« entry (unless this mount is forced to »null«)."; type = lib.types.attrsOf lib.types.anything; default = { }; };
-                zfsProps = lib.mkOption { description = "ZFS properties to set on the dataset, if mode type is »zfs«."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; };
+                zfsProps = lib.mkOption { description = "ZFS properties to set on the dataset, if mode type is »zfs«. Note that ZFS mounts made in the initramfs don't have the correct mount options from ZFS properties, so properties that affect mount options should (also) be set as ».options«."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; };
             }; })));
             default = { };
             apply = lib.filterAttrs (k: v: v != null);
         };
-        mountOptions = lib.mkOption { description = "Mount options that will be merged under ».mounts.*.options«."; type = lib.types.attrsOf (lib.types.either lib.types.bool lib.types.str); default = { nosuid = true; nodev = true; noatime = true; }; };
-    };
+        mountOptions = lib.mkOption { description = "Mount options that will be merged under ».mounts.*.options«."; type = lib.types.attrsOf (lib.types.oneOf [ lib.types.bool lib.types.str lib.types.str lib.types.int ]); default = { nosuid = true; nodev = true; noatime = true; }; };
+    }) ];
 
     zfsNoSyncProps = { sync = "disabled"; logbias = "throughput"; }; # According to the documentation, »logbias« should be irrelevant without sync (i.e. no logging), but some claim setting it to »throughput« still improves performance.
 in {
@@ -167,7 +170,7 @@ in {
 
     config = let
 
-        optionsToList = attrs: lib.mapAttrsToList (k: v: if v == true then k else "${k}=${v}") (lib.filterAttrs (k: v: v != false) attrs);
+        optionsToList = attrs: lib.mapAttrsToList (k: v: if v == true then k else "${k}=${toString v}") (lib.filterAttrs (k: v: v != false) attrs);
 
     in lib.mkIf cfg.enable (lib.mkMerge ([ ({
 
@@ -260,33 +263,52 @@ in {
         boot.cleanTmpDir = true; # Clear »/tmp« on reboot.
 
 
-    }) (lib.mkIf (cfg.local.type == "bind" && (cfg.local.bind.base == "f2fs" || cfg.local.bind.base == "f2fs-encrypted")) (let # Convenience option to create a local F2FS optimized to host the nix store:
+    }) (lib.mkIf (cfg.local.type == "bind" && (cfg.local.bind.base != null)) (let # Convenience option to create a local F2FS/EXT4 optimized to host the nix store:
+        type = if cfg.local.bind.base == "f2fs" || cfg.local.bind.base == "f2fs-encrypted" then "f2fs" else "ext4";
+        encrypted = cfg.local.bind.base == "f2fs-encrypted" || cfg.local.bind.base == "ext4-encrypted";
         useLuks = config.${prefix}.fs.keystore.keys?"luks/local-${hash}/0";
     in {
 
         # TODO: fsck
         ${prefix} = {
-            fs.keystore.keys."luks/local-${hash}/0" = lib.mkIf (cfg.local.bind.base == "f2fs-encrypted") (lib.mkOptionDefault "random");
+            fs.keystore.keys."luks/local-${hash}/0" = lib.mkIf encrypted (lib.mkOptionDefault "random");
             fs.disks.partitions."local-${hash}" = {
                 type = "8300"; order = lib.mkDefault 1000; disk = lib.mkDefault "primary"; size = lib.mkDefault (if cfg.remote.type == "none" then null else "50%");
             };
         };
-        fileSystems.${cfg.local.bind.source} = { fsType = "f2fs"; device = "/dev/${if useLuks then "mapper" else "disk/by-partlabel"}/local-${hash}"; formatOptions = (lib.concatStrings [
-            "-O extra_attr" # required by other options
-            ",inode_checksum" # enable inode checksum
-            ",sb_checksum" # enable superblock checksum
-            ",compression" # allow compression
-            #"-w ?" # "sector size in bytes"
-            # sector ? segments < section < zone
-        ]); options = optionsToList (cfg.temp.mountOptions // {
-            # F2FS compresses only for performance and wear. The whole uncompressed space is still reserved (in case the file content needs to get replaced by incompressible data in-place). To free the gained space, »ioctl(fd, F2FS_IOC_RELEASE_COMPRESS_BLOCKS)« needs to be called per file, making the file immutable. Nix could do that when moving stuff into the store.
-            compress_mode = "fs"; # enable compression for all files
-            compress_algorithm = "lz4"; # compress using lz4
-            compress_chksum = true; # verify checksums (when decompressing data blocks?)
-            lazytime = true; # update timestamps asynchronously
-        }); };
+        fileSystems.${cfg.local.bind.source} = {
+            fsType = type; device = "/dev/${if useLuks then "mapper" else "disk/by-partlabel"}/local-${hash}";
+        } // (if type == "f2fs" then {
+            formatOptions = (lib.concatStrings [
+                " -O extra_attr" # required by other options
+                ",inode_checksum" # enable inode checksum
+                ",sb_checksum" # enable superblock checksum
+                ",compression" # allow compression
+                #"-w ?" # "sector size in bytes"
+                # sector ? segments < section < zone
+            ]);
+            options = optionsToList (cfg.local.mountOptions // {
+                # F2FS compresses only for performance and wear. The whole uncompressed space is still reserved (in case the file content needs to get replaced by incompressible data in-place). To free the gained space, »ioctl(fd, F2FS_IOC_RELEASE_COMPRESS_BLOCKS)« needs to be called per file, making the file immutable. Nix could do that when moving stuff into the store.
+                compress_mode = "fs"; # enable compression for all files
+                compress_algorithm = "lz4"; # compress using lz4
+                compress_chksum = true; # verify checksums (when decompressing data blocks?)
+                lazytime = true; # update timestamps asynchronously
+            });
+        } else {
+            formatOptions = (lib.concatStrings [
+                " -O inline_data" # embed data of small files in the top-level inode
+                ",has_journal,extent,huge_file,flex_bg,metadata_csum,64bit,dir_nlink,extra_isize" # (ext4 default options)
+                #",lazy_journal_init,lazy_itable_init" # speed up creation (but: Invalid filesystem option set)
+                " -I 256" # inode size (ext default, allows for timestamps past 2038)
+                " -i 16384" # create one inode per 16k bytes of disk (ext default)
+                " -b 4096" # block size (ext default)
+                " -E nodiscard" # do not trim the whole blockdev upon formatting
+                " -e panic" # when (critical?) FS errors are detected, reset the system
+            ]); options = optionsToList (cfg.local.mountOptions // {
+            });
+        });
         # TODO: "F2FS and its tools support various parameters not only for configuring on-disk layout, but also for selecting allocation and cleaning algorithms."
-        boot.initrd.kernelModules = [ "f2fs" ]; # This is not generally, but sometimes, required to boot. Strange. (Kernel message: »request_module fs-f2fs succeeded, but still no fs?«)
+        boot.initrd.kernelModules = [ type ]; # This is not generally, but sometimes, required to boot. Strange. (Kernel message: »request_module fs-f2fs succeeded, but still no fs?«)
 
 
     })) ] ++ (map (type: (lib.mkIf (cfg.${type}.type == "bind") {
@@ -328,7 +350,11 @@ in {
                     mount = if (options.noauto or false) == true then "noauto" else true; inherit uid gid mode;
                     props = { canmount = "noauto"; mountpoint = target; } // zfsProps;
                 };
-            }) cfg.${type}.mounts);
+            } // (
+                lib.wip.mapMerge (prefix: if (lib.any (_:_.source == prefix) (lib.attrValues cfg.${type}.mounts)) then { } else {
+                    "${dataset}/${prefix}" = lib.mkDefault { props.canmount = "off"; };
+                }) (lib.wip.parentPaths source)
+            )) cfg.${type}.mounts);
         };
 
         fileSystems = lib.mapAttrs (target: args@{ extraFsConfig, ... }: extraFsConfig // {

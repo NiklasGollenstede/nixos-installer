@@ -1,10 +1,11 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
-    inherit (import "${dirname}/vars.nix"    dirname inputs) mapMerge mergeAttrsUnique flipNames;
+    inherit (import "${dirname}/vars.nix"    dirname inputs) mapMerge mapMergeUnique mergeAttrsUnique flipNames;
     inherit (import "${dirname}/imports.nix" dirname inputs) getModifiedPackages getNixFiles importWrapped;
     inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit;
     setup-scripts = (import "${dirname}/setup-scripts" "${dirname}/setup-scripts"  inputs);
     prefix = inputs.config.prefix;
+    inherit (import "${dirname}/misc.nix" dirname inputs) trace;
 in rec {
 
     # Simplified implementation of »flake-utils.lib.eachSystem«.
@@ -15,7 +16,7 @@ in rec {
         inherit ((import inputs.nixpkgs { overlays = [ ]; config = { }; system = "x86_64-linux"; }).pkgs) applyPatches fetchpatch;
     in outputs (builtins.mapAttrs (name: input: if name != "self" && patches?${name} && patches.${name} != [ ] then (let
         patched = applyPatches {
-            name = "${name}-patched"; src = input;
+            name = "${name}-patched"; src = "${input}";
             patches = map (patch: if patch ? url then fetchpatch patch else patch) patches.${name};
         };
         sourceInfo = (input.sourceInfo or input) // patched;
@@ -64,7 +65,7 @@ in rec {
 
     # Given a path to a host config file, returns some properties defined in its first inline module (to be used where accessing them via »nodes.${name}.config...« isn't possible).
     getSystemPreface = inputs: entryPath: args: let
-        imported = (importWrapped inputs entryPath).required ({ config = null; pkgs = null; lib = null; name = null; nodes = null; } // args);
+        imported = (importWrapped inputs entryPath).required ({ config = null; pkgs = null; lib = null; name = null; nodes = null; extraModules = null; } // args);
         module = builtins.elemAt imported.imports 0; props = module.${prefix}.preface;
     in if (
         imported?imports && (builtins.isList imported.imports) && (imported.imports != [ ]) && module?${prefix} && module.${prefix}?preface && props?hardware
@@ -72,75 +73,80 @@ in rec {
 
     # Builds the System Configuration for a single host. Since each host depends on the context of all other host (in the same "network"), this is essentially only callable through »mkNixosConfigurations«.
     # See »mkSystemsFlake« for documentation of the arguments.
-    mkNixosConfiguration = args@{ name, entryPath, peers, inputs, overlays, modules, nixosSystem, localSystem ? null, ... }: let
-        preface = (getSystemPreface inputs entryPath ({ inherit lib; } // specialArgs));
+    mkNixosConfiguration = args@{ name, entryPath ? null, config ? null, preface ? null,peers ? { }, inputs ? [ ], overlays ? [ ], modules ? [ ], nixosSystem, localSystem ? null, ... }: let
+        preface = args.preface or (getSystemPreface inputs entryPath (specialArgs // { inherit name; }));
         targetSystem = "${preface.hardware}-linux"; buildSystem = if localSystem != null then localSystem else targetSystem;
-        specialArgs = { # make these available in the attrSet passed to the modules
-            inherit inputs; # These are global and passed by the caller of this function (or not), so avoid using these (in favor of the own flakes inputs) where possible!
-        } // (args.specialArgs or { }) // {
-            inherit name; nodes = peers; # NixOPS
+        specialArgs = (args.specialArgs or { }) // {
+            nodes = peers; # NixOPS
         };
     in let system = { inherit preface; } // (nixosSystem {
         system = buildSystem;
-        modules = [ (
-            (importWrapped inputs entryPath).module
-        ) {
-            # The system architecture (often referred to as »system«).
-            options.${prefix}.preface.hardware = lib.mkOption { type = lib.types.str; readOnly = true; };
-        } {
-            # List of host names to instantiate this host config for, instead of just for the file name.
-            options.${prefix}.preface.instances = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ name ]; };
-        } {
+
+        modules = [ # Anything specific to only this evaluation of the module tree should go here.
+            (args.config or (importWrapped inputs entryPath).module)
+            { _module.args = { inherit name; }; }
+            { networking.hostName = name; }
+        ];
+
+        extraModules = modules ++ [ ({ # These are passed as »extraModules« module argument and can thus conveniently be reused when defining containers and such (Therefore define as much stuff as possible here).
+
+        }) ({
+
+            nixpkgs = { inherit overlays; }
+            // (if buildSystem != targetSystem then { localSystem.system = buildSystem; crossSystem.system = targetSystem; } else { system = targetSystem; });
+
+            _module.args = builtins.removeAttrs specialArgs [ "name" ]; # (pass the args here, so that they also apply to any other evaluation using »extraModules«)
+            ${prefix}.base.includeInputs = lib.mkDefault inputs;
+
+            system.nixos.revision = lib.mkIf (inputs?nixpkgs && inputs.nixpkgs?rev) inputs.nixpkgs.rev; # (evaluating the default value fails under some circumstances)
+
+        }) ({
+            options.${prefix}.preface.hardware = lib.mkOption { description = "The name of the system's CPU instruction set (the first part of what is often referred to as »system«)."; type = lib.types.str; readOnly = true; };
+        }) ({
+            options.${prefix}.preface.instances = lib.mkOption { description = "List of host names to instantiate this host config for, instead of just for the file name."; type = lib.types.listOf lib.types.str; readOnly = true; };
+            config.${prefix} = if preface?instances then { } else { preface.instances = [ name ]; };
+        }) ({
             options.${prefix}.setup.scripts = lib.mkOption {
                 description = ''Attrset of bash scripts defining functions that do installation and maintenance operations. See »./setup-scripts/README.md« below for more information.'';
                 type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, config, ... }: { options = {
-                    name = lib.mkOption { description = "Name that this device is being referred to as in other places."; type = lib.types.str; default = name; readOnly = true; };
+                    name = lib.mkOption { description = "Symbolic name of the script."; type = lib.types.str; default = name; readOnly = true; };
                     path = lib.mkOption { description = "Path of file for ».text« to be loaded from."; type = lib.types.nullOr lib.types.path; default = null; };
                     text = lib.mkOption { description = "Script text to process."; type = lib.types.str; default = builtins.readFile config.path; };
                     order = lib.mkOption { description = "Parsing order of the scripts. Higher orders will be parsed later, and can thus overwrite earlier definitions."; type = lib.types.int; default = 1000; };
                 }; })));
                 apply = lib.filterAttrs (k: v: v != null);
             }; config.${prefix}.setup.scripts = lib.mapAttrs (name: path: lib.mkOptionDefault { inherit path; }) (setup-scripts);
-        } ({ config, options, pkgs, inputs ? { }, ... }: {
+        }) ({ config, options, pkgs, ... }: {
             options.${prefix}.setup.appliedScripts = lib.mkOption {
                 type = lib.types.functionTo lib.types.str; readOnly = true;
-                default = context: substituteImplicit { inherit pkgs; scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues config.${prefix}.setup.scripts); context = { inherit config options pkgs inputs preface; } // context; }; # inherit (builtins) trace;
+                default = context: substituteImplicit { inherit pkgs; scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues config.${prefix}.setup.scripts); context = { inherit config options pkgs inputs; } // context; }; # inherit (builtins) trace;
             };
 
-        }) ({ config, ... }: {
-
-            imports = modules; nixpkgs = { inherit overlays; }
-            // (if buildSystem != targetSystem then { localSystem.system = buildSystem; crossSystem.system = targetSystem; } else { system = targetSystem; });
-
-            networking.hostName = name;
-
-            system.extraSystemBuilderCmds = (if !config.boot.initrd.enable then "" else ''
-                ln -sT ${builtins.unsafeDiscardStringContext config.system.build.bootStage1} $out/boot-stage-1.sh # (this is super annoying to locate otherwise)
-            '');
-
         }) ];
-        specialArgs = specialArgs; # explicitly passing »pkgs« here breaks »config.nixpkgs.overlays«!
+
+        #specialArgs = specialArgs; # (This is already set during module import, while »_module.args« only becomes available during module evaluation (before that, using it causes infinite recursion). Since it can't be ensured that this is set in every circumstance where »extraModules« are being used, it should not be set at all.)
+
     }); in system;
 
-    # Given either a list (or attr set) of »files« (paths to ».nix« or ».nix.md« files for dirs with »default.nix« files in them) or a »dir« path (and optionally a list of file names to »exclude« from it), this builds the NixOS configuration for each host (per file) in the context of all configs provided.
+    # Given either a list (or attr set) of »files« (paths to ».nix« or ».nix.md« files for dirs with »default.nix« files in them) or a »dir« path (and optionally a list of base names to »exclude« from it), this builds the NixOS configuration for each host (per file) in the context of all configs provided.
     # If »files« is an attr set, exactly one host with the attribute's name as hostname is built for each attribute. Otherwise the default is to build for one host per configuration file, named as the file name without extension or the sub-directory name. Setting »${prefix}.preface.instances« can override this to build the same configuration for those multiple names instead (the specific »name« is passed as additional »specialArgs« to the modules and can thus be used to adjust the config per instance).
     # All other arguments are as specified by »mkSystemsFlake« and are passed to »mkNixosConfiguration«.
     mkNixosConfigurations = args: let # { files, dir, exclude, ... }
-        files = args.files or (getNixFiles args.dir (args.exclude or [ ]));
+        files = args.files or (builtins.removeAttrs (getNixFiles args.dir) (args.exclude or [ ]));
         files' = if builtins.isAttrs files then files else (builtins.listToAttrs (map (entryPath: let
             stripped = builtins.match ''^(.*)[.]nix[.]md$'' (builtins.baseNameOf entryPath);
             name = builtins.unsafeDiscardStringContext (if stripped != null then (builtins.elemAt stripped 0) else (builtins.baseNameOf entryPath));
         in { inherit name; value = entryPath; }) files));
 
-        configs = mapMerge (name: entryPath: (let
+        configs = mapMergeUnique (name: entryPath: (let
             preface = (getSystemPreface inputs entryPath { });
-        in (mapMerge (name: {
+        in (mapMergeUnique (name: {
             "${name}" = mkNixosConfiguration ((
                 builtins.removeAttrs args [ "files" "dir" "exclude" ]
             ) // {
                 inherit name entryPath; peers = configs;
             });
-        }) (if !(builtins.isAttrs files) && preface?instances then preface.instances else [ name ])))) (files');
+        }) (if !(args?files && builtins.isAttrs files) && preface?instances then preface.instances else [ name ])))) (files');
 
         withId = lib.filterAttrs (name: node: node.preface?id) configs;
         ids = mapMerge (name: node: { "${toString node.preface.id}" = name; }) withId;
@@ -156,14 +162,14 @@ in rec {
         inputs ? { },
         # Arguments »{ files, dir, exclude, }« to »mkNixosConfigurations«, see there for details. May also be a list of those attrsets, in which case those multiple sets of hosts will be built separately by »mkNixosConfigurations«, allowing for separate sets of »peers« passed to »mkNixosConfiguration«. Each call will receive all other arguments, and the resulting sets of hosts will be merged.
         systems ? ({ dir = "${inputs.self}/hosts"; exclude = [ ]; }),
-        # List of overlays to set as »config.nixpkgs.overlays«. Defaults to the ».overlay(s)« of all »overlayInputs«/»inputs« (incl. »inputs.self«).
-        overlays ? (builtins.concatLists (map (input: if input?overlay then [ input.overlay ] else if input?overlays then builtins.attrValues input.overlays else [ ]) (builtins.attrValues overlayInputs))),
+        # List of overlays to set as »config.nixpkgs.overlays«. Defaults to ».overlays.default« of all »overlayInputs«/»inputs« (incl. »inputs.self«).
+        overlays ? (lib.remove null (map (input: if input?overlays && input.overlays?default then input.overlays.default else if input?overlay then input.overlay else null) (builtins.attrValues overlayInputs))),
         # (Subset of) »inputs« that »overlays« will be used from. Example: »{ inherit (inputs) self flakeA flakeB; }«.
         overlayInputs ? inputs,
-        # List of Modules to import for all hosts, in addition to the default ones in »nixpkgs«. The host-individual module should selectively enable these. Defaults to all »ModuleInputs«/»inputs«' ».nixosModule(s)« (including »inputs.self.nixosModule(s)«).
-        modules ? (map (input: input.nixosModule or (if input?nixosModules then { imports = builtins.attrValues input.nixosModules; } else { })) (builtins.attrValues moduleInputs)),
-        # (Subset of) »inputs« that »modules« will be used from. (The standard) »nixpkgs« does not export any (useful) modules, since the actual modules are included by default by »nixosSystem«.
-        moduleInputs ? (builtins.removeAttrs inputs [ "nixpkgs" ]),
+        # List of Modules to import for all hosts, in addition to the default ones in »nixpkgs«. The host-individual module should selectively enable these. Defaults to ».nixosModules.default« of all »moduleInputs«/»inputs« (including »inputs.self«).
+        modules ? (lib.remove null (map (input: if input?nixosModules && input.nixosModules?default then input.nixosModules.default else if input?nixosModule then input.nixosModule else null) (builtins.attrValues moduleInputs))),
+        # (Subset of) »inputs« that »modules« will be used from. Example: »{ inherit (inputs) self flakeA flakeB; }«.
+        moduleInputs ? inputs,
         # Additional arguments passed to each module evaluated for the host config (if that module is defined as a function).
         specialArgs ? { },
         # The »nixosSystem« function defined in »<nixpkgs>/flake.nix«, or equivalent.
@@ -196,7 +202,7 @@ in rec {
         # $ nix run /etc/nixos/#$(hostname)
         # Run an root session in the context of a different host (useful if Nix is not installed for root on the current host):
         # $ nix run /etc/nixos/#other-host -- sudo
-        apps = lib.mapAttrs (name: system: { type = "app"; program = "${pkgs.writeShellScript "scripts-${name}" ''
+        apps = lib.mapAttrs (name: system: rec { type = "app"; derivation = pkgs.writeShellScript "scripts-${name}" ''
 
             # if first arg is »sudo«, re-execute this script with sudo (as root)
             if [[ $1 == sudo ]] ; then shift ; exec sudo --preserve-env=SSH_AUTH_SOCK -- "$0" "$@" ; fi
@@ -223,7 +229,7 @@ in rec {
             # either call »$1« with the remaining parameters as arguments, or if »$1« is »-c« eval »$2«.
             if [[ ''${1:-} == -x ]] ; then shift ; set -x ; fi
             if [[ ''${1:-} == -c ]] ; then eval "$2" ; else "$@" ; fi
-        ''}"; }) nixosConfigurations;
+        ''; program = "${derivation}"; }) nixosConfigurations;
 
         # E.g.: $ nix develop /etc/nixos/#$(hostname)
         # ... and then call any of the functions in ./utils/setup-scripts/ (in the context of »$(hostname)«, where applicable).

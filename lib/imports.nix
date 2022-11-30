@@ -1,19 +1,29 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
-    inherit (import "${dirname}/vars.nix" dirname inputs) mapMerge mergeAttrsRecursive endsWith;
+    inherit (import "${dirname}/vars.nix" dirname inputs) mapMergeUnique mergeAttrsRecursive endsWith;
+    inherit (import "${dirname}/misc.nix" dirname inputs) trace;
 in rec {
 
-    # Return a list of the absolute paths of all folders and ».nix« or ».nix.md« files in »dir« whose names are not in »except«.
-    getNixFiles = dir: except: let listing = builtins.readDir dir; in (builtins.filter (e: e != null) (map (name: (
-        if !(builtins.elem name except) && (listing.${name} == "directory" || (builtins.match ''.*[.]nix([.]md)?$'' name) != null) then "${dir}/${name}" else null
-    )) (builtins.attrNames listing)));
-
-    # Builds an attrset that, for each folder that contains a »default.nix«, and for each ».nix« or ».nix.md« file in »dir« (other than those whose names are in »except«), maps the the name of that folder, or the name of the file without extension(s), to its full path.
-    getNamedNixFiles = dir: except: let listing = builtins.readDir dir; in mapMerge (name: if !(builtins.elem name except) then (
-        if (listing.${name} == "directory" && builtins.pathExists "${dir}/${name}/default.nix") then { ${name} = "${dir}/${name}/default.nix"; } else let
+    # Builds an attrset that, for each folder that contains a »default.nix«, and for each ».nix« or ».nix.md« file in »dir«, maps the the name of that folder, or the name of the file without extension(s), to its full path.
+    getNixFiles = dir: mapMergeUnique (name: type: if (type == "directory") then (
+        if (builtins.pathExists "${dir}/${name}/default.nix") then { ${name} = "${dir}/${name}/default.nix"; } else { }
+    ) else (
+        let
             match = builtins.match ''^(.*)[.]nix([.]md)?$'' name;
-        in if (match != null) then { ${builtins.head match} = "${dir}/${name}"; } else { }
-    ) else { }) (builtins.attrNames listing);
+        in if (match != null) then {
+            ${builtins.head match} = "${dir}/${name}";
+        } else { }
+    )) (builtins.readDir dir);
+
+    getNixFilesRecursive = dir: let
+        list = prefix: dir: mapMergeUnique (name: type: if (type == "directory") then (
+            list "${prefix}${name}/" "${dir}/${name}"
+        ) else (let
+            match = builtins.match ''^(.*)[.]nix([.]md)?$'' name;
+        in if (match != null) then {
+            "${prefix}${builtins.head match}" = "${dir}/${name}";
+        } else { })) (builtins.readDir dir);
+    in list "" dir;
 
     ## Decides whether a thing is probably a NixOS configuration module or not.
     #  Probably because almost everything could be a module declaration (any attribute set or function returning one is potentially a module).
@@ -26,10 +36,10 @@ in rec {
 
     ## Decides whether a thing could be a NixPkgs overlay.
     #  Any function with two (usually unnamed) arguments returning an attrset could be an overlay, so that's rather vague.
-    couldBeOverlay = thing: let result1 = thing (builtins.functionArgs thing);  result2 = result1 (builtins.functionArgs result1); in builtins.isFunction thing && builtins.isFunction result1 && builtins.isAttrs result2;
+    couldBeOverlay = thing: let result1 = thing (builtins.functionArgs thing); result2 = result1 (builtins.functionArgs result1); in builtins.isFunction thing && builtins.isFunction result1 && builtins.isAttrs result2;
 
     # Builds an attrset that, for each folder (containing a »default.nix«) or ».nix« or ».nix.md« file (other than »./default.nix«) in this folder, as the name of that folder or the name of the file without extension(s), exports the result of importing that file/folder.
-    importAll = inputs: dir: builtins.mapAttrs (name: path: import path (if endsWith "/default.nix" path then "${dir}/${name}" else dir) inputs) (getNamedNixFiles dir [ "default.nix" ]);
+    importAll = inputs: dir: builtins.mapAttrs (name: path: import path (if endsWith "/default.nix" path then "${dir}/${name}" else dir) inputs) (builtins.removeAttrs (getNixFiles dir) [ "default" ]);
 
     # Import a Nix file that expects the standard `dirname: inputs: ` arguments, providing some additional information and error handling.
     importWrapped = inputs: path: rec {
@@ -51,7 +61,7 @@ in rec {
         module = { _file = fullPath; imports = [ required ]; };
     };
 
-    ## Returns an attrset that, for each file in »dir« (except »default.nix« and as filtered and named by »getNamedNixFiles dir except«), imports that file and exposes only if the result passes »filter«. If provided, the imported value is »wrapped« after filtering.
+    ## Returns an attrset that, for each file in »dir« (except ...), imports that file and exposes only if the result passes »filter«. If provided, the imported value is »wrapped« after filtering.
     #  If a file/folder' import that is rejected by »filter« is an attrset (for example because it results from a call to this function), then all attributes whose values pass »filter« are prefixed with the file/folders name plus a slash and merged into the overall attrset.
     #  Example: Given a file tree like this, where each »default.nix« contains only a call to this function with the containing directory as »dir«, and every other file contains a definition of something accepted by the »filter«:
     #     ├── default.nix
@@ -64,22 +74,22 @@ in rec {
     # The top level »default.nix« returns:
     # { "a" = <filtered>; "b" = <filtered>; "c/d" = <filtered>; "c/e" = <filtered>; }
     importFilteredFlattened = dir: inputs: { except ? [ ], filter ? (thing: true), wrap ? (path: thing: thing), }: let
-        files = getNamedNixFiles dir (except ++ [ "default.nix" ]);
-    in mapMerge (name: path: let
+        files = builtins.removeAttrs (getNixFiles dir) except;
+    in mapMergeUnique (name: path: let
         thing = import path (if endsWith "/default.nix" path then "${dir}/${name}" else dir) inputs;
     in if (filter thing) then (
         { ${name} = wrap path thing; }
     ) else (if (builtins.isAttrs thing) then (
-        mapMerge (name': thing': if (filter thing') then (
+        mapMergeUnique (name': thing': if (filter thing') then (
             { "${name}/${name'}" = thing'; }
         ) else { }) thing
     ) else { })) files;
 
     # Used in a »default.nix« and called with the »dir« it is in, imports all modules in that directory as attribute set. See »importFilteredFlattened« and »isProbablyModule« for details.
-    importModules = inputs: dir: opts: importFilteredFlattened dir inputs (opts // { filter = isProbablyModule; wrap = path: module: { _file = path; imports = [ module ]; }; });
+    importModules = inputs: dir: opts: importFilteredFlattened dir inputs ({ except = [ "default" ]; } // opts // { filter = isProbablyModule; wrap = path: module: { _file = path; imports = [ module ]; }; });
 
     # Used in a »default.nix« and called with the »dir« it is in, imports all overlays in that directory as attribute set. See »importFilteredFlattened« and »couldBeOverlay« for details.
-    importOverlays = inputs: dir: opts: importFilteredFlattened dir inputs (opts // { filter = couldBeOverlay; });
+    importOverlays = inputs: dir: opts: importFilteredFlattened dir inputs ({ except = [ "default" ]; } // opts // { filter = couldBeOverlay; });
 
     # Imports »inputs.nixpkgs« and instantiates it with all ».overlay(s)« provided by »inputs.*«.
     importPkgs = inputs: args: import inputs.nixpkgs ({
@@ -89,7 +99,7 @@ in rec {
     # Given a list of »overlays« and »pkgs« with them applied, returns the subset of »pkgs« that was directly modified by the overlays.
     getModifiedPackages = pkgs: overlays: let
         names = builtins.concatLists (map (overlay: builtins.attrNames (overlay { } { })) (builtins.attrValues overlays));
-    in mapMerge (name: if lib.isDerivation pkgs.${name} then { ${name} = pkgs.${name}; } else { }) names;
+    in mapMergeUnique (name: if lib.isDerivation pkgs.${name} then { ${name} = pkgs.${name}; } else { }) names;
 
     ## Given a path to a module in »nixpkgs/nixos/modules/«, when placed in another module's »imports«, this adds an option »disableModule.${modulePath}« that defaults to being false, but when explicitly set to »true«, disables all »config« values set by the module.
     #  Every module should, but not all modules do, provide such an option themselves.

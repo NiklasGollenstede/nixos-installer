@@ -2,7 +2,7 @@
 # NixOS Modules
 
 A NixOS module is a collection of any number of NixOS option definitions and value assignments to those or other options.
-While the set of imported modules, and thereby that of the defined options, is static (in this case starting with the modules passed to `mkNixosSystem` in `../flake.nix`), the value assignments can generally be contingent on other values (as long as there are no logical loops), making for a highly flexible system construction.
+While the set of imported modules, and thereby that of the defined options, is static (in this case starting with the modules passed to `mkNixosSystem` in `../flake.nix`), the value assignments can generally be contingent on other values (as long as there are no logical loops), making for highly flexible system constructions.
 Since modules can't be imported (or excluded) dynamically, most modules have an `enable` option, which, if false, effectively disables whatever that module does.
 
 Ultimately, the goal of a NixOS configuration is to build an operating system, which is basically a structured collection of program and configuration files.

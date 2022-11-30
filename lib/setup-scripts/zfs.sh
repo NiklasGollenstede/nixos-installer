@@ -1,14 +1,25 @@
 
-## Creates the system's ZFS pools and their datasets.
+## Creates all of the system's ZFS pools that are »createDuringInstallation«, plus their datasets.
 function create-zpools { # 1: mnt
-    local mnt=$1 ; local poolName ; for poolName in "@{!config.wip.fs.zfs.pools[@]}" ; do ( set -eu
+    local poolName ; for poolName in "@{!config.wip.fs.zfs.pools[@]}" ; do
+        if [[ ! @{config.wip.fs.zfs.pools!catAttrSets.createDuringInstallation[$poolName]} ]] ; then continue ; fi
+        create-zpool "$1" "$poolName"
+    done
+}
+
+## Creates a single of the system's ZFS pools and its datasets.
+function create-zpool { # 1: mnt, 2: poolName
+    local mnt=$1 ; local poolName=$2 ; ( set -u
         eval 'declare -A pool='"@{config.wip.fs.zfs.pools[$poolName]}"
         eval 'declare -a vdevs='"${pool[vdevArgs]}"
         eval 'declare -A poolProps='"${pool[props]}"
         eval 'declare -A dataset='"@{config.wip.fs.zfs.datasets[${pool[name]}]}"
         eval 'declare -A dataProps='"${dataset[props]}"
         get-zfs-crypt-props "${dataset[name]}" dataProps
-        declare -a args=( )
+        declare -a args=( ) ; keySrc=/dev/null
+        if [[ ${dataProps[keyformat]:-} == ephemeral ]] ; then
+            dataProps[encryption]=aes-256-gcm ; dataProps[keyformat]=hex ; dataProps[keylocation]=file:///dev/stdin ; keySrc=/dev/urandom
+        fi
         for name in "${!poolProps[@]}" ; do args+=( -o "${name}=${poolProps[$name]}" ) ; done
         for name in "${!dataProps[@]}" ; do args+=( -O "${name}=${dataProps[$name]}" ) ; done
         for index in "${!vdevs[@]}" ; do
@@ -20,12 +31,11 @@ function create-zpools { # 1: mnt
                 if ! is-partition-on-disks "$part" "${blockDevs[@]}" ; then echo "Partition alias $part used by zpool ${pool[name]} does not point at one of the target disks ${blockDevs[@]}" ; exit 1 ; fi
             fi
         done
-        ( PATH=@{native.zfs}/bin ; ${_set_x:-:} ; zpool create "${args[@]}" -R "$mnt" "${pool[name]}" "${vdevs[@]}" )
-    ) && {
-        prepend_trap "@{native.zfs}/bin/zpool export '$poolName'" EXIT
-    } ; done &&
-
-    ensure-datasets $mnt
+        <$keySrc tr -dc 0-9a-f | head -c 64 | ( PATH=@{native.zfs}/bin ; ${_set_x:-:} ; zpool create "${args[@]}" -R "$mnt" "${pool[name]}" "${vdevs[@]}" || exit ) || exit
+        @{native.zfs}/bin/zfs unload-key "$poolName" &>/dev/null || true
+    ) || return
+    prepend_trap "@{native.zfs}/bin/zpool export '$poolName'" EXIT || return
+    ensure-datasets $mnt '^'"$poolName"'($|[/])' || return
 }
 
 ## Ensures that the system's datasets exist and have the defined properties (but not that they don't have properties that aren't defined).
@@ -108,7 +118,7 @@ function ensure-datasets {( set -eu # 1: mnt, 2?: filterExp
 )}
 
 ## Given the name (»datasetPath«) of a ZFS dataset, this deducts crypto-related options from the declared keys (»config.wip.fs.keystore.keys."zfs/..."«).
-function get-zfs-crypt-props { # 1: datasetPath, 2: name_cryptProps, 3: name_cryptKey, 4: name_cryptRoot
+function get-zfs-crypt-props { # 1: datasetPath, 2?: name_cryptProps, 3?: name_cryptKey, 4?: name_cryptRoot
     local hash=@{config.networking.hostName!hashString.sha256:0:8}
     local keystore=/run/keystore-$hash
     local -n __cryptProps=${2:-props} ; local -n __cryptKey=${3:-cryptKey} ; local -n __cryptRoot=${4:-cryptRoot}

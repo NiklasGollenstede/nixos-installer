@@ -4,10 +4,10 @@
 
 This module does two related things:
 * it provides the specification for encryption keys to be generated during system installation, which are then (automatically) used by the [setup scripts](../../lib/setup-scripts/README.md) for various pieces of file system encryption,
-* and it configures a `keystore` LUKS device to be opened (according to the keys specified for it) in the initramfs boot stage to use those keys to unlock other encrypted file systems.
+* and it configures a `keystore` LUKS device to be opened (according to the `keys` specified for it) in the initramfs boot stage, to use those keys to unlock other encrypted file systems.
 
 Keys can always be specified, and the installer may decide to use the setup script functions populating the keystore or not.
-The default functions in [`lib/setup-scripts`](../../lib/setup-scripts/README.md) do populating the keystore, and then use the keys according to the description below.
+The default functions in [`lib/setup-scripts`](../../lib/setup-scripts/README.md) do populate the keystore, and then use the keys according to the description below.
 
 What keys are used for is derived from the attribute name in the `.keys` specification, which (plus a `.key` suffix) also becomes their storage path in the keystore:
 * Keys in `luks/` are used for LUKS devices, where the second path label is both the target device name and source device GPT partition label, and the third and final label is the LUKS key slot (`0` is required to be specified, `1` to `7` are optional).
@@ -19,7 +19,7 @@ The format of the key specification is `method[=args]`, where `method` is the su
 Most key generation methods only make sense in some key usage contexts. A `random` key is impossible to provide to unlock the keystore (which it is stored in), but is well suited to unlock other devices (if the keystore has backups); conversely a USB-partition can be used to headlessly unlock the keystore, but would be redundant for any further devices, as it would also be copied into the keystore.
 
 If the module is `enable`d, a partition and LUKS device `keystore-...` gets configured and the contents of the installation time keystore is copied to it (in its entirety, including intermediate or derived keys and those unlocking the keystore itself (TODO: this could be optimized)).
-This LUKS device is then configured to be unlocked (using any ot the key methods specified for it) before anything else during boot, and closed before leaving the initramfs phase.
+This LUKS device is then configured to be unlocked (using any of the key methods specified for it -- by default, key slot 0 is set to the `hostname`) before anything else during boot, and closed before leaving the initramfs phase.
 Any number of other devices may thus specify paths in the keystore as keylocation to be unlocked during boot without needing to prompt for further secrets, and without exposing the keys to the running system.
 
 
@@ -43,7 +43,7 @@ in let module = {
         ); };
         unlockMethods = {
             trivialHostname = lib.mkOption { description = "For headless auto boot, use »hostname« (in a file w/o newline) as trivial password/key for the keystore."; type = lib.types.bool; default = lib.elem "hostname" keystoreKeys; };
-            usbPartition = lib.mkOption { type = lib.types.bool; default = (lib.elem "usb-part" keystoreKeys); };
+            usbPartition = lib.mkOption { description = "Use (the random key stored on) a specifically named (tiny) GPT partition (usually on a USB-stick) to automatically unlock the keystore. Use »nix run .#$hostName -- add-bootkey-to-keydev $devPath« (see »${inputs.self}/lib/setup-scripts/maintenance.sh«) to cerate such a partition."; type = lib.types.bool; default = (lib.elem "usb-part" keystoreKeys); };
             pinThroughYubikey = lib.mkOption { type = lib.types.bool; default = (lib.any (type: lib.wip.matches "^yubikey-pin=.*$" type) keystoreKeys); };
         };
     }; };
@@ -65,7 +65,7 @@ in let module = {
             allowDiscards = lib.mkDefault true; # If attackers can observe trimmed blocks, then they can probably do much worse ...
         }; }) (lib.wip.filterMatching ''^luks/.*/0$'' (lib.attrNames cfg.keys)));
 
-        ${prefix}.fs.keystore.keys."luks/keystore-${hash}/0" = lib.mkOptionDefault "hostname";
+        ${prefix}.fs.keystore.keys."luks/keystore-${hash}/0" = lib.mkOptionDefault "hostname"; # (This is the only key that the setup scripts unconditionally require to be declared.)
 
     }) ({
 

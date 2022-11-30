@@ -94,7 +94,7 @@ function gen-key-yubikey-challenge {( set -eu # 1: _, 2: serialAndSlotAndChallen
     serial=$( <<<"$args" cut -d: -f1 ) ; slot=$( <<<"$args" cut -d: -f2 )
     challenge=${args/$serial:$slot:/}
 
-    if [[ "$serial" != "$( @{native.yubikey-personalization}/bin/ykinfo -sq )" ]] ; then printf 'Please insert / change to YubiKey with serial %s!\n' "$serial" 1>&2 ; fi
+    if [[ "$serial" != "$( @{native.yubikey-personalization}/bin/ykinfo -sq 2>/dev/null )" ]] ; then printf 'Please insert / change to YubiKey with serial %s!\n' "$serial" 1>&2 ; fi
     if [[ ! "${3:-}" ]] ; then
         read -p 'Challenging YubiKey '"$serial"' slot '"$slot"' twice with '"${message:-challenge »"$challenge":1/2«}"'. Enter to continue, or Ctrl+C to abort:'
     else

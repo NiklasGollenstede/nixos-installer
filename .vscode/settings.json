@@ -10,6 +10,7 @@
 		"attrset", "attrsets", // nix/abbr (attribute set)
 		"autologin", // agetty
 		"binfmt", // abbr "binary format"
+		"blkdiscard", // program
 		"blkid", // program / function
 		"blockdev", // program / function
 		"bootable", // word (~= able to boot)
@@ -20,6 +21,7 @@
 		"builtins", // nix
 		"cachefile", // zfs
 		"canmount", // zfs
+		"cdetect", // abbr
 		"checksumming", // word
 		"cmake", // program
 		"cmds", // abbr (commands)
@@ -36,22 +38,29 @@
 		"dedup", // zfs
 		"deps", // abbr dependencies
 		"devs", // abbr (devices)
+		"dir_nlink", // ext4 option
 		"dmask", // mount
 		"dnodesize", // zfs
 		"dontUnpack", // nixos
 		"dosfstools", // package
 		"draid", // zfs
 		"dropbear", // program
+		"dtoverlay", // option
+		"dtparam", // option
 		"e2fsprogs", // package
+		"eeprom", // abbr
 		"elif", // abbr (else if)
 		"encryptionroot", // zfs
 		"extglob", // cli arg
+		"extlinux", // program
+		"extra_isize", // ext4 option
 		"fallocate", // program / function
 		"fdisk", // program
 		"fetchpatch", // nix
 		"fetchurl", // nix function
 		"filesystems", // plural
 		"findutils", // package
+		"firmwareLinuxNonfree", // nixos
 		"fmask", // mount
 		"foldl", // nix (fold left)
 		"foldr", // nix (fold right)
@@ -66,6 +75,7 @@
 		"gnugrep", // package
 		"gnused", // package
 		"gollenstede", // name
+		"gpio", // abbr (general purpose IO)
 		"gptfdisk", // package
 		"headlessly", // word
 		"hostbus", // cli arg
@@ -82,8 +92,11 @@
 		"keylocation", // zfs
 		"keystatus", // zfs
 		"kmod", // linux
+		"lazy_itable_init", // ext4 option
 		"lazytime", // f2fs
+		"leds", // plural
 		"libblockdev", // package
+		"libraspberrypi", // program
 		"libubootenv", // package
 		"logbias", // zfs
 		"losetup", // program / function
@@ -91,9 +104,11 @@
 		"lsusb", // program / function
 		"luks", // linux
 		"macaddr", // cli arg
+		"metadata_csum", // ext4 option
 		"mkdir", // program / function
 		"mkenvimage", // program
 		"mktemp", // program / function
+		"mmap", // abbr "memory map"
 		"modifyvm", // virtual box
 		"mountpoint", // program / function
 		"mtab", // linux
@@ -114,6 +129,7 @@
 		"noheadings", // cli arg
 		"nohibernate", // kernel param
 		"nosuid", // mount option
+		"ondemand", // concat
 		"oneshot", // systemd
 		"optimise", // B/E
 		"ostype", // virtual box
@@ -137,8 +153,11 @@
 		"raspi3b", // cli arg
 		"rawdisk", // virtual box
 		"realpath", // program / function
+		"redistributable", // word
 		"refreservation", // zfs
 		"relatime", // mount option
+		"rpiboot", // package
+		"rpicm4", // abbr (Raspberry PI Compute Module 4)
 		"rpool", // zfs
 		"rprivate", // linux
 		"sata", // storage protocol
@@ -176,7 +195,9 @@
 		"upperdir", // mount overlay option
 		"upstreamed", // word
 		"urandom", // linux
+		"usbhid", // kmod
 		"vboxusers", // virtual box
+		"vcgencmd", // program
 		"vdev", "vdevs", // zfs
 		"vfat", // linux
 		"virt", // abbr (virtualization)

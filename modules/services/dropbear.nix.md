@@ -16,15 +16,15 @@ in {
 
     options.${prefix} = { services.dropbear = {
         enable = lib.mkEnableOption "dropbear SSH daemon";
-        socketActivation = lib.mkEnableOption "socket activation mode for dropbear";
-        rootKeys = lib.mkOption { description = "Literal lines to write to »/root/.ssh/authorized_keys«"; default = [ ]; type = lib.types.listOf lib.types.str; };
+        port = lib.mkOption { description = "TCP port to listen on and open a firewall rule for."; type = lib.types.port; default = 22; };
+        socketActivation = lib.mkEnableOption "socket activation mode for dropbear, where systemd launches dropbear on incoming TCP connections, instead of dropbear permanently running and listening on its TCP port";
+        rootKeys = lib.mkOption { description = "Literal lines to write to »/root/.ssh/authorized_keys«"; default = ""; type = lib.types.lines; };
         hostKeys = lib.mkOption { description = "Location of the host key(s) to use. If empty, then a key(s) will be generated at »/etc/dropbear/dropbear_(ecdsa/rsa)_host_key« on first access to the server."; default = [ ]; type = lib.types.listOf lib.types.path; };
     }; };
 
     config = let
         defaultArgs = lib.concatStringsSep "" [
             "${pkgs.dropbear}/bin/dropbear"
-            " -p 22" # listen on TCP/22
             (if cfg.hostKeys == [ ] then (
                 " -R" # generate host keys on connection
             ) else lib.concatMapStrings (path: (
@@ -33,9 +33,8 @@ in {
         ];
 
     in lib.mkIf cfg.enable (lib.mkMerge [ ({
-        environment.systemPackages = [ pkgs.dropbear ];
 
-        networking.firewall.allowedTCPPorts = [ 22 ];
+        networking.firewall.allowedTCPPorts = [ cfg.port ];
 
     }) (lib.mkIf (!cfg.socketActivation) {
 
@@ -43,18 +42,21 @@ in {
             description = "dropbear SSH server (listening)";
             wantedBy = [ "multi-user.target" ]; after = [ "network.target" ];
             serviceConfig.ExecStartPre = lib.mkIf (cfg.hostKeys == [ ]) "${pkgs.coreutils}/bin/mkdir -p /etc/dropbear/";
-            serviceConfig.ExecStart = defaultArgs + " -F -E"; # don't fork, use stderr
+            serviceConfig.ExecStart = lib.concatStringsSep "" [
+                defaultArgs
+                " -p ${toString cfg.port}" # listen on TCP/${port}
+                " -F -E" # don't fork, use stderr
+            ];
             #serviceConfig.PIDFile = "/var/run/dropbear.pid"; serviceConfig.Type = "forking"; after = [ "network.target" ]; # alternative to »-E -F« (?)
         };
 
     }) (lib.mkIf (cfg.socketActivation) {
 
-        # This did not work: dropbear errors out with "socket operation on non-socket".
-
         systemd.sockets.dropbear = { # start a »dropbear@.service« on any number of TCP connections on port 22
             conflicts = [ "dropbear.service" ];
-            listenStreams = [ "22" ];
-            socketConfig.Accept = true;
+            listenStreams = [ "${toString cfg.port}" ];
+            socketConfig.Accept = "yes";
+            #socketConfig.Restart = "always";
             wantedBy = [ "sockets.target" ]; # (isn't this implicit?)
         };
         systemd.services."dropbear@" = {
@@ -62,21 +64,16 @@ in {
             after = [ "syslog.target" ];
             serviceConfig.PreExec = lib.mkIf (cfg.hostKeys == [ ]) "${pkgs.coreutils}/bin/mkdir -p /etc/dropbear/"; # or before socket?
             serviceConfig.ExecStart = lib.concatStringsSep "" [
-                "-"  # for the most part ignore exit != 0
+                "-"   # for the most part ignore exit != 0
                 defaultArgs
                 " -i" # handle a single connection on stdio
             ];
+            serviceConfig.StandardInput = "socket";
         };
 
-    }) (lib.mkIf (cfg.rootKeys != [ ]) {
+    }) (lib.mkIf (cfg.rootKeys != "") {
 
-        # TODO: This is suboptimal when the system gets activated more than once. Could use a »tmpfiles« rule, or simply »>« (instead of »>>« here).
-        system.activationScripts.root-authorized_keys = ''
-            mkdir -pm 700 /root/.ssh/
-            [ -e /root/.ssh/authorized_keys ] || install -m 600 -T /dev/null /root/.ssh/authorized_keys
-            chmod 600 /root/.ssh/authorized_keys
-            ${lib.concatMapStringsSep "\n" (key: "printf %s ${lib.escapeShellArg key} >>/root/.ssh/authorized_keys") cfg.rootKeys}
-        '';
+        systemd.tmpfiles.rules = [ (lib.wip.mkTmpfile { type = "L+"; path = "/root/.ssh/authorized_keys"; argument = pkgs.writeText "root-ssh-authorized_keys" cfg.rootKeys; }) ];
 
     }) ]);
 

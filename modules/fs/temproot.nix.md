@@ -212,13 +212,22 @@ in {
             "L+ /root/.bash_history                  - - - -            ../${keep}/root/.bash_history"
             "f                                                            /${keep}/root/.local/share/nix/repl-history     0600  root  root  -"
             "L+ /root/.local/share/nix/repl-history  - - - -   ../../../../${keep}/root/.local/share/nix/repl-history"
+
+            # SSHd host keys:
+            "d /${keep}/etc/ssh/                               0755  root  root   -  -"
+            "L         /etc/ssh/ssh_host_ed25519_key           -     -     -      -  /${keep}/etc/ssh/ssh_host_ed25519_key"
+            "L         /etc/ssh/ssh_host_ed25519_key.pub       -     -     -      -  /${keep}/etc/ssh/ssh_host_ed25519_key.pub"
+            "L         /etc/ssh/ssh_host_rsa_key               -     -     -      -  /${keep}/etc/ssh/ssh_host_rsa_key"
+            "L         /etc/ssh/ssh_host_rsa_key.pub           -     -     -      -  /${keep}/etc/ssh/ssh_host_rsa_key.pub"
         ];
+
         fileSystems = { # this does get applied early
             # (on systems without hardware clock, this allows systemd to provide an at least monolithic time after restarts)
             "/var/lib/systemd/timesync" = { device = "/local/var/lib/systemd/timesync"; options = [ "bind" "nofail" ]; }; # TODO: add »neededForBoot = true«?
             # save persistent timer states
             "/var/lib/systemd/timers" = { device = "/local/var/lib/systemd/timers"; options = [ "bind" "nofail" ]; }; # TODO: add »neededForBoot = true«?
         };
+
         security.sudo.extraConfig = "Defaults lecture=never"; # default is »once«, but we'd forget that we did that
 
 
@@ -293,6 +302,7 @@ in {
                 compress_algorithm = "lz4"; # compress using lz4
                 compress_chksum = true; # verify checksums (when decompressing data blocks?)
                 lazytime = true; # update timestamps asynchronously
+                discard = true;
             });
         } else {
             formatOptions = (lib.concatStrings [
@@ -305,6 +315,7 @@ in {
                 " -E nodiscard" # do not trim the whole blockdev upon formatting
                 " -e panic" # when (critical?) FS errors are detected, reset the system
             ]); options = optionsToList (cfg.local.mountOptions // {
+                discard = true;
             });
         });
         # TODO: "F2FS and its tools support various parameters not only for configuring on-disk layout, but also for selecting allocation and cleaning algorithms."

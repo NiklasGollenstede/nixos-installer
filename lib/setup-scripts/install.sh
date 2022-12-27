@@ -77,10 +77,10 @@ function install-system-to {( set -u # 1: mnt
         chmod -R u+w $mnt/@{config.environment.etc.nixos.source} || exit
     fi
 
-    # Set this as the initial system generation:
+    # Set this as the initial system generation (just in case »nixos-install-cmd« won't):
     mkdir -p -m 755 $mnt/nix/var/nix/profiles || exit
-    ln -sT $(realpath $targetSystem) $mnt/nix/var/nix/profiles/system-1-link || exit
-    ln -sT system-1-link $mnt/nix/var/nix/profiles/system || exit
+    [[ -e $mnt/nix/var/nix/profiles/system-1-link ]] || ln -sT $(realpath $targetSystem) $mnt/nix/var/nix/profiles/system-1-link || exit
+    [[ -e $mnt/nix/var/nix/profiles/system ]] || ln -sT system-1-link $mnt/nix/var/nix/profiles/system || exit
 
     # Support cross architecture installation (not sure if this is actually required)
     if [[ $(cat /run/current-system/system 2>/dev/null || echo "x86_64-linux") != "@{config.wip.preface.hardware}"-linux ]] ; then
@@ -91,7 +91,7 @@ function install-system-to {( set -u # 1: mnt
     # Copy system closure to new nix store:
     if [[ ${SUDO_USER:-} ]] ; then chown -R $SUDO_USER: $mnt/nix/store $mnt/nix/var || exit ; fi
     ( cmd=( nix --extra-experimental-features nix-command --offline copy --no-check-sigs --to $mnt ${topLevel:-$targetSystem} ) ; if [[ ${args[quiet]:-} ]] ; then "${cmd[@]}" --quiet &>/dev/null || exit ; else set -x ; time "${cmd[@]}" || exit ; fi ) || exit ; rm -rf $mnt/nix/var/nix/gcroots || exit
-    # TODO: if the target has @{config.nix.autoOptimiseStore} and the host doesn't (there is no .links dir?), optimize now
+    # TODO: if the target has @{config.nix.settings.auto-optimise-store} and the host doesn't (there is no .links dir?), optimize now
     if [[ ${SUDO_USER:-} ]] ; then chown -R root:root $mnt/nix $mnt/nix/var || exit ; chown :30000 $mnt/nix/store || exit ; fi
 
     # Run the main install command (primarily for the bootloader):

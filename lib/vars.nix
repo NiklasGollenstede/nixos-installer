@@ -94,6 +94,32 @@ in rec {
         s = from: to: builtins.substring from (to - from) hash;
     in "${s 0 8}-${s 8 12}-5${s 13 16}-8${s 17 20}-${s 20 32}";
 
+    ## Generate an entry for »systemd.tmpfiles.rules« with named attributes and proper escaping.
+    #  This behaves according to the man page, but contrary to what the man page says/implies:
+    #  * a single »%« is actually interpreted verbatim, as long as it is not followed by a letter (I guess a "specifier" is a »%« followed by a letter or another »%«),
+    #  * »\xDD« escapes don't work in the »type« field (e.g. error: "Unknown modifiers in command 'x66+'" for "\x66+", which should be interpreted as "f+"),
+    #  * none of the »\« I tried (»\n«, »\t«, »\xDD«) worked in the »path« (it simply removed the »\«); Only »\\« correctly results in »\«.
+    #  => I assume the "Fields may contain C-style escapes" isn't technically incorrect, but the implied "... and they are interpreted as such" actually only applies to the »argument« field. The man page also doesn't actually say what consequence quoting has (I assume it prevents splitting at " ", but anything else?).
+    mkTmpfile = {
+        type ? "d", # One of [ "f" "f+" "w" "w+" "d" "D" "e" "v" "q" "Q" "p" "p+" "L" "L+" "c" "c+" "b" "b+" "C" "x" "X" "r" "R" "z" "Z" "t" "T" "h" "H" "a" "a+" "A" "A+" ].
+        path, pathSubstitute ? false, # String starting with "/" or (if »pathSubstitute == true«) also "%"
+        mode ? "-", # 4 digit octal works. Can be prefixed with "~" (mask with existing mode) or ":" (keep existing mode).
+        user ? "-", group ? user,
+        age ? "-",
+        argument ? "", argumentSubstitute ? false, # Depends on type.
+    }: let
+        # »systemd/src/basic/string-util.h« defines »WHITESPACE = " \t\n\r"«. »toJSON« escapes all of these except for " ", but that only matters if it is the first char of the (unquoted) argument.
+        esc = s: if s == "-" then s else builtins.toJSON s; noSub = builtins.replaceStrings [ "%" ] [ "%%" ];
+        argument' = builtins.substring 1 ((builtins.stringLength (esc argument)) - 2) (esc argument);
+        argument'' = if builtins.substring 0 1 argument' != " " then argument'
+        else ''\x20${builtins.substring 1 ((builtins.stringLength argument') - 1) argument'}'';
+    in ''${type} ${if pathSubstitute then esc path else noSub (esc path)} ${esc mode} ${esc user} ${esc group} ${esc age} ${if pathSubstitute then argument'' else noSub argument''}'';
+/*
+    systemd.tmpfiles.rules = [
+        (lib.my.mkTmpfile { type = "f+"; path = "/home/user/t\"e\t%t\n!"; user = "user"; argument = " . foo\nbar\r\n\tba%!\n"; })
+        ''f+ "/home/user/test!\"!\t!%%!\x20! !\n!${"\n"}%!%a!\\!" - "user" "user" - \x20. foo%a!\nbar\r\n\tba%%!\n''
+    ];
+ */
 
     ## Math
 

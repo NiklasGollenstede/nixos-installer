@@ -73,9 +73,9 @@ function gen-key-home-yubikey {( set -eu # 1: usage, 2: serialAndSlotAndUser(as 
 ## Generates a reproducible secret by prompting for a pin/password and then challenging slot »$slot« of YubiKey »$serial«.
 function gen-key-yubikey-pin {( set -eu # 1: usage, 2: serialAndSlot(as »serial:slot«)
     usage=$1 ; serialAndSlot=$2
-    password=$(prompt-new-password "/ pin as challenge to YubiKey »$serialAndSlot« as key for »@{config.networking.hostName}:$usage«")
-    if [[ ! $password ]] ; then exit 1 ; fi
-    gen-key-yubikey-challenge "$usage" "$serialAndSlot:$password" true "password / pin as key for »@{config.networking.hostName}:$usage«"
+    pin=$( prompt-new-password "/ pin as challenge to YubiKey »$serialAndSlot« as key for »@{config.networking.hostName}:$usage«" )
+    if [[ ! $pin ]] ; then exit 1 ; fi
+    gen-key-yubikey-challenge "$usage" "$serialAndSlot:$pin" true "password / pin as key for »@{config.networking.hostName}:$usage«"
 )}
 
 ## Generates a reproducible secret for a certain »$use«case and optionally »$salt« on a »$host« by challenging slot »$slot« of YubiKey »$serial«.

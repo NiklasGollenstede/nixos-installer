@@ -1,4 +1,10 @@
 {
+	"markdown.validate.ignoredLinks": [
+		"./modules/",
+		"./modules/fs/",
+		"./patches/",
+		"./example/",
+	],
 	"cSpell.diagnosticLevel": "Information", // to find spelling mistakes
 	"cSpell.words": [
 		"aarch64", // processor architecture
@@ -9,6 +15,7 @@
 		"askpass", // program
 		"attrset", "attrsets", // nix/abbr (attribute set)
 		"autologin", // agetty
+		"autotrim", // zpool property
 		"binfmt", // abbr "binary format"
 		"blkdiscard", // program
 		"blkid", // program / function
@@ -28,6 +35,7 @@
 		"compress_chksum", // f2fs
 		"concat", // abbr
 		"controlvm", // virtual box
+		"conv", // dd option
 		"convertfromraw", // virtual box
 		"coreutils", // package
 		"createrawvmdk", // virtual box
@@ -38,6 +46,7 @@
 		"dedup", // zfs
 		"deps", // abbr dependencies
 		"devs", // abbr (devices)
+		"diffutils", // package
 		"dir_nlink", // ext4 option
 		"dmask", // mount
 		"dnodesize", // zfs
@@ -78,11 +87,15 @@
 		"gpio", // abbr (general purpose IO)
 		"gptfdisk", // package
 		"headlessly", // word
+		"hetzner", // comapny
+		"HISTCONTROL", // bash option
 		"hostbus", // cli arg
 		"hostfwd", // cli arg
 		"hostiocache", // virtual box
 		"hostport", // cli arg
 		"hugepages", // linux
+		"ignoredups", // bash option
+		"ignorespace", // bash option
 		"inetutils", // package
 		"inodes", // plural
 		"internalcommands", // virtual box
@@ -98,6 +111,7 @@
 		"libblockdev", // package
 		"libraspberrypi", // program
 		"libubootenv", // package
+		"libutil", // concat
 		"logbias", // zfs
 		"losetup", // program / function
 		"lowerdir", // mount overlay option
@@ -129,6 +143,7 @@
 		"noheadings", // cli arg
 		"nohibernate", // kernel param
 		"nosuid", // mount option
+		"notrunc", // dd option
 		"ondemand", // concat
 		"oneshot", // systemd
 		"optimise", // B/E
@@ -136,6 +151,7 @@
 		"OVMF", // package
 		"partlabel", // linux
 		"partprobe", // program / function
+		"partuuid", // linux
 		"passthru", // nix
 		"pbkdf", // cli arg
 		"pflash", // cli arg
@@ -166,9 +182,11 @@
 		"setsid", // program / function
 		"setuid", // cli arg
 		"sgdisk", // program
+		"shopt", // bash option
 		"showvminfo", // virtual box
 		"sigs", // cli arg
 		"socat", // program / function
+		"specialisation", "specialisations", // nixos option
 		"startvm", // virtual box
 		"stdenv", // nix
 		"storageattach", // virtual box
@@ -176,6 +194,7 @@
 		"sublist", // Nix
 		"swsuspend", // parameter
 		"syncoid", // program
+		"syslinux", // package
 		"temproot", // abbr (temporary root (FS))
 		"timesync", // systemd
 		"TMPDIR", // env var
@@ -214,5 +233,6 @@
 		"yubikey", // program
 		"YubiKeys", // plural
 		"zfsutil", // program / function
-	]
+		"zstd", "zstdcat", // program / function
+	],
 }

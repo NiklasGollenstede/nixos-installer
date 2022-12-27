@@ -4,9 +4,12 @@
 
 Device specific config for any 64bit capable Raspberry PI (esp. rPI4 and CM4, but also 3B(+) and Zero 2, maybe others).
 
+To set up a rPI host, connect it's boot medium (USB SSD or microSD card) to some other host, and run [`install-system`](../../lib/setup-scripts/README.md#install-system-documentation), directly targeting the future boot medium.
+
 
 ## Notes
 
+* Importing this module also makes the [`hardware.raspberry-pi."4".*`](https://github.com/NixOS/nixos-hardware/blob/master/raspberry-pi/4/) options from [`nixos-hardware`](https://github.com/NixOS/nixos-hardware/) available (but disabled by default).
 * All the `boot.loader.raspberryPi.*` stuff (and maybe also `boot.kernelParams`) seems to be effectively disabled if `boot.loader.generic-extlinux-compatible.enable == true`.
   The odd thing is that various online sources, including `nixos-hardware`, enable extlinux (this may simply be because `nixos-generate-config` sets this by default, purely based on the presence of `/boot/extlinux` in the (derived from more generic) default images).
   Without extlinux, u-boot is also disabled, which means that (on an rPI4) there is no way to get a generation selection menu, and generations would need to be restored by moving files in the `/boot` partition manually.
@@ -24,12 +27,12 @@ in {
 
     options.${prefix} = { hardware.raspberry-pi = {
         enable = lib.mkEnableOption "base configuration for Raspberry Pi 64bit hardware";
-        i2c = lib.mkEnableOption "the ARM i²c /dev/i2c-1 on pins 3+5 / GPIO2+3 (/ SDA+SCL)";
+        i2c = lib.mkEnableOption ''the ARM i²c /dev/i2c-1 on pins 3+5 / GPIO2+3 (/ SDA+SCL). Also see `hardware.raspberry-pi."4".i2c{0,1}.enable`'';
         lightless = lib.mkEnableOption "operation without any activity lights";
     }; };
 
     ## Import the rPI4 config from nixos-hardware, but have it disabled by default.
-    # This provides some options for additional onboard hardware components as »hardware.raspberry-pi."4".*«, see: https://github.com/NixOS/nixos-hardware/blob/master/raspberry-pi/4/
+    #  This provides some options for additional onboard hardware components as »hardware.raspberry-pi."4".*«, see: https://github.com/NixOS/nixos-hardware/blob/master/raspberry-pi/4/
     imports = let
         path = "${inputs.nixos-hardware}/raspberry-pi/4/default.nix"; module = import path args;
     in [ { _file = path; imports = [ {

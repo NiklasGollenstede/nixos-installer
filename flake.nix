@@ -5,7 +5,7 @@
 ); inputs = {
 
     # To update »./flake.lock«: $ nix flake update
-    nixpkgs = { url = "github:NixOS/nixpkgs/nixos-22.05"; };
+    nixpkgs = { url = "github:NixOS/nixpkgs/nixos-22.11"; };
     nixos-hardware = { url = "github:NixOS/nixos-hardware/master"; };
     config = { type = "github"; owner = "NiklasGollenstede"; repo = "nix-wiplib"; dir = "example/defaultConfig"; rev = "5e9cc7ce3440be9ce6aeeaedcc70db9c80489c5f"; }; # Use some previous commit's »./example/defaultConfig/flake.nix« as the default config for this flake.
 
@@ -21,7 +21,7 @@
 
 in [ # Run »nix flake show --allow-import-from-derivation« to see what this merges to:
     repo # lib.* nixosModules.* overlays.*
-    (lib.wip.mkSystemsFlake { inherit inputs; moduleInputs = builtins.removeAttrs inputs [ "nixpkgs" "nixos-hardware" ]; }) # nixosConfigurations.* apps.*-linux.* devShells.*-linux.* packages.*-linux.all-systems
+    (lib.wip.mkSystemsFlake { inherit inputs; }) # nixosConfigurations.* apps.*-linux.* devShells.*-linux.* packages.*-linux.all-systems
     (lib.wip.forEachSystem [ "aarch64-linux" "x86_64-linux" ] (localSystem: { # packages.*-linux.* defaultPackage.*-linux
         packages = builtins.removeAttrs (lib.wip.getModifiedPackages (lib.wip.importPkgs inputs { system = localSystem; }) overlays) [ "libblockdev" ];
         defaultPackage = self.packages.${localSystem}.all-systems;

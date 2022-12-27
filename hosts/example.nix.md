@@ -37,7 +37,7 @@ in { imports = [ ({ ## Hardware
 
     ## What follows is a whole bunch of boilerplate-ish stuff, most of which multiple hosts would have in common and which would thus be moved to one or more modules:
 
-    boot.loader.systemd-boot.enable = true; boot.loader.grub.enable = false;
+    wip.bootloader.extlinux.enable = true;
 
     # Example of adding and/or overwriting setup/maintenance functions:
     wip.setup.scripts.install-overwrite = { path = ../example/install.sh.md; order = 1000; };
@@ -96,6 +96,9 @@ in { imports = [ ({ ## Hardware
 
 }) (lib.mkIf (name == "example-raidz") { ## Multi-disk ZFS setup
 
+    wip.bootloader.extlinux.enable = lib.mkForce false; # use UEFI boot this time
+    boot.loader.systemd-boot.enable = true; boot.loader.grub.enable = false;
+
     wip.fs.disks.devices = lib.genAttrs ([ "primary" "raidz1" "raidz2" "raidz3" ]) (name: { size = "16G"; });
     wip.fs.boot.enable = true; wip.fs.boot.size = "512M";
 
@@ -114,7 +117,7 @@ in { imports = [ ({ ## Hardware
     wip.fs.disks.partitions."rpool-arc-${hash}" = { type = "bf00"; };
 
 
-}) ({ ## Actual Config
+}) ({ ## Base Config
 
     # Some base config:
     wip.base.enable = true;
@@ -132,7 +135,8 @@ in { imports = [ ({ ## Hardware
     boot.kernelParams = [ /* "console=tty1" */ "console=ttyS0" "boot.shell_on_fail" ]; wip.base.panic_on_fail = false;
 
     wip.services.dropbear.enable = true;
-    #wip.services.dropbear.rootKeys = [ ''${lib.readFile "${dirname}/....pub"}'' ];
+    wip.services.dropbear.rootKeys = ''${lib.readFile "${dirname}/../example/ssh-login.pub"}'';
+    wip.services.dropbear.socketActivation = true;
 
     #wip.fs.disks.devices.primary.gptOffset = 64;
     #wip.fs.disks.devices.primary.size = "250059096K"; # 256GB Intel H10

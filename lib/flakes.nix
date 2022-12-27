@@ -53,7 +53,9 @@ in rec {
     #     ]; # ...
     # }; in inputs.wiplib.lib.wip.patchFlakeInputsAndImportRepo inputs patches ./. (inputs@{ self, nixpkgs, ... }: repo@{ nixosModules, overlays, lib, ... }: let ... in [ repo ... ])
     patchFlakeInputsAndImportRepo = inputs: patches: repoPath: outputs: (
-        patchFlakeInputs inputs patches (inputs: importRepo inputs repoPath (outputs inputs))
+        patchFlakeInputs inputs patches (inputs: importRepo inputs repoPath (outputs (inputs // {
+            self = inputs.self // { outPath = builtins.path { path = repoPath; name = "source"; }; }; # If the »flake.nix is in a sub dir of a repo, "${inputs.self}" would otherwise refer to the parent. (?)
+        })))
     );
 
     # Merges a list of flake output attribute sets.
@@ -82,21 +84,23 @@ in rec {
     in let system = { inherit preface; } // (nixosSystem {
         system = buildSystem;
 
-        modules = [ # Anything specific to only this evaluation of the module tree should go here.
+        modules = [ { imports = [ # Anything specific to only this evaluation of the module tree should go here.
             (args.config or (importWrapped inputs entryPath).module)
-            { _module.args = { inherit name; }; }
+            { _module.args.name = lib.mkOverride 99 name; } # (specialisations can somehow end up with the name »configuration«, which is very incorrect)
             { networking.hostName = name; }
-        ];
+        ]; _file = "${dirname}/flakes.nix#modules"; } ];
 
-        extraModules = modules ++ [ ({ # These are passed as »extraModules« module argument and can thus conveniently be reused when defining containers and such (Therefore define as much stuff as possible here).
+        extraModules = modules ++ [ { imports = [ ({ # These are passed as »extraModules« module argument and can thus conveniently be reused when defining containers and such (Therefore define as much stuff as possible here).
 
-        }) ({
+        }) ({ config, ... }: {
 
             nixpkgs = { inherit overlays; }
             // (if buildSystem != targetSystem then { localSystem.system = buildSystem; crossSystem.system = targetSystem; } else { system = targetSystem; });
 
             _module.args = builtins.removeAttrs specialArgs [ "name" ]; # (pass the args here, so that they also apply to any other evaluation using »extraModules«)
-            ${prefix}.base.includeInputs = lib.mkDefault inputs;
+            ${prefix}.base.includeInputs = lib.mkDefault (if config.boot.isContainer then inputs // {
+                self = null; # avoid changing (and thus restarting) the containers on every trivial change
+            } else inputs);
 
             system.nixos.revision = lib.mkIf (inputs?nixpkgs && inputs.nixpkgs?rev) inputs.nixpkgs.rev; # (evaluating the default value fails under some circumstances)
 
@@ -122,7 +126,7 @@ in rec {
                 default = context: substituteImplicit { inherit pkgs; scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues config.${prefix}.setup.scripts); context = { inherit config options pkgs inputs; } // context; }; # inherit (builtins) trace;
             };
 
-        }) ];
+        }) ]; _file = "${dirname}/flakes.nix#extraModules"; } ];
 
         #specialArgs = specialArgs; # (This is already set during module import, while »_module.args« only becomes available during module evaluation (before that, using it causes infinite recursion). Since it can't be ensured that this is set in every circumstance where »extraModules« are being used, it should not be set at all.)
 
@@ -215,6 +219,7 @@ in rec {
                     for file in ~/.bash_profile ~/.bash_login ~/.profile ; do
                         if [[ -r $file ]] ; then . $file ; break ; fi
                     done ; unset $file
+                    declare -A args=( ) ; declare -a argv=( ) # some functions expect these
                     # add active »hostName« to shell prompt
                     PS1=''${PS1/\\$/\\[\\e[93m\\](${name})\\[\\e[97m\\]\\$}
                 ''}EOS
@@ -235,10 +240,12 @@ in rec {
         # ... and then call any of the functions in ./utils/setup-scripts/ (in the context of »$(hostname)«, where applicable).
         # To get an equivalent root shell: $ nix run /etc/nixos/#functions-$(hostname) -- sudo bash
         devShells = lib.mapAttrs (name: system: pkgs.mkShell {
+            inherit name;
             nativeBuildInputs = tools ++ [ pkgs.nixos-install-tools ];
             shellHook = ''
                 ${system.config.${prefix}.setup.appliedScripts { native = pkgs; }}
                 # add active »hostName« to shell prompt
+                declare -A args=( ) ; declare -a argv=( ) # some functions expect these
                 PS1=''${PS1/\\$/\\[\\e[93m\\](${name})\\[\\e[97m\\]\\$}
             '';
         }) nixosConfigurations;

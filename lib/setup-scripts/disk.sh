@@ -97,6 +97,7 @@ function partition-disk { # 1: name, 2: blockDev, 3?: devSize
 
     local -a sgdisk=( --zap-all ) # delete existing part tables
     if [[ ${disk[gptOffset]} != 0 ]] ; then
+        echo 'Setting »gptOffset != 0« is currently not supported, as sgdisk with the patch applied somehow fails to read files' 1>&2 ; return 1
         sgdisk+=( --move-main-table=$(( 2 + ${disk[gptOffset]} )) ) # this is incorrectly documented as --adjust-main-table in the man pages (at least versions 1.05 to 1.09 incl)
         sgdisk+=( --move-backup-table=$(( devSize/${disk[sectorSize]} - 1 - 32 - ${disk[gptOffset]} )) )
     fi
@@ -201,40 +202,37 @@ function fix-grub-install {
 
 
 ## Mounts all file systems as it would happen during boot, but at path prefix »$mnt« (instead of »/«).
-function mount-system {( set -eu # 1: mnt, 2?: fstabPath
-    # TODO: »config.system.build.fileSystems« is a dependency-sorted list. Could use that ...
-    # mount --all --fstab @{config.system.build.toplevel}/etc/fstab --target-prefix "$1" -o X-mount.mkdir # (»--target-prefix« is not supported on Ubuntu 20.04)
-    mnt=$1 ; fstabPath=${2:-"@{config.system.build.toplevel}/etc/fstab"}
+function mount-system {( set -eu # 1: mnt, 2?: fstabPath, 3?: allowFail
+    # While not generally required for fstab, nixos uses the dependency-sorted »config.system.build.fileSystems« list (instead of plain »builtins.attrValues config.fileSystems«) to generate »/etc/fstab« (provided »config.fileSystems.*.depends« is set correctly, e.g. for overlay mounts).
+    # This function depends on the file at »fstabPath« to be sorted like that.
+
+    # The following is roughly equivalent to: mount --all --fstab @{config.system.build.toplevel}/etc/fstab --target-prefix "$1" -o X-mount.mkdir # (but »--target-prefix« is not supported with older versions on »mount«, e.g. on Ubuntu 20.04 (but can't we use mount from nixpkgs?))
+    mnt=$1 ; fstabPath=${2:-"@{config.system.build.toplevel}/etc/fstab"} ; allowFail=${3:-}
     PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH
-    <$fstabPath grep -v '^#' | LC_ALL=C sort -k2 | while read source target type options numbers ; do
+
+    <$fstabPath grep -v '^#' | while read source target type options numbers ; do
         if [[ ! $target || $target == none ]] ; then continue ; fi
         options=,$options, ; options=${options//,ro,/,}
-        if [[ $options =~ ,r?bind, ]] || [[ $type == overlay ]] ; then continue ; fi
+
         if ! mountpoint -q "$mnt"/"$target" ; then (
             mkdir -p "$mnt"/"$target" || exit
             [[ $type == tmpfs || $type == */* ]] || @{native.kmod}/bin/modprobe --quiet $type || true # (this does help sometimes)
-            mount -t $type -o "${options:1:(-1)}" "$source" "$mnt"/"$target" || exit
-        ) || [[ $options == *,nofail,* ]] || exit ; fi # (actually, nofail already makes mount fail silently)
-    done || exit
-    # Since bind mounts may depend on other mounts not only for the target (which the sort takes care of) but also for the source, do all bind mounts last. This would break if there was a different bind mountpoint within a bind-mounted target.
-    <$fstabPath grep -v '^#' | LC_ALL=C sort -k2 | while read source target type options numbers ; do
-        if [[ ! $target || $target == none ]] ; then continue ; fi
-        options=,$options, ; options=${options//,ro,/,}
-        if [[ $options =~ ,r?bind, ]] || [[ $type == overlay ]] ; then : ; else continue ; fi
-        if ! mountpoint -q "$mnt"/"$target" ; then (
-            mkdir -p "$mnt"/"$target" || exit
+
             if [[ $type == overlay ]] ; then
                 options=${options//,workdir=/,workdir=$mnt\/} ; options=${options//,upperdir=/,upperdir=$mnt\/} # Work and upper dirs must be in target.
-                workdir=$(<<<"$options" grep -o -P ',workdir=\K[^,]+' || true) ; if [[ $workdir ]] ; then mkdir -p "$workdir" ; fi
-                upperdir=$(<<<"$options" grep -o -P ',upperdir=\K[^,]+' || true) ; if [[ $upperdir ]] ; then mkdir -p "$upperdir" ; fi
-                lowerdir=$(<<<"$options" grep -o -P ',lowerdir=\K[^,]+' || true) # TODO: test the lowerdir stuff
+                workdir=$(  <<<"$options" grep -o -P ',workdir=\K[^,]+'  || true ) ; if [[ $workdir  ]] ; then mkdir -p "$workdir"  ; fi
+                upperdir=$( <<<"$options" grep -o -P ',upperdir=\K[^,]+' || true ) ; if [[ $upperdir ]] ; then mkdir -p "$upperdir" ; fi
+                lowerdir=$( <<<"$options" grep -o -P ',lowerdir=\K[^,]+' || true )
                 options=${options//,lowerdir=$lowerdir,/,lowerdir=$mnt/${lowerdir//:/:$mnt\/},} ; source=overlay
-            else
+                # TODO: test the lowerdir stuff
+            elif [[ $options =~ ,r?bind, ]] ; then
                 if [[ $source == /nix/store/* ]] ; then options=,ro$options ; fi
                 source=$mnt/$source ; if [[ ! -e $source ]] ; then mkdir -p "$source" || exit ; fi
             fi
+
             mount -t $type -o "${options:1:(-1)}" "$source" "$mnt"/"$target" || exit
-        ) || [[ $options == *,nofail,* ]] || exit ; fi
+
+        ) || [[ $options == *,nofail,* || $allowFail ]] || exit ; fi # (actually, nofail already makes mount fail silently)
     done || exit
 )}
 

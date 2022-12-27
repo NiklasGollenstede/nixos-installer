@@ -29,9 +29,10 @@ in let module = {
                 autoApplyDuringBoot = (lib.mkEnableOption "automatically re-applying changed dataset properties and create missing datasets in the initramfs phase during boot for this pool. This can be useful since the keystore is open but no datasets are mounted at that time") // { default = true; };
                 autoApplyOnActivation = (lib.mkEnableOption "automatically re-applying changed dataset properties and create missing datasets on system activation for this pool. This may fail for some changes since datasets may be mounted and the keystore is usually closed at this time. Enable ».autoApplyDuringBoot« and reboot to address this") // { default = true; };
             }; config = {
+                props.autotrim = lib.mkDefault "on"; # These days, there should be no reason not to trim.
                 props.ashift = lib.mkOptionDefault "12"; # be explicit
-                props.comment = lib.mkOptionDefault "hostname=${config.networking.hostName};"; # This is just nice to know without needing to inspect the datasets (»zpool import« shows the comment).
                 props.cachefile = lib.mkOptionDefault "none"; # If it works on first boot without (stateful) cachefile, then it will also do so later.
+                props.comment = lib.mkOptionDefault (if (builtins.stringLength config.networking.hostName <= (32 - 9)) then "hostname=${config.networking.hostName}" else config.networking.hostName); # This is just nice to know which host this pool belongs to, without needing to inspect the datasets (»zpool import« shows the comment). The »comment« is limited to 32 characters.
             }; })));
             default = { };
             apply = lib.filterAttrs (k: v: v != null);
@@ -40,7 +41,7 @@ in let module = {
         datasets = lib.mkOption {
             description = "ZFS datasets managed and mounted on this host.";
             type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
-                name = lib.mkOption { description = "Attribute name as name of the pool."; type = lib.types.str; default = name; readOnly = true; };
+                name = lib.mkOption { description = "Attribute name as name of the dataset."; type = lib.types.str; default = name; readOnly = true; };
                 props = lib.mkOption { description = "ZFS properties to set on the dataset."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; };
                 mount = lib.mkOption { description = "Whether to create a »fileSystems« entry to mount the dataset. »noauto« creates an entry with that option set."; type = lib.types.enum [ true "noauto" false ]; default = false; };
                 permissions = lib.mkOption { description = ''Permissions to set on the dataset via »zfs allow«. Attribute names should express propagation/who and match »/^[dl]?([ug]\d+|e)$/«, the values are the list of permissions granted.''; type = lib.types.attrsOf lib.types.commas; default = { }; };
@@ -65,6 +66,7 @@ in let module = {
         boot.zfs.devNodes = lib.mkDefault ''/dev/disk/by-partlabel" -d "/dev/mapper''; # Do automatic imports (initrd & systemd) by-partlabel or mapped device, instead of by-id, since that is how the pools were created. (This option is meant to support only a single path, but since it is not properly escaped, this works to pass two paths.)
         services.zfs.autoScrub.enable = true;
         services.zfs.trim.enable = true; # (default)
+        networking.hostId = lib.mkDefault (builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName)); # ZFS requires one, so might as well set a default.
 
         ## Implement »cfg.datasets.*.mount«:
         fileSystems = lib.wip.mapMerge (path: { props, mount, ... }: if mount != false then {
@@ -143,6 +145,7 @@ in let module = {
             fi
         '');
             #setsid ${extraUtils}/bin/ash -c "exec ${extraUtils}/bin/ash < /dev/$console >/dev/$console 2>/dev/$console"
+        boot.zfs = if (builtins.substring 0 5 inputs.nixpkgs.lib.version) == "22.05" then { } else { allowHibernation = true; };
 
 
     }) (let ## Implement »cfg.pools.*.autoApplyDuringBoot« and »cfg.pools.*.autoApplyOnActivation«:
@@ -157,7 +160,7 @@ in let module = {
         '';
         ensure-datasets-for = filterBy: zfsPackage: ''( if [ ! "''${IN_NIXOS_ENTER:-}" ] && [ -e ${zfsPackage}/bin/zfs ] ; then
             ${lib.concatStrings (map (pool: ''
-                expected=${lib.escapeShellArg (builtins.toJSON (lib.mapAttrs (n: v: v.props) (lib.filterAttrs (path: _: path == pool || lib.wip.startsWith "${pool}/" path) cfg.datasets)))}
+                expected=${lib.escapeShellArg (builtins.toJSON (lib.mapAttrs (n: v: v.props // (if v.permissions != { } then { ":permissions" = v.permissions; } else { })) (lib.filterAttrs (path: _: path == pool || lib.wip.startsWith "${pool}/" path) cfg.datasets)))}
                 if [ "$(${zfsPackage}/bin/zfs get -H -o value nixos-${prefix}:applied-datasets ${pool})" != "$expected" ] ; then
                     ${ensure-datasets zfsPackage} / ${lib.escapeShellArg (filter pool)} && ${zfsPackage}/bin/zfs set nixos-${prefix}:applied-datasets="$expected" ${pool}
                 fi

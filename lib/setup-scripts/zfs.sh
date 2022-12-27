@@ -32,10 +32,11 @@ function create-zpool { # 1: mnt, 2: poolName
             fi
         done
         <$keySrc tr -dc 0-9a-f | head -c 64 | ( PATH=@{native.zfs}/bin ; ${_set_x:-:} ; zpool create "${args[@]}" -R "$mnt" "${pool[name]}" "${vdevs[@]}" || exit ) || exit
-        @{native.zfs}/bin/zfs unload-key "$poolName" &>/dev/null || true
+        if [[ $keySrc == /dev/urandom ]] ; then @{native.zfs}/bin/zfs unload-key "$poolName" &>/dev/null ; fi
     ) || return
     prepend_trap "@{native.zfs}/bin/zpool export '$poolName'" EXIT || return
     ensure-datasets $mnt '^'"$poolName"'($|[/])' || return
+    if [[ ${args[debug]:-} ]] ; then @{native.zfs}/bin/zfs list -o name,canmount,mounted,mountpoint,keystatus,encryptionroot -r "$poolName" ; fi
 }
 
 ## Ensures that the system's datasets exist and have the defined properties (but not that they don't have properties that aren't defined).

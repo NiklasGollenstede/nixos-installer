@@ -9,18 +9,19 @@ Just to provide an example of what a host configuration using this set of librar
 
 To prepare a virtual machine disk, as `sudo` user with `nix` installed, run in `..`:
 ```bash
- nix run '.#example' -- sudo install-system /home/$(id -un)/vm/disks/example.img && sudo chown $(id -un): /home/$(id -un)/vm/disks/example.img
- nix run '.#example-raidz' -- sudo install-system /tmp/nixos-main.img:raidz1=/tmp/nixos-rz1.img:raidz2=/tmp/nixos-rz2.img:raidz3=/tmp/nixos-rz3.img
+ nix run '.#example' -- sudo install-system /home/$(id -un)/vm/disks/example/
+ ( sudo chown $(id -un): /home/$(id -un)/vm/disks/example/* )
+ nix run '.#example-raidz' -- sudo install-system /tmp/nixos-example-raidz/
 ```
 Then to boot the system in a qemu VM with KVM:
 ```bash
- nix run '.#example' -- sudo run-qemu /home/$(id -un)/vm/disks/example.img
+ nix run '.#example' -- sudo run-qemu /home/$(id -un)/vm/disks/example/
 ```
 Or as user with vBox access, run this and use the UI or the printed commands:
 ```bash
- nix run '.#example' -- register-vbox /home/$(id -un)/vm/disks/example.img
+ nix run '.#example' -- register-vbox /home/$(id -un)/vm/disks/example/primary.img
 ```
-Alternative to running directly as `root` (esp. if `nix` is not installed for root), the above commands can also be run with `sudo` as additional argument before the `--`.
+Alternative to running with `sudo` (if `nix` is installed for root), the above commands can also be run as `root` without the `sudo` argument.
 
 
 ## Implementation
@@ -31,7 +32,7 @@ dirname: inputs: { config, pkgs, lib, name, ... }: let inherit (inputs.self) lib
     #suffix = builtins.head (builtins.match ''example-(.*)'' name); # make differences in config based on this when using »wip.preface.instances«
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
 in { imports = [ ({ ## Hardware
-    wip.preface.instances = [ "example-explicit" "example" "example-minimal" "example-raidz" ];
+    wip.preface.instances = [ "example-explicit" "example" "example-minimal" "example-raidz" "test-zfs-hibernate" ];
 
     wip.preface.hardware = "x86_64"; system.stateVersion = "22.05";
 
@@ -60,13 +61,17 @@ in { imports = [ ({ ## Hardware
     fileSystems."/nix/store" = { options = ["bind,ro"]; device = "/system/nix/store"; neededForBoot = true; };
 
 
-}) (lib.mkIf (name == "example") { ## More complex but automatic FS setup
+}) (lib.mkIf (name == "example" || name == "test-zfs-hibernate") { ## More complex but automatic FS setup
 
     #wip.fs.disks.devices.primary.size = "16G"; # (default)
     wip.fs.boot.enable = true; wip.fs.boot.size = "512M";
 
     wip.fs.keystore.enable = true;
     wip.fs.temproot.enable = true;
+
+    wip.fs.temproot.swap.size = "2G";
+    wip.fs.temproot.swap.asPartition = true;
+    wip.fs.temproot.swap.encrypted = true;
 
     wip.fs.temproot.temp.type = "tmpfs";
 
@@ -143,4 +148,28 @@ in { imports = [ ({ ## Hardware
 
     boot.binfmt.emulatedSystems = [ "aarch64-linux" ];
 
-})  ]; }
+
+}) (lib.mkIf (name == "test-zfs-hibernate") {
+    # This was an attempt to reliably get ZFS to corrupt when importing a ZFS pool before resuming from hibernation in initrd. It isn't reproducible, though: https://github.com/NixOS/nixpkgs/pull/208037#issuecomment-1368240321
+
+    wip.fs.temproot.temp.type = lib.mkForce "zfs";
+    wip.fs.temproot.local.type = lib.mkForce "zfs";
+    wip.fs.keystore.keys."luks/rpool-${hash}/0" = lib.mkForce null;
+
+    wip.fs.disks.devices.mirror.size = "16G";
+    wip.fs.disks.partitions."mirror-${hash}" = { type = "bf00"; disk = "mirror"; };
+    environment.systemPackages = [ (pkgs.writeShellScriptBin "test-zfs-hibernate" ''
+        set -ex
+        </dev/urandom head -c 10G >/tmp/dump
+        sync ; echo 3 > /proc/sys/vm/drop_caches ; sleep 5
+        zpool attach rpool-${hash} /dev/disk/by-partlabel/rpool-${hash} /dev/disk/by-partlabel/mirror-${hash}
+        sleep 2 # the above command should still be in progress
+        : before ; date
+        systemctl hibernate
+        : hibernating ; date
+        sleep 3 ; : awake ; date
+    '') ];
+    boot.zfs = if (builtins.substring 0 5 inputs.nixpkgs.lib.version) == "22.05" then { } else { allowHibernation = true; };
+
+
+}) ]; }

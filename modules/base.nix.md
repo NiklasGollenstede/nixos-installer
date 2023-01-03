@@ -12,14 +12,14 @@ Things that really should be (more like) this by default.
 dirname: inputs: specialArgs@{ config, pkgs, lib, name, ... }: let inherit (inputs.self) lib; in let
     prefix = inputs.config.prefix;
     cfg = config.${prefix}.base;
-    inputDefinesSystem = cfg.includeInputs?self && cfg.includeInputs.self?nixosConfigurations && cfg.includeInputs.self.nixosConfigurations?${name};
 in {
 
     options.${prefix} = { base = {
         enable = lib.mkEnableOption "saner defaults";
         includeInputs = lib.mkOption { description = "The system's build inputs, to be included in the flake registry, and on the »NIX_PATH« entry, such that they are available for self-rebuilds and e.g. as »pkgs« on the CLI."; type = lib.types.attrsOf lib.types.anything; apply = lib.filterAttrs (k: v: v != null); default = { }; };
         panic_on_fail = lib.mkEnableOption "Kernel parameter »boot.panic_on_fail«" // { default = true; example = false; }; # It's stupidly hard to remove items from lists ...
-        autoUpgrade = lib.mkEnableOption "automatic NixOS updates and garbage collection" // { default = inputDefinesSystem; defaultText = lib.literalExpression "config.${prefix}.base.includeInputs.self.nixosConfigurations?\${name}"; example = false; };
+        autoUpgrade = lib.mkEnableOption "automatic NixOS updates and garbage collection" // { default = cfg.includeInputs?self.nixosConfigurations.${name}; defaultText = lib.literalExpression "config.${prefix}.base.includeInputs?self.nixosConfigurations.\${name}"; example = false; };
+        bashInit = lib.mkEnableOption "pretty defaults for interactive bash shells" // { default = true; example = false; };
     }; };
 
     # Bugfix:
@@ -36,7 +36,15 @@ in {
         environment.etc."machine-id".text = lib.mkDefault (builtins.substring 0 32 (builtins.hashString "sha256" "${config.networking.hostName}:machine-id")); # this works, but it "should be considered "confidential", and must not be exposed in untrusted environments" (not sure _why_ though)
         documentation.man.enable = lib.mkDefault config.documentation.enable;
         nix.settings.auto-optimise-store = lib.mkDefault true; # file deduplication, see https://nixos.org/manual/nix/stable/command-ref/new-cli/nix3-store-optimise.html#description
+        boot.loader.timeout = lib.mkDefault 1; # save 4 seconds on startup
 
+        system.extraSystemBuilderCmds = (if !config.boot.initrd.enable then "" else ''
+            ln -sT ${builtins.unsafeDiscardStringContext config.system.build.bootStage1} $out/boot-stage-1.sh # (this is super annoying to locate otherwise)
+        ''); # (to deactivate this, set »system.extraSystemBuilderCmds = lib.mkAfter "rm -f $out/boot-stage-1.sh";«)
+
+        system.activationScripts.diff-systems = { text = ''
+            if [[ -e /run/current-system ]] ; then ${pkgs.nix}/bin/nix --extra-experimental-features nix-command store diff-closures /run/current-system "$systemConfig" ; fi
+        ''; deps = [ "etc" ]; }; # (to deactivate this, set »system.activationScripts.diff-systems = lib.mkForce "";«)
 
     }) ({
         # Robustness/debugging:
@@ -46,7 +54,7 @@ in {
         systemd.extraConfig = "StatusUnitFormat=name"; # Show unit names instead of descriptions during boot.
 
 
-    }) (lib.mkIf (inputDefinesSystem) { # non-flake
+    }) (lib.mkIf (cfg.includeInputs?self.nixosConfigurations.${name}) { # non-flake
 
         # Importing »<nixpkgs>« as non-flake returns a lambda returning the evaluated Nix Package Collection (»pkgs«). The most accurate representation of what that should be on the target host is the »pkgs« constructed when building it:
         system.extraSystemBuilderCmds = ''
@@ -92,29 +100,66 @@ in {
         };
 
 
-    }) ({
-        # Free convenience:
+    }) (lib.mkIf (cfg.bashInit) {
+        # (almost) Free Convenience:
 
-        environment.shellAliases = { "with" = lib.mkDefault ''nix-shell --run "bash --login" -p''; }; # »with« doesn't seem to be a common linux command yet, and it makes sense here: with $package => do stuff in shell
+        environment.shellAliases = {
 
-        programs.bash.promptInit = lib.mkDefault ''
-        # Provide a nice prompt if the terminal supports it.
-        if [ "''${TERM:-}" != "dumb" ] ; then
-            if [[ "$UID" == '0' ]] ; then if [[ ! "''${SUDO_USER:-}" ]] ; then # direct root: red username + green hostname
-                PS1='\[\e[0m\]\[\e[48;5;234m\]\[\e[96m\]$(printf "%-+ 4d" $?)\[\e[93m\][\D{%Y-%m-%d %H:%M:%S}] \[\e[91m\]\u\[\e[97m\]@\[\e[92m\]\h\[\e[97m\]:\[\e[96m\]\w'"''${TERM_RECURSION_DEPTH:+\[\e[91m\]["$TERM_RECURSION_DEPTH"]}"'\[\e[24;97m\]\$ \[\e[0m\]'
-            else # sudo root: red username + red hostname
-                PS1='\[\e[0m\]\[\e[48;5;234m\]\[\e[96m\]$(printf "%-+ 4d" $?)\[\e[93m\][\D{%Y-%m-%d %H:%M:%S}] \[\e[91m\]\u\[\e[97m\]@\[\e[91m\]\h\[\e[97m\]:\[\e[96m\]\w'"''${TERM_RECURSION_DEPTH:+\[\e[91m\]["$TERM_RECURSION_DEPTH"]}"'\[\e[24;97m\]\$ \[\e[0m\]'
-            fi ; else # other user: green username + green hostname
-                PS1='\[\e[0m\]\[\e[48;5;234m\]\[\e[96m\]$(printf "%-+ 4d" $?)\[\e[93m\][\D{%Y-%m-%d %H:%M:%S}] \[\e[92m\]\u\[\e[97m\]@\[\e[92m\]\h\[\e[97m\]:\[\e[96m\]\w'"''${TERM_RECURSION_DEPTH:+\[\e[91m\]["$TERM_RECURSION_DEPTH"]}"'\[\e[24;97m\]\$ \[\e[0m\]'
+            "with" = pkgs.writeShellScript "with" ''
+                help='Synopsys: With the Nix packages »PKGS« (as attribute path read from the imported »nixpkgs« specified on the »NIX_PATH«), run »CMD« with »ARGS«, or »bash --login« if no »CMD« is supplied.
+                Usage: with [-h] PKGS... [-- [CMD [ARGS...]]]'
+                pkgs=( ) ; while (( "$#" > 0 )) ; do {
+                    if [[ $1 == -h ]] ; then echo "$help" ; exit 0 ; fi
+                    if [[ $1 == -- ]] ; then shift ; break ; fi ; pkgs+=( "$1" )
+                } ; shift ; done
+                if (( ''${#pkgs[@]} == 0 )) ; then echo "$help" ; exit 1 ; fi
+                if (( "$#" == 0 )) ; then set -- bash --login ; fi
+                nix-shell --run "$( printf ' %q' "$@" )" -p "''${pkgs[@]}"
+                #function run { bash -xc "$( printf ' %q' "$@" )" ; }
+            ''; # »with« doesn't seem to be a common linux command yet, and it makes sense here: with package(s) => do stuff
+
+            ls = "ls --color=auto"; # (default)
+            l  = "ls -alhF"; # (added F)
+            ll = "ls -alF"; # (added aF)
+            lt = "tree -a -p -g -u -s -D -F --timefmt '%Y-%m-%d %H:%M:%S'"; # ll like tree
+            lp = pkgs.writeShellScript "lp" ''abs="$(cd "$(dirname "$1")" ; pwd)"/"$(basename "$1")" ; ${pkgs.util-linux}/bin/namei -lx "$abs"''; # similar to »ll -d« on all path element from »$1« to »/«
+
+            ips = "ip -c -br addr"; # colorized listing of all interface's IPs
+            mounts = pkgs.writeShellScript "mounts" ''${pkgs.util-linux}/bin/mount | ${pkgs.gnugrep}/bin/grep -vPe '/.zfs/snapshot/| on /var/lib/docker/|^/var/lib/snapd/snaps/' | LC_ALL=C ${pkgs.coreutils}/bin/sort -k3 | ${pkgs.util-linux}/bin/column -t -N Device/Source,on,Mountpoint,type,Type,Options -H on,type -W Device/Source,Mountpoint,Options''; # the output of »mount«, cleaned up and formatted as a sorted table
+
+            netns-exec = pkgs.writeShellScript "netns-exec" ''ns=$1 ; shift ; /run/wrappers/bin/firejail --noprofile --quiet --netns="$ns" -- "$@"''; # execute a command in a different netns (like »ip netns exec«), without requiring root permissions (but does require »config.programs.firejail.enable=true«)
+
+            nixos-list-generations = "nix-env --list-generations --profile /nix/var/nix/profiles/system";
+
+            sc  = "systemctl";
+            scs = "systemctl status";
+            scc = "systemctl cat";
+            scu = "systemctl start"; # up
+            scd = "systemctl stop"; # down
+            scr = "systemctl restart";
+            scf = "systemctl list-units --failed";
+            scj = "journalctl -b -f -u";
+
+        };
+
+        programs.bash.promptInit = ''
+            # Provide a nice prompt if the terminal supports it.
+            if [ "''${TERM:-}" != "dumb" ] ; then
+                if [[ "$UID" == '0' ]] ; then if [[ ! "''${SUDO_USER:-}" ]] ; then # direct root: red username + green hostname
+                    PS1='\[\e[0m\]\[\e[48;5;234m\]\[\e[96m\]$(printf "%-+ 4d" $?)\[\e[93m\][\D{%Y-%m-%d %H:%M:%S}] \[\e[91m\]\u\[\e[97m\]@\[\e[92m\]\h\[\e[97m\]:\[\e[96m\]\w'"''${TERM_RECURSION_DEPTH:+\[\e[91m\]["$TERM_RECURSION_DEPTH"]}"'\[\e[24;97m\]\$ \[\e[0m\]'
+                else # sudo root: red username + red hostname
+                    PS1='\[\e[0m\]\[\e[48;5;234m\]\[\e[96m\]$(printf "%-+ 4d" $?)\[\e[93m\][\D{%Y-%m-%d %H:%M:%S}] \[\e[91m\]\u\[\e[97m\]@\[\e[91m\]\h\[\e[97m\]:\[\e[96m\]\w'"''${TERM_RECURSION_DEPTH:+\[\e[91m\]["$TERM_RECURSION_DEPTH"]}"'\[\e[24;97m\]\$ \[\e[0m\]'
+                fi ; else # other user: green username + green hostname
+                    PS1='\[\e[0m\]\[\e[48;5;234m\]\[\e[96m\]$(printf "%-+ 4d" $?)\[\e[93m\][\D{%Y-%m-%d %H:%M:%S}] \[\e[92m\]\u\[\e[97m\]@\[\e[92m\]\h\[\e[97m\]:\[\e[96m\]\w'"''${TERM_RECURSION_DEPTH:+\[\e[91m\]["$TERM_RECURSION_DEPTH"]}"'\[\e[24;97m\]\$ \[\e[0m\]'
+                fi
+                if test "$TERM" = "xterm" ; then
+                    PS1="\[\033]2;\h:\u:\w\007\]$PS1"
+                fi
             fi
-            if test "$TERM" = "xterm" ; then
-                PS1="\[\033]2;\h:\u:\w\007\]$PS1"
-            fi
-        fi
-        export TERM_RECURSION_DEPTH=$(( 1 + ''${TERM_RECURSION_DEPTH:-0} ))
+            export TERM_RECURSION_DEPTH=$(( 1 + ''${TERM_RECURSION_DEPTH:-0} ))
         ''; # The non-interactive version of bash does not remove »\[« and »\]« from PS1, but without those the terminal gets confused about the cursor position after the prompt once one types more than a bit of text there (at least via serial or SSH).
 
-        environment.interactiveShellInit = lib.mkDefault ''
+        environment.interactiveShellInit = lib.mkBefore ''
             # In RePl mode: remove duplicates from history; don't save commands with a leading space.
             HISTCONTROL=ignoredups:ignorespace
 
@@ -123,14 +168,15 @@ in {
                 stty rows 34 cols 145 # Fairly large font on 1080p. (Setting this too large for the screen warps the output really badly.)
             fi
         '';
-
-        system.extraSystemBuilderCmds = (if !config.boot.initrd.enable then "" else ''
-            ln -sT ${builtins.unsafeDiscardStringContext config.system.build.bootStage1} $out/boot-stage-1.sh # (this is super annoying to locate otherwise)
-        '');
-
-        # deactivate by setting »system.activationScripts.diff-systems = lib.mkForce "";«
-        system.activationScripts.diff-systems = ''
-            if [[ -e /run/current-system ]] ; then ${pkgs.nix}/bin/nix --extra-experimental-features nix-command store diff-closures /run/current-system "$systemConfig" ; fi
+    }) (lib.mkIf (cfg.bashInit) { # other »interactiveShellInit« (and »shellAliases«) would go in here, being able to overwrite stuff from above, but still also being included in the alias completion below
+        environment.interactiveShellInit = lib.mkAfter ''
+            # enable completion for aliases
+            source ${ pkgs.fetchFromGitHub {
+                owner = "cykerway"; repo = "complete-alias";
+                rev = "4fcd018faa9413e60ee4ec9f48ebeac933c8c372"; # v1.18 (2021-07-17)
+                sha256 = "sha256-fZisrhdu049rCQ5Q90sFWFo8GS/PRgS29B1eG8dqlaI=";
+            } }/complete_alias
+            complete -F _complete_alias "''${!BASH_ALIASES[@]}"
         '';
 
     }) ]);

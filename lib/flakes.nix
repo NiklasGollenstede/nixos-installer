@@ -1,7 +1,7 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
     inherit (import "${dirname}/vars.nix"    dirname inputs) mapMerge mapMergeUnique mergeAttrsUnique flipNames;
-    inherit (import "${dirname}/imports.nix" dirname inputs) getModifiedPackages getNixFiles importWrapped;
+    inherit (import "${dirname}/imports.nix" dirname inputs) getNixFiles importWrapped;
     inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit;
     setup-scripts = (import "${dirname}/setup-scripts" "${dirname}/setup-scripts"  inputs);
     prefix = inputs.config.prefix;
@@ -34,14 +34,12 @@ in rec {
     importRepo = inputs: repoPath': outputs: let
         repoPath = builtins.path { path = repoPath'; name = "source"; }; # referring to the current flake directory as »./.« is quite intuitive (and »inputs.self.outPath« causes infinite recursion), but without this it adds another hash to the path (because it copies it)
     in let result = (outputs (
-        (let it                = importWrapped inputs "${repoPath}/lib";      in if it.exists then rec {
-            lib           = it.result;
-        } else { }) // (let it = importWrapped inputs "${repoPath}/overlays"; in if it.exists then rec {
-            overlays      = it.result;
-            overlay       = final: prev: builtins.foldl' (prev: overlay: prev // (overlay final prev)) prev (builtins.attrValues overlays);
-        } else { }) // (let it = importWrapped inputs "${repoPath}/modules";  in if it.exists then rec {
-            nixosModules  = it.result;
-            nixosModule   = { imports = builtins.attrValues nixosModules; };
+        (let it                = importWrapped inputs "${repoPath}/lib";      in if it.exists then {
+            lib = it.result;
+        } else { }) // (let it = importWrapped inputs "${repoPath}/overlays"; in if it.exists then {
+            overlays = { default = final: prev: builtins.foldl' (prev: overlay: prev // (overlay final prev)) prev (builtins.attrValues it.result); } // it.result;
+        } else { }) // (let it = importWrapped inputs "${repoPath}/modules";  in if it.exists then {
+            nixosModules = { default = { imports = builtins.attrValues it.result; }; } // it.result;
         } else { })
     )); in if (builtins.isList result) then mergeOutputs result else result;
 
@@ -70,7 +68,7 @@ in rec {
         imported = (importWrapped inputs entryPath).required ({ config = null; pkgs = null; lib = null; name = null; nodes = null; extraModules = null; } // args);
         module = builtins.elemAt imported.imports 0; props = module.${prefix}.preface;
     in if (
-        imported?imports && (builtins.isList imported.imports) && (imported.imports != [ ]) && module?${prefix} && module.${prefix}?preface && props?hardware
+        imported?imports && (builtins.isList imported.imports) && (imported.imports != [ ]) && module?${prefix}.preface && props?hardware
     ) then (props) else throw "File ${entryPath} must fulfill the structure: dirname: inputs: { ... }: { imports = [ { ${prefix}.preface = { hardware = str; ... } } ]; }";
 
     # Builds the System Configuration for a single host. Since each host depends on the context of all other host (in the same "network"), this is essentially only callable through »mkNixosConfigurations«.
@@ -91,6 +89,7 @@ in rec {
         ]; _file = "${dirname}/flakes.nix#modules"; } ];
 
         extraModules = modules ++ [ { imports = [ ({ # These are passed as »extraModules« module argument and can thus conveniently be reused when defining containers and such (Therefore define as much stuff as possible here).
+        # TODO: or should these be set as »baseModules«? Does that implicitly pass these into any derived configs?
 
         }) ({ config, ... }: {
 
@@ -102,7 +101,7 @@ in rec {
                 self = null; # avoid changing (and thus restarting) the containers on every trivial change
             } else inputs);
 
-            system.nixos.revision = lib.mkIf (inputs?nixpkgs && inputs.nixpkgs?rev) inputs.nixpkgs.rev; # (evaluating the default value fails under some circumstances)
+            system.nixos.revision = lib.mkIf (inputs?nixpkgs.rev) inputs.nixpkgs.rev; # (evaluating the default value fails under some circumstances)
 
         }) ({
             options.${prefix}.preface.hardware = lib.mkOption { description = "The name of the system's CPU instruction set (the first part of what is often referred to as »system«)."; type = lib.types.str; readOnly = true; };
@@ -167,11 +166,11 @@ in rec {
         # Arguments »{ files, dir, exclude, }« to »mkNixosConfigurations«, see there for details. May also be a list of those attrsets, in which case those multiple sets of hosts will be built separately by »mkNixosConfigurations«, allowing for separate sets of »peers« passed to »mkNixosConfiguration«. Each call will receive all other arguments, and the resulting sets of hosts will be merged.
         systems ? ({ dir = "${inputs.self}/hosts"; exclude = [ ]; }),
         # List of overlays to set as »config.nixpkgs.overlays«. Defaults to ».overlays.default« of all »overlayInputs«/»inputs« (incl. »inputs.self«).
-        overlays ? (lib.remove null (map (input: if input?overlays && input.overlays?default then input.overlays.default else if input?overlay then input.overlay else null) (builtins.attrValues overlayInputs))),
+        overlays ? (lib.remove null (map (input: if input?overlays.default then input.overlays.default else if input?overlay then input.overlay else null) (builtins.attrValues overlayInputs))),
         # (Subset of) »inputs« that »overlays« will be used from. Example: »{ inherit (inputs) self flakeA flakeB; }«.
         overlayInputs ? inputs,
         # List of Modules to import for all hosts, in addition to the default ones in »nixpkgs«. The host-individual module should selectively enable these. Defaults to ».nixosModules.default« of all »moduleInputs«/»inputs« (including »inputs.self«).
-        modules ? (lib.remove null (map (input: if input?nixosModules && input.nixosModules?default then input.nixosModules.default else if input?nixosModule then input.nixosModule else null) (builtins.attrValues moduleInputs))),
+        modules ? (lib.remove null (map (input: if input?nixosModules.default then input.nixosModules.default else if input?nixosModule then input.nixosModule else null) (builtins.attrValues moduleInputs))),
         # (Subset of) »inputs« that »modules« will be used from. Example: »{ inherit (inputs) self flakeA flakeB; }«.
         moduleInputs ? inputs,
         # Additional arguments passed to each module evaluated for the host config (if that module is defined as a function).

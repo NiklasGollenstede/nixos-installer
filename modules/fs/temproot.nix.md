@@ -81,8 +81,8 @@ On a less beefy system, but also with less data to manage, `tmpfs` works fine fo
   #wip.fs.keystore.keys."luks/local-${hash}/0" = "random"; # (implied by the »-encrypted« suffix above)
   #wip.fs.disks.partitions."local-${hash}".size = "50%"; # (default, fixed after installation)
   wip.fs.temproot.remote.type = "zfs";
-  wip.fs.keystore.keys."luks/rpool-${hash}/0" = "random";
   #wip.fs.keystore.keys."zfs/rpool-${hash}/remote" = "random"; # (default)
+  #wip.fs.keystore.keys."luks/rpool-${hash}/0" = "random"; # Would also enable LUKS encryption of the pool, but there isn't too much point in encrypting twice.
   #wip.fs.zfs.pools."rpool-${hash}".vdevArgs = [ "rpool-${hash}" ]; # (default)
   #wip.fs.disks.partitions."rpool-${hash}" = { type = "bf00"; size = null; order = 500; }; # (default)
 
@@ -322,7 +322,12 @@ in {
         boot.initrd.kernelModules = [ type ]; # This is not generally, but sometimes, required to boot. Strange. (Kernel message: »request_module fs-f2fs succeeded, but still no fs?«)
 
 
-    })) ] ++ (map (type: (lib.mkIf (cfg.${type}.type == "bind") {
+    })) (lib.mkIf (cfg.remote.type == "none") {
+
+        systemd.tmpfiles.rules = [ (lib.wip.mkTmpfile { type = "L+"; path = "/remote"; argument = "/local"; }) ]; # for compatibility (but use a symlink to make clear that this is not actually a separate mount)
+
+
+    }) ] ++ (map (type: (lib.mkIf (cfg.${type}.type == "bind") {
 
         fileSystems = (lib.mapAttrs (target: args@{ source, uid, gid, mode, extraFsConfig, ... }: extraFsConfig // (rec {
             device = "${cfg.${type}.bind.source}/${source}";

@@ -39,12 +39,18 @@ function do-disk-setup { # 1: diskPaths
 function partition-disks { # 1: diskPaths
     local beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
     local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
+
     declare -g -A blockDevs=( ) # this ends up in the caller's scope
-    local path ; for path in ${1//:/ } ; do
-        local name=${path/=*/} ; if [[ $name != "$path" ]] ; then path=${path/$name=/} ; else name=primary ; fi
-        if [[ ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name specified more than once. Duplicate definition: $path" 1>&2 ; return 1 ; fi
-        blockDevs[$name]=$path
-    done
+    if [[ $1 == */ ]] ; then
+        mkdir -p "$1"
+        for name in "@{!config.wip.fs.disks.devices[@]}" ; do blockDevs[$name]=${1}${name}.img ; done
+    else
+        local path ; for path in ${1//:/ } ; do
+            local name=${path/=*/} ; if [[ $name != "$path" ]] ; then path=${path/$name=/} ; else name=primary ; fi
+            if [[ ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name specified more than once. Duplicate definition: $path" 1>&2 ; return 1 ; fi
+            blockDevs[$name]=$path
+        done
+    fi
 
     local name ; for name in "@{!config.wip.fs.disks.devices[@]}" ; do
         if [[ ! ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name not provided" 1>&2 ; return 1 ; fi
@@ -97,7 +103,6 @@ function partition-disk { # 1: name, 2: blockDev, 3?: devSize
 
     local -a sgdisk=( --zap-all ) # delete existing part tables
     if [[ ${disk[gptOffset]} != 0 ]] ; then
-        echo 'Setting »gptOffset != 0« is currently not supported, as sgdisk with the patch applied somehow fails to read files' 1>&2 ; return 1
         sgdisk+=( --move-main-table=$(( 2 + ${disk[gptOffset]} )) ) # this is incorrectly documented as --adjust-main-table in the man pages (at least versions 1.05 to 1.09 incl)
         sgdisk+=( --move-backup-table=$(( devSize/${disk[sectorSize]} - 1 - 32 - ${disk[gptOffset]} )) )
     fi

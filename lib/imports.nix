@@ -97,8 +97,10 @@ in rec {
     } // args);
 
     # Given a list of »overlays« and »pkgs« with them applied, returns the subset of »pkgs« that was directly modified by the overlays.
+    # (But this only works for top-level / non-scoped packages.)
     getModifiedPackages = pkgs: overlays: let
-        names = builtins.concatLists (map (overlay: builtins.attrNames (overlay { } { })) (builtins.attrValues overlays));
+        getNames = overlay: builtins.attrNames (overlay { } { });
+        names = if overlays?default then getNames overlays.default else builtins.concatLists (map getNames (builtins.attrValues overlays));
     in mapMergeUnique (name: if lib.isDerivation pkgs.${name} then { ${name} = pkgs.${name}; } else { }) names;
 
     ## Given a path to a module in »nixpkgs/nixos/modules/«, when placed in another module's »imports«, this adds an option »disableModule.${modulePath}« that defaults to being false, but when explicitly set to »true«, disables all »config« values set by the module.

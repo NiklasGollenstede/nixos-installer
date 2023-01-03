@@ -64,7 +64,11 @@ function run-qemu {( set -eu # 1: diskImages
         #qemu+=( -M virt -m 1024 -smp 4 -cpu cortex-a53  ) ; args[no-nat]=1
     fi # else things are going to be quite slow
 
-    disks=( ${diskImages//:/ } ) ; for index in ${!disks[@]} ; do
+    if [[ $diskImages == */ ]] ; then
+        disks=( ${diskImages}primary.img ) ; for name in "@{!config.wip.fs.disks.devices[@]}" ; do if [[ $name != primary ]] ; then disks+=( ${diskImages}${name}.img ) ; fi ; done
+        #disks=( "@{!config.wip.fs.disks.devices[@]}" ) ; disks=( "${disks[@]/#/$diskImages}" )
+    else disks=( ${diskImages//:/ } ) ; fi
+    for index in ${!disks[@]} ; do
 #       qemu+=( -drive format=raw,if=ide,file="${disks[$index]/*=/}" ) # »if=ide« is the default, which these days isn't great for driver support inside the VM
         qemu+=( # not sure how correct the interpretations if the command are, and whether this works for more than one disk
             -drive format=raw,file="${disks[$index]/*=/}",media=disk,if=none,index=${index},id=drive${index} # create the disk drive, without attaching it, name it driveX

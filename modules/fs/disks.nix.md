@@ -74,7 +74,7 @@ in {
             esc = lib.escapeShellArg;
         in pkgs.runCommand "partitioning-${config.networking.hostName}" { } ''
             ${lib.wip.substituteImplicit { inherit pkgs; scripts = [ partition-disk ]; context = { inherit config; native = pkgs; }; }} # inherit (builtins) trace;
-            mkdir $out ; declare -A args=([debug]=1)
+            set -u ; mkdir -p $out ; declare -A args=([debug]=1)
             ${lib.concatStrings (lib.mapAttrsToList (name: disk: ''
                 name=${esc name} ; img=$name.img
                 ${pkgs.coreutils}/bin/truncate -s ${esc disk.size} "$img"

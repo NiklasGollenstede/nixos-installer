@@ -58,6 +58,8 @@ function nixos-install-cmd {( set -eu # 1: mnt, 2: topLevel
 function install-system-to {( set -u # 1: mnt
     mnt=$1 ; topLevel=${2:-}
     targetSystem=${args[toplevel]:-@{config.system.build.toplevel}}
+    beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
+    beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
     trap - EXIT # start with empty traps for sub-shell
 
     # Link/create files that some tooling expects:
@@ -90,14 +92,19 @@ function install-system-to {( set -u # 1: mnt
 
     # Copy system closure to new nix store:
     if [[ ${SUDO_USER:-} ]] ; then chown -R $SUDO_USER: $mnt/nix/store $mnt/nix/var || exit ; fi
-    ( cmd=( nix --extra-experimental-features nix-command --offline copy --no-check-sigs --to $mnt ${topLevel:-$targetSystem} ) ; if [[ ${args[quiet]:-} ]] ; then "${cmd[@]}" --quiet &>/dev/null || exit ; else set -x ; time "${cmd[@]}" || exit ; fi ) || exit ; rm -rf $mnt/nix/var/nix/gcroots || exit
+    (
+        cmd=( nix --extra-experimental-features nix-command --offline copy --no-check-sigs --to $mnt ${topLevel:-$targetSystem} )
+        if [[ ${args[quiet]:-} ]] ; then
+            ( set -o pipefail ; "${cmd[@]}" --quiet 2>&1 >/dev/null | { grep -Pe '^error:' || true ; } ) || exit
+        else set -x ; time "${cmd[@]}" || exit ; fi
+    ) || exit ; rm -rf $mnt/nix/var/nix/gcroots || exit
     # TODO: if the target has @{config.nix.settings.auto-optimise-store} and the host doesn't (there is no .links dir?), optimize now
     if [[ ${SUDO_USER:-} ]] ; then chown -R root:root $mnt/nix $mnt/nix/var || exit ; chown :30000 $mnt/nix/store || exit ; fi
 
     # Run the main install command (primarily for the bootloader):
     mount -o bind,ro /nix/store $mnt/nix/store || exit ; prepend_trap '! mountpoint -q $mnt/nix/store || umount -l $mnt/nix/store' EXIT || exit # all the things required to _run_ the system are copied, but (may) need some more things to initially install it and/or enter the chroot (like qemu, see above)
     run-hook-script 'Pre Installation' @{config.wip.fs.disks.preInstallCommands!writeText.preInstallCommands} || exit
-    code=0 ; nixos-install-cmd $mnt "${topLevel:-$targetSystem}" || code=$?
+    code=0 ; nixos-install-cmd $mnt "${topLevel:-$targetSystem}" >$beLoud 2>$beSilent || code=$?
     run-hook-script 'Post Installation' @{config.wip.fs.disks.postInstallCommands!writeText.postInstallCommands} || exit
 
     # Done!

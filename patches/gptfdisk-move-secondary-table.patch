@@ -1,5 +1,5 @@
 diff --git a/gpt.cc b/gpt.cc
-index 76cd9ad..d61064f 100644
+index 76cd9ad..4798db2 100644
 --- a/gpt.cc
 +++ b/gpt.cc
 @@ -1500,7 +1500,7 @@ int GPTData::DestroyGPT(void) {
@@ -35,7 +35,15 @@ index 76cd9ad..d61064f 100644
  // Blank the partition array
  void GPTData::BlankPartitions(void) {
     uint32_t i;
-@@ -2285,7 +2302,7 @@ uint64_t GPTData::FindFirstAvailable(uint64_t start) {
+@@ -2066,6 +2083,7 @@ void GPTData::MoveSecondHeaderToEnd() {
+    } // if
+    mainHeader.lastUsableLBA = secondHeader.lastUsableLBA = diskSize - mainHeader.firstUsableLBA;
+    secondHeader.partitionEntriesLBA = secondHeader.lastUsableLBA + UINT64_C(1);
++   // TODO: Whenever this gets called, it moves the backup table to be the same distance from the backup header as the primary one it from its header. This seems highly problematic, since MoveMainTable does not call this, but then further actions may or may not do so. Moving the primary table may thus imply moving the backup table, or it may leave it where it was. There is also no guarantee that the space where the backup table is moved to is actually available.
+ } // GPTData::FixSecondHeaderLocation()
+ 
+ // Sets the partition's name to the specified UnicodeString without
+@@ -2285,7 +2303,7 @@ uint64_t GPTData::FindFirstAvailable(uint64_t start) {
  } // GPTData::FindFirstAvailable()
  
  // Returns the LBA of the start of the first partition on the disk (by
@@ -44,7 +52,7 @@ index 76cd9ad..d61064f 100644
  uint64_t GPTData::FindFirstUsedLBA(void) {
      uint32_t i;
      uint64_t firstFound = UINT64_MAX;
-@@ -2298,6 +2315,20 @@ uint64_t GPTData::FindFirstUsedLBA(void) {
+@@ -2298,6 +2316,20 @@ uint64_t GPTData::FindFirstUsedLBA(void) {
      return firstFound;
  } // GPTData::FindFirstUsedLBA()
  
@@ -95,7 +103,7 @@ index 5d19372..17b3380 100644
     uint64_t FindLastAvailable();
     uint64_t FindLastInFree(uint64_t start, bool align = false);
 diff --git a/gptcl.cc b/gptcl.cc
-index 34c9421..232285a 100644
+index 34c9421..f4361b7 100644
 --- a/gptcl.cc
 +++ b/gptcl.cc
 @@ -68,7 +68,7 @@ int GPTDataCL::DoOptions(int argc, char* argv[]) {
@@ -134,6 +142,20 @@ index 34c9421..232285a 100644
     };
  
     // Create popt context...
+@@ -156,12 +158,12 @@ int GPTDataCL::DoOptions(int argc, char* argv[]) {
+ 
+    // Assume first non-option argument is the device filename....
+    device = (char*) poptGetArg(poptCon);
+-   poptResetContext(poptCon);
+ 
+    if (device != NULL) {
+       JustLooking(); // reset as necessary
+       BeQuiet(); // Tell called functions to be less verbose & interactive
+       if (LoadPartitions((string) device)) {
++         device = NULL; poptResetContext(poptCon);
+          if ((WhichWasUsed() == use_mbr) || (WhichWasUsed() == use_bsd))
+             saveNonGPT = 0; // flag so we don't overwrite unless directed to do so
+          sSize = GetBlockSize();
 @@ -280,13 +282,21 @@ int GPTDataCL::DoOptions(int argc, char* argv[]) {
                    alignEnd = true;
                    break;
@@ -246,6 +268,49 @@ index 32e2f88..8ed6274 100644
        void CreatePartition(void);
        void DeletePartition(void);
        void ChangePartType(void);
+diff --git a/guid.cc b/guid.cc
+index 1e73ab7..387019a 100644
+--- a/guid.cc
++++ b/guid.cc
+@@ -139,29 +139,28 @@ void GUIDData::Zero(void) {
+ // (immediately after creating the UUID on Windows 7 being an important
+ // exception).
+ void GUIDData::Randomize(void) {
+-   int i, uuidGenerated = 0;
+ 
+-#ifdef _UUID_UUID_H
++#ifndef _WIN32
+    uuid_generate(uuidData);
+    ReverseBytes(&uuidData[0], 4);
+    ReverseBytes(&uuidData[4], 2);
+    ReverseBytes(&uuidData[6], 2);
+-   uuidGenerated = 1;
+-#endif
++#else
++
+ #if defined (_RPC_H) || defined (__RPC_H__)
+    UUID MsUuid;
+    if (UuidCreate(&MsUuid) == RPC_S_OK) {
+       memcpy(uuidData, &MsUuid, 16);
+       uuidGenerated = 1;
+    } // if
++#else
++   cerr << "Warning! Unable to generate a proper UUID! Creating an improper one as a last\n"
++        << "resort! Windows 7 may crash if you save this partition table!\a\n";
++   for (int i = 0; i < 16; i++)
++      uuidData[i] = (unsigned char) (256.0 * (rand() / (RAND_MAX + 1.0)));
++#endif
+ #endif
+ 
+-   if (!uuidGenerated) {
+-      cerr << "Warning! Unable to generate a proper UUID! Creating an improper one as a last\n"
+-           << "resort! Windows 7 may crash if you save this partition table!\a\n";
+-      for (i = 0; i < 16; i++)
+-         uuidData[i] = (unsigned char) (256.0 * (rand() / (RAND_MAX + 1.0)));
+-   } // if
+ } // GUIDData::Randomize
+ 
+ // Equality operator; returns 1 if the GUIDs are equal, 0 if they're unequal
 diff --git a/sgdisk.8 b/sgdisk.8
 index b966a13..6f8b375 100644
 --- a/sgdisk.8

@@ -10,7 +10,7 @@
 function generic-arg-parse { # ...
     declare -g -A args=( ) ; declare -g -a argv=( ) # this ends up in the caller's scope
     while (( "$#" )) ; do
-        if [[ $1 == -- ]] ; then shift ; argv+=( "$@" ) ; return ; fi
+        if [[ $1 == -- ]] ; then shift ; argv+=( "$@" ) ; \return 0 ; fi
         if [[ $1 == --* ]] ; then
             if [[ $1 == *=* ]] ; then
                 local key=${1/=*/} ; args[${key/--/}]=${1/$key=/}
@@ -25,15 +25,15 @@ function generic-arg-parse { # ...
 #  »name« should be the program name/path (usually »$0«), »args« the form/names of any positional arguments expected (e.g. »SOURCE... DEST«) and is included in the "Usage" description,
 #  »description« the introductory text shown before the "Usage", and »suffix« any text printed after the argument list.
 function generic-arg-help { # 1: name, 2?: args, 3?: description, 4?: suffix
-    if [[ ! ${args[help]:-} ]] ; then : ${allowedArgs[help]:=1} ; return 0 ; fi
+    if [[ ! ${args[help]:-} ]] ; then : ${allowedArgs[help]:=1} ; \return 0 ; fi
     [[ ! ${3:-} ]] || echo "$3"
     printf 'Usage:\n    %s [ARG[=value]]... [--] %s\n\nWhere »ARG« may be any of:\n' "$1" "${2:-}"
-    local name ; while IFS= read -r name ; do
+    local name ; while IFS= read -u3 -r name ; do
         printf '    %s\n        %s\n' "$name" "${allowedArgs[$name]}"
-    done < <( printf '%s\n' "${!allowedArgs[@]}" | LC_ALL=C sort )
+    done 3< <( printf '%s\n' "${!allowedArgs[@]}" | LC_ALL=C sort )
     printf '    %s\n        %s\n' "--help" "Do nothing but print this message and exit with success."
     [[ ! ${4:-} ]] || echo "$4"
-    exit 0
+    \exit 0
 }
 
 ## Performs a basic verification of the named arguments passed by the user and parsed by »generic-arg-parse« against the names in »allowedArgs«.
@@ -46,22 +46,23 @@ function generic-arg-verify { # 1: exitCode
     for name in "${!args[@]}" ; do
         if [[ ${allowedArgs[--$name]:-} ]] ; then
             if [[ ${args[$name]} == '' || ${args[$name]} == 1 ]] ; then continue ; fi
-            echo "Argument »--$name« should be a boolean, but its value is: ${args[$name]}" ; return $exitCode
+            echo "Argument »--$name« should be a boolean, but its value is: ${args[$name]}" 1>&2 ; \return $exitCode
         fi
         if [[ $names == *' --'"$name"'='* || $names == *' --'"$name"'[='* ]] ; then continue ; fi
-        echo "Unexpected argument »--$name«.${allowedArgs[help]:+ Call with »--help« for a list of valid arguments.}" ; return $exitCode
+        echo "Unexpected argument »--$name«.${allowedArgs[help]:+ Call with »--help« for a list of valid arguments.}" 1>&2 ; \return $exitCode
     done
 }
 
 ## Prepends a command to a trap. Especially useful fo define »finally« commands via »prepend_trap '<command>' EXIT«.
 #  NOTE: When calling this in a sub-shell whose parents already has traps installed, make sure to do »trap - trapName« first. On a new shell, this should be a no-op, but without it, the parent shell's traps will be added to the sub-shell as well (due to strange behavior of »trap -p« (in bash ~5.1.8)).
 function prepend_trap { # 1: command, ...: trapNames
-    fatal() { printf "ERROR: $@\n" >&2 ; return 1 ; }
-    local cmd=$1 ; shift || fatal "${FUNCNAME} usage error"
+    fatal() { printf "ERROR: $@\n" 1>&2 ; \return 1 ; }
+    local cmd=$1 ; shift 1 || fatal "${FUNCNAME} usage error"
     local name ; for name in "$@" ; do
         trap -- "$( set +x
             printf '%s\n' "( ${cmd} ) || true ; "
-            p3() { printf '%s\n' "${3:-}" ; } ; eval "p3 $(trap -p "${name}")"
+            p3() { printf '%s\n' "${3:-}" ; }
+            eval "p3 $(trap -p "${name}")"
         )" "${name}" || fatal "unable to add to trap ${name}"
     done
 }
@@ -69,7 +70,7 @@ declare -f -t prepend_trap # required to modify DEBUG or RETURN traps
 
 ## Given the name to an existing bash function, this creates a copy of that function with a new name (in the current scope).
 function copy-function { # 1: existingName, 2: newName
-    local original=$(declare -f "${1?existingName not provided}") ; if [[ ! $original ]] ; then echo "Function $1 is not defined" ; return 1 ; fi
+    local original=$(declare -f "${1?existingName not provided}") ; if [[ ! $original ]] ; then echo "Function $1 is not defined" 1>&2 ; \return 1 ; fi
     eval "${original/$1/${2?newName not provided}}" # run the code declaring the function again, replacing only the first occurrence of the name
 }
 
@@ -78,7 +79,7 @@ function write-secret {( set -u # 1: path, 2?: owner[:[group]], 3?: mode
     mkdir -p -- "$(dirname "$1")"/ || exit
     install -o root -g root -m 000 -T /dev/null "$1" || exit
     secret=$(tee "$1") # copy stdin to path without removing or adding anything
-    if [[ "${#secret}" == 0 ]] ; then echo "write-secret to $1 was empty!" 1>&2 ; exit 1 ; fi # could also stat the file ...
+    if [[ "${#secret}" == 0 ]] ; then echo "write-secret to $1 was empty!" 1>&2 ; \exit 1 ; fi # could also stat the file ...
     chown "${2:-root:root}" -- "$1" || exit
     chmod "${3:-400}"       -- "$1" || exit
 )}
@@ -87,7 +88,7 @@ function write-secret {( set -u # 1: path, 2?: owner[:[group]], 3?: mode
 function prompt-new-password {( set -u # 1: usage
     read -s -p "Please enter the new password $1: "     password1 || exit ; echo 1>&2
     read -s -p "Please enter the same password again: " password2 || exit ; echo 1>&2
-    if (( ${#password1} == 0 )) || [[ "$password1" != "$password2" ]] ; then printf 'Passwords empty or mismatch, aborting.\n' 1>&2 ; exit 1 ; fi
+    if (( ${#password1} == 0 )) || [[ "$password1" != "$password2" ]] ; then printf 'Passwords empty or mismatch, aborting.\n' 1>&2 ; \exit 1 ; fi
     printf %s "$password1" || exit
 )}
 

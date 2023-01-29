@@ -1,0 +1,51 @@
+diff --git a/nixos/modules/profiles/installation-device.nix b/nixos/modules/profiles/installation-device.nix
+index ae9be08c8d8..ce0d51d6b29 100644
+--- a/nixos/modules/profiles/installation-device.nix
++++ b/nixos/modules/profiles/installation-device.nix
+@@ -62,7 +62,7 @@ with lib;
+ 
+       Type `sudo systemctl start display-manager' to
+       start the graphical user interface.
+-    '';
++    '' + "\n";
+ 
+     # We run sshd by default. Login via root is only possible after adding a
+     # password via "passwd" or by adding a ssh key to /home/nixos/.ssh/authorized_keys.
+diff --git a/nixos/modules/services/ttys/getty.nix b/nixos/modules/services/ttys/getty.nix
+index 22ae9c27e5b..6eb96a6fc9f 100644
+--- a/nixos/modules/services/ttys/getty.nix
++++ b/nixos/modules/services/ttys/getty.nix
+@@ -102,7 +102,7 @@ in
+     # Note: this is set here rather than up there so that changing
+     # nixos.label would not rebuild manual pages
+     services.getty.greetingLine = mkDefault ''<<< Welcome to NixOS ${config.system.nixos.label} (\m) - \l >>>'';
+-    services.getty.helpLine = mkIf (config.documentation.nixos.enable && config.documentation.doc.enable) "\nRun 'nixos-help' for the NixOS manual.";
++    services.getty.helpLine = mkIf (config.documentation.nixos.enable && config.documentation.doc.enable) "\nRun 'nixos-help' for the NixOS manual.\n";
+ 
+     systemd.services."getty@" =
+       { serviceConfig.ExecStart = [
+@@ -152,7 +152,6 @@ in
+ 
+           [1;32m${config.services.getty.greetingLine}[0m
+           ${config.services.getty.helpLine}
+-
+         '';
+       };
+ 
+diff --git a/nixos/modules/virtualisation/lxc-container.nix b/nixos/modules/virtualisation/lxc-container.nix
+index 4963d9f3f9e..458871fe0e7 100644
+--- a/nixos/modules/virtualisation/lxc-container.nix
++++ b/nixos/modules/virtualisation/lxc-container.nix
+@@ -190,11 +190,7 @@ in
+     '';
+ 
+     # Some more help text.
+-    services.getty.helpLine =
+-      ''
+-
+-        Log in as "root" with an empty password.
+-      '';
++    services.getty.helpLine = "\nLog in as \"root\" with an empty password.\n";
+ 
+     # Containers should be light-weight, so start sshd on demand.
+     services.openssh.enable = mkDefault true;

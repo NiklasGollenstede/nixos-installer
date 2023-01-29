@@ -1,8 +1,8 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
     inherit (import "${dirname}/vars.nix"    dirname inputs) mapMerge mapMergeUnique mergeAttrsUnique flipNames;
-    inherit (import "${dirname}/imports.nix" dirname inputs) getNixFiles importWrapped;
-    inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit;
+    inherit (import "${dirname}/imports.nix" dirname inputs) getNixFiles importWrapped getOverlaysFromInputs getModulesFromInputs;
+    inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit extractBashFunction;
     setup-scripts = (import "${dirname}/setup-scripts" "${dirname}/setup-scripts"  inputs);
     prefix = inputs.config.prefix;
     inherit (import "${dirname}/misc.nix" dirname inputs) trace;
@@ -26,7 +26,7 @@ in rec {
         # A flake has »{ inputs; outputs; sourceInfo; } // outputs // sourceInfo«, where »inputs« is what's passed to the outputs function without »self«, and »outputs« is the result of calling the outputs function. Don't know the merge priority.
         if (!input?sourceInfo) then sourceInfo else (let
             outputs = (import "${patched.outPath}/flake.nix").outputs ({ self = sourceInfo // outputs; } // input.inputs);
-        in { inherit (input) inputs; inherit outputs; inherit sourceInfo; } // outputs // sourceInfo)
+        in outputs // sourceInfo // { inherit (input) inputs; inherit outputs; inherit sourceInfo; })
     )) else input) inputs);
 
     # Generates implicit flake outputs by importing conventional paths in the local repo. E.g.:
@@ -73,14 +73,19 @@ in rec {
 
     # Builds the System Configuration for a single host. Since each host depends on the context of all other host (in the same "network"), this is essentially only callable through »mkNixosConfigurations«.
     # See »mkSystemsFlake« for documentation of the arguments.
-    mkNixosConfiguration = args@{ name, entryPath ? null, config ? null, preface ? null,peers ? { }, inputs ? [ ], overlays ? [ ], modules ? [ ], nixosSystem, localSystem ? null, ... }: let
+    mkNixosConfiguration = args@{ name,
+        entryPath ? null, config ? null, preface ? null,
+        inputs ? { }, overlays ? (getOverlaysFromInputs inputs), modules ? (getModulesFromInputs inputs),
+        peers ? { }, nixosSystem ? inputs.nixpkgs.lib.nixosSystem, localSystem ? null,
+    ... }: let
         preface = args.preface or (getSystemPreface inputs entryPath (specialArgs // { inherit name; }));
         targetSystem = "${preface.hardware}-linux"; buildSystem = if localSystem != null then localSystem else targetSystem;
         specialArgs = (args.specialArgs or { }) // {
             nodes = peers; # NixOPS
         };
+        outputName = if args?renameOutputs then args.renameOutputs name else name;
     in let system = { inherit preface; } // (nixosSystem {
-        system = buildSystem;
+        system = buildSystem; # (this actually does nothing more than setting »config.nixpkgs.system« and can be null here)
 
         modules = [ { imports = [ # Anything specific to only this evaluation of the module tree should go here.
             (args.config or (importWrapped inputs entryPath).module)
@@ -110,7 +115,11 @@ in rec {
             config.${prefix} = if preface?instances then { } else { preface.instances = [ name ]; };
         }) ({
             options.${prefix}.setup.scripts = lib.mkOption {
-                description = ''Attrset of bash scripts defining functions that do installation and maintenance operations. See »./setup-scripts/README.md« below for more information.'';
+                description = ''
+                    Attrset of bash scripts defining functions that do installation and maintenance operations.
+                    The functions should expect the bash options `pipefail` and `nounset` (`-u`) to be set.
+                    See »./setup-scripts/README.md« for more information.
+                '';
                 type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, config, ... }: { options = {
                     name = lib.mkOption { description = "Symbolic name of the script."; type = lib.types.str; default = name; readOnly = true; };
                     path = lib.mkOption { description = "Path of file for ».text« to be loaded from."; type = lib.types.nullOr lib.types.path; default = null; };
@@ -122,12 +131,13 @@ in rec {
         }) ({ config, options, pkgs, ... }: {
             options.${prefix}.setup.appliedScripts = lib.mkOption {
                 type = lib.types.functionTo lib.types.str; readOnly = true;
-                default = context: substituteImplicit { inherit pkgs; scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues config.${prefix}.setup.scripts); context = { inherit config options pkgs inputs; } // context; }; # inherit (builtins) trace;
+                default = context: substituteImplicit { inherit pkgs; scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues config.${prefix}.setup.scripts); context = { inherit config options pkgs inputs outputName; } // context; }; # inherit (builtins) trace;
             };
 
         }) ]; _file = "${dirname}/flakes.nix#extraModules"; } ];
 
-        #specialArgs = specialArgs; # (This is already set during module import, while »_module.args« only becomes available during module evaluation (before that, using it causes infinite recursion). Since it can't be ensured that this is set in every circumstance where »extraModules« are being used, it should not be set at all.)
+        specialArgs = { inherit outputName; };
+        # (This is already set during module import, while »_module.args« only becomes available during module evaluation (before that, using it causes infinite recursion). Since it can't be ensured that this is set in every circumstance where »extraModules« are being used, it should generally not be used to set custom arguments. The »outputName« is only applicable in the current evaluation anyway, though.)
 
     }); in system;
 
@@ -166,11 +176,11 @@ in rec {
         # Arguments »{ files, dir, exclude, }« to »mkNixosConfigurations«, see there for details. May also be a list of those attrsets, in which case those multiple sets of hosts will be built separately by »mkNixosConfigurations«, allowing for separate sets of »peers« passed to »mkNixosConfiguration«. Each call will receive all other arguments, and the resulting sets of hosts will be merged.
         systems ? ({ dir = "${inputs.self}/hosts"; exclude = [ ]; }),
         # List of overlays to set as »config.nixpkgs.overlays«. Defaults to ».overlays.default« of all »overlayInputs«/»inputs« (incl. »inputs.self«).
-        overlays ? (lib.remove null (map (input: if input?overlays.default then input.overlays.default else if input?overlay then input.overlay else null) (builtins.attrValues overlayInputs))),
+        overlays ? (getOverlaysFromInputs overlayInputs),
         # (Subset of) »inputs« that »overlays« will be used from. Example: »{ inherit (inputs) self flakeA flakeB; }«.
         overlayInputs ? inputs,
         # List of Modules to import for all hosts, in addition to the default ones in »nixpkgs«. The host-individual module should selectively enable these. Defaults to ».nixosModules.default« of all »moduleInputs«/»inputs« (including »inputs.self«).
-        modules ? (lib.remove null (map (input: if input?nixosModules.default then input.nixosModules.default else if input?nixosModule then input.nixosModule else null) (builtins.attrValues moduleInputs))),
+        modules ? (getModulesFromInputs moduleInputs),
         # (Subset of) »inputs« that »modules« will be used from. Example: »{ inherit (inputs) self flakeA flakeB; }«.
         moduleInputs ? inputs,
         # Additional arguments passed to each module evaluated for the host config (if that module is defined as a function).
@@ -182,72 +192,16 @@ in rec {
         ## If provided, then change the name of each output attribute by passing it through this function. Allows exporting of multiple variants of a repo's hosts from a single flake:
         renameOutputs ? null,
     ... }: let
-        otherArgs = (builtins.removeAttrs args [ "systems" "renameOutputs" ]) // { inherit inputs systems overlays modules specialArgs nixosSystem localSystem; };
+        otherArgs = args // { inherit inputs overlays modules specialArgs nixosSystem localSystem; };
         nixosConfigurations = if builtins.isList systems then mergeAttrsUnique (map (systems: mkNixosConfigurations (otherArgs // systems)) systems) else mkNixosConfigurations (otherArgs // systems);
     in let outputs = {
         inherit nixosConfigurations;
     } // (forEachSystem [ "aarch64-linux" "x86_64-linux" ] (localSystem: let
         pkgs = (import inputs.nixpkgs { inherit overlays; system = localSystem; });
         tools = lib.unique (map (p: p.outPath) (lib.filter lib.isDerivation pkgs.stdenv.allowedRequisites));
-        PATH = lib.concatMapStringsSep ":" (pkg: "${pkg}/bin") tools;
     in rec {
 
-        # Do per-host setup and maintenance things:
-        # SYNOPSIS: nix run REPO#HOST [-- [sudo] [bash | -x [-c SCRIPT | FUNC ...ARGS]]]
-        # Where »REPO« is the path to a flake repo using »mkSystemsFlake« for it's »apps« output, and »HOST« is the name of a host it defines.
-        # If the first argument (after  »--«) is »sudo«, then the program will re-execute itself as root using sudo (minus that »sudo« argument).
-        # If the (then) first argument is »bash«, or if there are no (more) arguments, it will execute an interactive shell with the variables and functions sourced (largely equivalent to »nix develop .#$host«).
-        # »-x« as next argument runs »set -x«. If the next argument is »-c«, it will evaluate (only) the following argument as bash script, otherwise the argument will be called as command, with all following arguments as arguments tot he command.
-        # Examples:
-        # Install the host named »$target« to the image file »/tmp/system-$target.img«:
-        # $ nix run .#$target -- install-system /tmp/system-$target.img
-        # Run an interactive bash session with the setup functions in the context of the current host:
-        # $ nix run /etc/nixos/#$(hostname)
-        # Run an root session in the context of a different host (useful if Nix is not installed for root on the current host):
-        # $ nix run /etc/nixos/#other-host -- sudo
-        apps = lib.mapAttrs (name: system: rec { type = "app"; derivation = pkgs.writeShellScript "scripts-${name}" ''
-
-            # if first arg is »sudo«, re-execute this script with sudo (as root)
-            if [[ $1 == sudo ]] ; then shift ; exec sudo --preserve-env=SSH_AUTH_SOCK -- "$0" "$@" ; fi
-
-            # if the (now) first arg is »bash« or there are no args, re-execute this script as bash »--init-file«, starting an interactive bash in the context of the script
-            if [[ $1 == bash ]] || [[ $# == 0 && $0 == *-scripts-${name} ]] ; then
-                exec ${pkgs.bashInteractive}/bin/bash --init-file <(cat << "EOS"${"\n"+''
-                    # prefix the script to also include the default init files
-                    ! [[ -e /etc/profile ]] || . /etc/profile
-                    for file in ~/.bash_profile ~/.bash_login ~/.profile ; do
-                        if [[ -r $file ]] ; then . $file ; break ; fi
-                    done ; unset $file
-                    declare -A args=( ) ; declare -a argv=( ) # some functions expect these
-                    # add active »hostName« to shell prompt
-                    PS1=''${PS1/\\$/\\[\\e[93m\\](${name})\\[\\e[97m\\]\\$}
-                ''}EOS
-                cat $0) -i
-            fi
-
-            # provide installer tools (native to localSystem, not targetSystem)
-            hostPath=$PATH ; PATH=${PATH}
-
-            ${system.config.${prefix}.setup.appliedScripts { native = pkgs; }}
-
-            # either call »$1« with the remaining parameters as arguments, or if »$1« is »-c« eval »$2«.
-            if [[ ''${1:-} == -x ]] ; then shift ; set -x ; fi
-            if [[ ''${1:-} == -c ]] ; then eval "$2" ; else "$@" ; fi
-        ''; program = "${derivation}"; }) nixosConfigurations;
-
-        # E.g.: $ nix develop /etc/nixos/#$(hostname)
-        # ... and then call any of the functions in ./utils/setup-scripts/ (in the context of »$(hostname)«, where applicable).
-        # To get an equivalent root shell: $ nix run /etc/nixos/#functions-$(hostname) -- sudo bash
-        devShells = lib.mapAttrs (name: system: pkgs.mkShell {
-            inherit name;
-            nativeBuildInputs = tools ++ [ pkgs.nixos-install-tools ];
-            shellHook = ''
-                ${system.config.${prefix}.setup.appliedScripts { native = pkgs; }}
-                # add active »hostName« to shell prompt
-                declare -A args=( ) ; declare -a argv=( ) # some functions expect these
-                PS1=''${PS1/\\$/\\[\\e[93m\\](${name})\\[\\e[97m\\]\\$}
-            '';
-        }) nixosConfigurations;
+        apps = lib.mapAttrs (name: system: rec { type = "app"; derivation = writeSystemScripts { inherit name system pkgs; }; program = "${derivation}"; }) nixosConfigurations;
 
         # dummy that just pulls in all system builds
         packages.all-systems = pkgs.runCommandLocal "all-systems" { } ''
@@ -270,8 +224,78 @@ in rec {
         nixosConfigurations = mapMerge (k: v: { ${renameOutputs k} = v; }) outputs.nixosConfigurations;
     } // (forEachSystem [ "aarch64-linux" "x86_64-linux" ] (localSystem: {
         apps = mapMerge (k: v: { ${renameOutputs k} = v; }) outputs.apps.${localSystem};
-        devShells = mapMerge (k: v: { ${renameOutputs k} = v; }) outputs.devShells.${localSystem};
         packages.${renameOutputs "all-systems"} = outputs.packages.${localSystem}.all-systems;
         checks.${renameOutputs "all-systems"} = outputs.checks.${localSystem}.all-systems;
     }));
+
+
+    # Do per-host setup and maintenance things:
+    # SYNOPSIS: nix run REPO#HOST [-- [sudo] [bash | [--command SCRIPT | FUNC] ...[ARG|OPTION]]]
+    # Where »REPO« is the path to a flake repo using »mkSystemsFlake« for it's »apps« output, and »HOST« is the name of a host it defines.
+    # If the first argument (after  »--«) is »sudo«, then the program will re-execute itself as root using sudo (minus that »sudo« argument).
+    # If the (then) first argument is »bash«, or if there are no (more) arguments or options, it will execute an interactive shell with the variables and functions sourced.
+    # If an option »--command« is supplied, then the first argument evaluated as bash instructions, otherwise the first argument is called as a function (or program).
+    # Either way, the remaining arguments and options have been parsed by »generic-arg-parse« and are available in »argv« and »args«.
+    # Examples:
+    # Install the host named »$target« to the image file »/tmp/system-$target.img«:
+    # $ nix run .#$target -- install-system /tmp/system-$target.img
+    # Run an interactive bash session with the setup functions in the context of the current host:
+    # $ nix run /etc/nixos/#$(hostname)
+    # Run a root session in the context of a different host (useful if Nix is not installed for root on the current host):
+    # $ nix run /etc/nixos/#other-host -- sudo
+    writeSystemScripts = {
+        name ? system._module.args.name,
+        system, pkgs,
+    }: let
+        tools = lib.unique (map (p: p.outPath) (lib.filter lib.isDerivation pkgs.stdenv.allowedRequisites));
+    in pkgs.writeShellScript "scripts-${name}" ''
+
+        # if first arg is »sudo«, re-execute this script with sudo (as root)
+        if [[ $1 == sudo ]] ; then shift ; exec sudo --preserve-env=SSH_AUTH_SOCK -- "$0" "$@" ; fi
+
+        # if the (now) first arg is »bash« or there are no args, re-execute this script as bash »--init-file«, starting an interactive bash in the context of the script
+        if [[ $1 == bash ]] || [[ $# == 0 && $0 == *-scripts-${name} ]] ; then
+            exec ${pkgs.bashInteractive}/bin/bash --init-file <(cat << "EOS"${"\n"+''
+                # prefix the script to also include the default init files
+                ! [[ -e /etc/profile ]] || . /etc/profile
+                for file in ~/.bash_profile ~/.bash_login ~/.profile ; do
+                    if [[ -r $file ]] ; then . $file ; break ; fi
+                done ; unset $file
+
+                set -o pipefail -o nounset # (do not rely on errexit)
+                declare -A args=( ) ; declare -a argv=( ) # some functions expect these
+                # add active »hostName« to shell prompt
+                PS1=''${PS1/\\$/\\[\\e[93m\\](${name})\\[\\e[97m\\]\\$}
+            ''}EOS
+            cat $0) -i
+        fi
+
+        # provide installer tools (native to localSystem, not targetSystem)
+        hostPath=$PATH ; PATH=${lib.makeBinPath tools}
+
+        ${extractBashFunction (builtins.readFile setup-scripts.utils) "generic-arg-parse"}
+        set -o pipefail -o nounset # (do not rely on errexit)
+        generic-arg-parse "$@" || exit
+
+        if [[ ''${args[debug]:-} ]] ; then # for the aliases to work, they have to be set before the functions are parsed
+            shopt -s expand_aliases # enable aliases in non-interactive bash
+            for control in return exit ; do alias $control='{
+                status=$? ; if ! (( status )) ; then '$control' 0 ; fi # control flow return
+                if ! ${pkgs.bashInteractive}/bin/bash --init-file ${system.config.environment.etc.bashrc.source} ; then '$control' $status ; fi # »|| '$control'« as an error-catch
+            }' ; done
+        fi
+
+        ${system.config.${prefix}.setup.appliedScripts { native = pkgs; }}
+
+        # either call »argv[0]« with the remaining parameters as arguments, or if »$1« is »-c« eval »$2«.
+        if [[ ''${args[debug]:-} || ''${args[trace]:-} ]] ; then set -x ; fi
+        if [[ ''${args[command]:-} ]] ; then
+            command=''${argv[0]:?'With --command, the first positional argument must specify the commands to run.'}
+            argv=( "''${argv[@]:1}" ) ; set -- "''${argv[@]}" ; eval "$command"
+        else
+            entry=''${argv[0]:?}
+            argv=( "''${argv[@]:1}" ) ; "$entry" "''${argv[@]}"
+        fi
+    '';
+
 }

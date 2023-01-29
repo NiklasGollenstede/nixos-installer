@@ -15,11 +15,11 @@ This uses the same implementation as `boot.loader.generic-extlinux-compatible` t
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: args@{ config, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
+dirname: inputs: args@{ config, options, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
     prefix = inputs.config.prefix;
     cfg = config.${prefix}.bootloader.extlinux;
     targetMount = let path = lib.findFirst (path: config.fileSystems?${path}) "/" (lib.wip.parentPaths cfg.targetDir); in config.fileSystems.${path};
-    supportedFSes = [ "vfat" ]; fsSupported = fs: builtins.elem fs supportedFSes;
+    supportedFSes = [ "vfat" "ntfs" "ext2" "ext3" "ext4" "btrfs" "xfs" "ufs" ]; fsSupported = fs: builtins.elem fs supportedFSes;
 in {
 
     options.${prefix} = { bootloader.extlinux = {
@@ -52,12 +52,12 @@ in {
 
         esc = lib.escapeShellArg;
 
-    in lib.mkIf cfg.enable ({
+    in lib.mkMerge [ (lib.mkIf cfg.enable {
 
         assertions = [ {
             assertion = cfg.allowInstableTargetPart || (builtins.match ''^/dev/disk/by-(id|label|partlabel|partuuid|uuid)/.*[^/]$'' cfg.targetPart) != null;
             message = ''
-                `config.${prefix}.bootloader.extlinux.targetPart` is not set to a stable path in `/dev/disk/by-{id,label,partlabel,partuuid,uuid}/`. Not using a unique identifier (or even using a path that can unexpectedly change) is very risky.
+                `config.${prefix}.bootloader.extlinux.targetPart` is set to `${cfg.targetPart}`, which is not a stable path in `/dev/disk/by-{id,label,partlabel,partuuid,uuid}/`. Not using a unique identifier (or even using a path that can unexpectedly change) is very risky.
             '';
         } {
             assertion = fsSupported targetMount.fsType;
@@ -73,19 +73,16 @@ in {
 
         system.boot.loader.id = "extlinux";
         system.build.installBootLoader = "${pkgs.writeShellScript "install-extlinux.sh" ''
-            if [[ ! ''${1:-} || $1 != /nix/store/* ]] ; then echo "Usage: $0 TOPLEVEL_PATH" ; exit 1 ; fi
+            if [[ ! ''${1:-} || $1 != /nix/store/* ]] ; then echo "Usage: $0 TOPLEVEL_PATH" 1>&2 ; exit 1 ; fi
+            export PATH=$PATH:${pkgs.stdenv}/bin
             ${extlinux-conf-builder} "$1" -d ${esc cfg.targetDir}
 
             partition=${esc cfg.targetPart}
-            diskDev=$( realpath "$partition" ) || exit ; if [[ $diskDev == /dev/sd* ]] ; then
-                diskDev=$( shopt -s extglob ; echo "''${diskDev%%+([0-9])}" )
-            else
-                diskDev=$( shopt -s extglob ; echo "''${diskDev%%p+([0-9])}" )
-            fi
+            diskDev=/dev/$( basename "$( readlink -f /sys/class/block/"$( basename "$( realpath "$partition" )" )"/.. )" ) || exit
 
             if [[ $( cat ${esc cfg.targetDir}/extlinux/installedVersion 2>/dev/null || true ) != ${esc cfg.package} ]] ; then
                 if ! output=$( ${esc cfg.package}/bin/extlinux --install --heads=64 --sectors=32 ${esc cfg.targetDir}/extlinux 2>&1 ) ; then
-                    printf '%s\n' "$output" ; exit 1
+                    printf '%s\n' "$output" 1>&2 ; exit 1
                 fi
                 printf '%s\n' ${esc cfg.package} >${esc cfg.targetDir}/extlinux/installedVersion
             fi
@@ -93,7 +90,7 @@ in {
                 dd bs=440 conv=notrunc count=1 if=${esc cfg.package}/share/syslinux/mbr.bin of=$diskDev status=none || exit
             fi
 
-            if [[ '${toString cfg.showUI}' ]] ; then # showUI
+            if [[ ${toString cfg.showUI} ]] ; then # showUI
                 for lib in libutil menu ; do
                     if ! ${pkgs.diffutils}/bin/cmp --quiet ${esc cfg.targetDir}/extlinux/$lib.c32 ${esc cfg.package}/share/syslinux/$lib.c32 ; then
                         cp ${esc cfg.package}/share/syslinux/$lib.c32 ${esc cfg.targetDir}/extlinux/$lib.c32
@@ -109,5 +106,14 @@ in {
 
         boot.loader.grub.enable = false;
 
-    });
+    }) (
+
+        (lib.mkIf (options.virtualisation?useDefaultFilesystems) { # (»nixos/modules/virtualisation/qemu-vm.nix« is imported, i.e. we are building a "vmVariant")
+            ${prefix} = {
+                bootloader.extlinux.enable = lib.mkIf config.virtualisation.useDefaultFilesystems (lib.mkVMOverride false);
+                bootloader.extlinux.allowInstableTargetPart = lib.mkVMOverride true; # (»/dev/sdX« etc in the VM are stable (if the VM is invoked the same way))
+            };
+        })
+
+    ) ];
 }

@@ -319,7 +319,7 @@ in {
             });
         });
         # TODO: "F2FS and its tools support various parameters not only for configuring on-disk layout, but also for selecting allocation and cleaning algorithms."
-        boot.initrd.kernelModules = [ type ]; # This is not generally, but sometimes, required to boot. Strange. (Kernel message: »request_module fs-f2fs succeeded, but still no fs?«)
+        boot.initrd.kernelModules = lib.mkIf (config.fileSystems?${cfg.local.bind.source}) [ config.fileSystems.${cfg.local.bind.source}.fsType ]; # This is not generally, but sometimes, required to boot. Strange. (Kernel message: »request_module fs-f2fs succeeded, but still no fs?«)
 
 
     })) (lib.mkIf (cfg.remote.type == "none") {

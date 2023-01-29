@@ -69,8 +69,6 @@ in let module = {
 
     }) ({
 
-        boot.initrd.supportedFilesystems = [ "vfat" ];
-
         boot.initrd.luks.devices."keystore-${hash}" = {
             device = "/dev/disk/by-partlabel/keystore-${hash}";
             postOpenCommands = ''
@@ -99,6 +97,10 @@ in let module = {
                 )
             '';
         };
+
+    }) (lib.mkIf (config.boot.initrd.luks.devices?"keystore-${hash}") { # (this will be false when overwritten by »nixos/modules/virtualisation/qemu-vm.nix«)
+
+        boot.initrd.supportedFilesystems = [ "vfat" ];
 
         boot.initrd.postMountCommands = ''
             ${if (lib.any (lib.wip.matches "^home/.*$") (lib.attrNames cfg.keys)) then ''

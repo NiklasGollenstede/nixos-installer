@@ -14,14 +14,14 @@ function gen-key-unencrypted {( set -eu # 1: usage
 ## Uses the hostname as a trivial key.
 function gen-key-hostname {( set -eu # 1: usage
     usage=$1
-    if [[ ! "$usage" =~ ^(luks/keystore-@{config.networking.hostName!hashString.sha256:0:8}/.*)$ ]] ; then printf '»trivial« key mode is only available for the keystore itself.\n' 1>&2 ; exit 1 ; fi
+    if [[ ! "$usage" =~ ^(luks/keystore-@{config.networking.hostName!hashString.sha256:0:8}/.*)$ ]] ; then printf '»trivial« key mode is only available for the keystore itself.\n' 1>&2 ; \exit 1 ; fi
     printf %s "@{config.networking.hostName}"
 )}
 
 ## Obtains a key by reading it from a bootkey partition (see »add-bootkey-to-keydev«).
 function gen-key-usb-part {( set -eu # 1: usage
     usage=$1
-    if [[ ! "$usage" =~ ^(luks/keystore-[^/]+/[1-8])$ ]] ; then printf '»usb-part« key mode is only available for the keystore itself.\n' 1>&2 ; exit 1 ; fi
+    if [[ ! "$usage" =~ ^(luks/keystore-[^/]+/[1-8])$ ]] ; then printf '»usb-part« key mode is only available for the keystore itself.\n' 1>&2 ; \exit 1 ; fi
     bootkeyPartlabel=bootkey-"@{config.networking.hostName!hashString.sha256:0:8}"
     cat /dev/disk/by-partlabel/"$bootkeyPartlabel"
 )}
@@ -41,7 +41,7 @@ function gen-key-constant {( set -eu # 1: _, 2: value
 ## Obtains a key by prompting for a password.
 function gen-key-password {( set -eu # 1: usage
     usage=$1
-    ( prompt-new-password "as key for @{config.networking.hostName}:$usage" || exit 1 )
+    ( prompt-new-password "as key for @{config.networking.hostName}:$usage" || \exit 1 )
 )}
 
 ## Generates a key by prompting for (or reusing) a »$user«'s password, combining it with »$keystore/home/$user.key«.
@@ -51,9 +51,9 @@ function gen-key-home-composite {( set -eu # 1: usage, 2: user
         password=${userPasswords[$user]}
     else
         password=$(prompt-new-password "that will be used as component of the key for »@{config.networking.hostName}:$usage«")
-        if [[ ! $password ]] ; then exit 1 ; fi
+        if [[ ! $password ]] ; then \exit 1 ; fi
     fi
-    ( cat "$keystore"/home/"$user".key && cat <<<"$password" ) | sha256sum | head -c 64
+    { cat "$keystore"/home/"$user".key && cat <<<"$password" ; } | sha256sum | head -c 64
 )}
 
 ## Generates a reproducible, host-independent key by challenging slot »$slot« of YubiKey »$serial« with »$user«'s password.
@@ -65,7 +65,7 @@ function gen-key-home-yubikey {( set -eu # 1: usage, 2: serialAndSlotAndUser(as 
         password=${userPasswords[$user]}
     else
         password=$(prompt-new-password "as YubiKey challenge for »@{config.networking.hostName}:$usage«")
-        if [[ ! $password ]] ; then exit 1 ; fi
+        if [[ ! $password ]] ; then \exit 1 ; fi
     fi
     gen-key-yubikey-challenge "$usage" "$serial:$slot:home-$user=$password" true "»${user}«'s password (for key »${usage}«)"
 )}
@@ -74,7 +74,7 @@ function gen-key-home-yubikey {( set -eu # 1: usage, 2: serialAndSlotAndUser(as 
 function gen-key-yubikey-pin {( set -eu # 1: usage, 2: serialAndSlot(as »serial:slot«)
     usage=$1 ; serialAndSlot=$2
     pin=$( prompt-new-password "/ pin as challenge to YubiKey »$serialAndSlot« as key for »@{config.networking.hostName}:$usage«" )
-    if [[ ! $pin ]] ; then exit 1 ; fi
+    if [[ ! $pin ]] ; then \exit 1 ; fi
     gen-key-yubikey-challenge "$usage" "$serialAndSlot:$pin" true "password / pin as key for »@{config.networking.hostName}:$usage«"
 )}
 
@@ -100,19 +100,19 @@ function gen-key-yubikey-challenge {( set -eu # 1: _, 2: serialAndSlotAndChallen
     else
         read -p 'Challenging YubiKey '"$serial"' slot '"$slot"' once with '"${message:-challenge »"$challenge"«}"'. Enter to continue, or Ctrl+C to abort:'
     fi
-    if [[ "$serial" != "$( @{native.yubikey-personalization}/bin/ykinfo -sq )" ]] ; then printf 'YubiKey with serial %s not present, aborting.\n' "$serial" 1>&2 ; exit 1 ; fi
+    if [[ "$serial" != "$( @{native.yubikey-personalization}/bin/ykinfo -sq )" ]] ; then printf 'YubiKey with serial %s not present, aborting.\n' "$serial" 1>&2 ; \exit 1 ; fi
 
     if [[ ! "${3:-}" ]] ; then
         secret="$( @{native.yubikey-personalization}/bin/ykchalresp -"$slot" "$challenge":1 )""$( sleep .5 || : ; @{native.yubikey-personalization}/bin/ykchalresp -"$slot" "$challenge":2 || @{native.yubikey-personalization}/bin/ykchalresp -"$slot" "$challenge":2 )" # the second consecutive challenge tends to fail if it follows immediately
-        if [[ ${#secret} != 80 ]] ; then printf 'YubiKey challenge failed, aborting.\n' "$serial" 1>&2 ; exit 1 ; fi
+        if [[ ${#secret} != 80 ]] ; then printf 'YubiKey challenge failed, aborting.\n' "$serial" 1>&2 ; \exit 1 ; fi
     else
         secret="$( @{native.yubikey-personalization}/bin/ykchalresp -"$slot" "$challenge" )"
-        if [[ ${#secret} != 40 ]] ; then printf 'YubiKey challenge failed, aborting.\n' "$serial" 1>&2 ; exit 1 ; fi
+        if [[ ${#secret} != 40 ]] ; then printf 'YubiKey challenge failed, aborting.\n' "$serial" 1>&2 ; \exit 1 ; fi
     fi
-    printf %s "$secret" | head -c 64
+    { printf %s "$secret" || true ; } | head -c 64
 )}
 
 ## Generates a random secret key.
 function gen-key-random {( set -eu # 1: usage
-    </dev/urandom tr -dc 0-9a-f | head -c 64
+    </dev/urandom @{native.xxd}/bin/xxd -l 32 -c 64 -p
 )}

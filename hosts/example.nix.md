@@ -41,7 +41,7 @@ in { imports = [ ({ ## Hardware
     wip.bootloader.extlinux.enable = true;
 
     # Example of adding and/or overwriting setup/maintenance functions:
-    wip.setup.scripts.install-overwrite = { path = ../example/install.sh.md; order = 1000; };
+    #wip.setup.scripts.install-overwrite = { path = ../example/install.sh.md; order = 1000; };
 
 
 }) (lib.mkIf (name == "example-explicit") { ## Minimal explicit FS setup
@@ -53,6 +53,7 @@ in { imports = [ ({ ## Hardware
         t;1;c  # type ; part1 ; W95 FAT32 (LBA)
         a;1    # active/boot ; part1
     ''; }; };
+    wip.fs.boot.enable = false;
 
     # Put everything except for /boot and /nix/store on a tmpfs. This is the absolute minimum, most usable systems require some more paths that are persistent (e.g. all of /nix and /home).
     fileSystems."/"          = { fsType  =  "tmpfs";    device = "tmpfs"; neededForBoot = true; options = [ "mode=755" ]; };
@@ -133,7 +134,7 @@ in { imports = [ ({ ## Hardware
 
     ## And here would go the things that actually make the host unique (and do something productive). For now just some debugging things:
 
-    environment.systemPackages = [ pkgs.curl pkgs.htop ];
+    environment.systemPackages = [ pkgs.curl pkgs.htop pkgs.tree ];
 
     services.getty.autologinUser = "root"; users.users.root.password = "root";
 

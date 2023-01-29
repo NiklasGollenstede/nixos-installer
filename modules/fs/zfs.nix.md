@@ -10,7 +10,7 @@ Additionally, this module sets some defaults for ZFS (but only in a "always bett
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: { config, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
+dirname: inputs: { config, options, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
     cfg = config.${prefix}.fs.zfs;
     prefix = inputs.config.prefix;
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
@@ -59,7 +59,7 @@ in let module = {
     }; };
 
     config = let
-    in lib.mkIf cfg.enable (lib.mkMerge [ ({
+    in lib.mkMerge [ (lib.mkIf cfg.enable (lib.mkMerge [ ({
 
         # boot.(initrd.)supportedFilesystems = [ "zfs" ]; # NixOS should figure that out itself based on zfs being used in »config.fileSystems«.
         # boot.zfs.extraPools = [ ]; # Don't need to import pools that have at least one dataset listed in »config.fileSystems« / with ».mount != false«.
@@ -93,8 +93,8 @@ in let module = {
                 canmount = lib.mkOptionDefault "off"; mountpoint = lib.mkOptionDefault "none"; # Assume the pool root is a "container", unless overwritten.
             }; }) cfg.pools;
 
-            # All pools that have at least one dataset that (explicitly or implicitly) has a key to be loaded from »/run/keystore-.../zfs/« have to be imported in the initramfs while the keystore is open:
-            fs.zfs.extraInitrdPools = (lib.mapAttrsToList (name: _: lib.head (lib.splitString "/" name)) (lib.filterAttrs (name: { props, ... }: if props?keylocation then lib.wip.startsWith "file:///run/keystore-" props.keylocation else config.${prefix}.fs.keystore.keys?"zfs/${name}") cfg.datasets));
+            # All pools that have at least one dataset that (explicitly or implicitly) has a key to be loaded from »/run/keystore-.../zfs/« have to be imported in the initramfs while the keystore is open (but only if the keystore is not disabled):
+            fs.zfs.extraInitrdPools = lib.mkIf (config.boot.initrd.luks.devices?"keystore-${hash}") (lib.mapAttrsToList (name: _: lib.head (lib.splitString "/" name)) (lib.filterAttrs (name: { props, ... }: if props?keylocation then lib.wip.startsWith "file:///run/keystore-${hash}/" props.keylocation else config.${prefix}.fs.keystore.keys?"zfs/${name}") cfg.datasets));
 
             # Might as well set some defaults for all partitions required (though for all but one at least some of the values will need to be changed):
             fs.disks.partitions = lib.wip.mapMergeUnique (name: { ${name} = { # (This also implicitly ensures that no partition is used twice for zpools.)
@@ -145,7 +145,7 @@ in let module = {
             fi
         '');
             #setsid ${extraUtils}/bin/ash -c "exec ${extraUtils}/bin/ash < /dev/$console >/dev/$console 2>/dev/$console"
-        boot.zfs = if (builtins.substring 0 5 inputs.nixpkgs.lib.version) == "22.05" then { } else { allowHibernation = true; };
+        boot.zfs = if (options.boot.zfs?allowHibernation) then { allowHibernation = true; } else { };
 
 
     }) (let ## Implement »cfg.pools.*.autoApplyDuringBoot« and »cfg.pools.*.autoApplyOnActivation«:
@@ -179,7 +179,12 @@ in let module = {
         }; # these are sorted alphabetically, unless one gets "lifted up" by some other ending on it via its ».deps« field
 
 
-    }) ]);
+    }) ])) (
+        # Disable this module in VMs without filesystems:
+        lib.mkIf (options.virtualisation?useDefaultFilesystems) { # (»nixos/modules/virtualisation/qemu-vm.nix« is imported, i.e. we are building a "vmVariant")
+            ${prefix}.fs.zfs.enable = lib.mkIf config.virtualisation.useDefaultFilesystems (lib.mkVMOverride false);
+        }
+    ) ];
 
 }; verbose = {
 

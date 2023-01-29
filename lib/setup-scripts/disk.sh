@@ -11,7 +11,8 @@ function do-disk-setup { # 1: diskPaths
 
     mnt=/tmp/nixos-install-@{config.networking.hostName} && mkdir -p "$mnt" && prepend_trap "rmdir $mnt" EXIT || return # »mnt=/run/user/0/...« would be more appropriate, but »nixos-install« does not like the »700« permissions on »/run/user/0«
 
-    partition-disks "$1" || return
+    ensure-disks "$1" || return
+    partition-disks || return
     create-luks-layers && open-luks-layers || return # other block layers would go here too (but figuring out their dependencies would be difficult)
     run-hook-script 'Post Partitioning' @{config.wip.fs.disks.postPartitionCommands!writeText.postPartitionCommands} || return
 
@@ -34,11 +35,8 @@ function do-disk-setup { # 1: diskPaths
 # * So alignment at the default »align=8MiB« actually seems a decent choice.
 
 
-## Partitions the »diskPaths« instances of all »config.wip.fs.disks.devices« to ensure that all specified »config.wip.fs.disks.partitions« exist.
-#  Parses »diskPaths«, creates and loop-mounts images for non-/dev/ paths, and tries to abort if any partition already exists on the host.
-function partition-disks { # 1: diskPaths
-    local beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
-    local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
+## Parses and expands »diskPaths« to ensure that a disk or image exists for each »config.wip.fs.disks.devices«, creates and loop-mounts images for non-/dev/ paths, and checks whether physical device sizes match.
+function ensure-disks { # 1: diskPaths, 2?: skipLosetup
 
     declare -g -A blockDevs=( ) # this ends up in the caller's scope
     if [[ $1 == */ ]] ; then
@@ -47,42 +45,52 @@ function partition-disks { # 1: diskPaths
     else
         local path ; for path in ${1//:/ } ; do
             local name=${path/=*/} ; if [[ $name != "$path" ]] ; then path=${path/$name=/} ; else name=primary ; fi
-            if [[ ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name specified more than once. Duplicate definition: $path" 1>&2 ; return 1 ; fi
+            if [[ ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name specified more than once. Duplicate definition: $path" 1>&2 ; \return 1 ; fi
             blockDevs[$name]=$path
         done
     fi
 
     local name ; for name in "@{!config.wip.fs.disks.devices[@]}" ; do
-        if [[ ! ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name not provided" 1>&2 ; return 1 ; fi
+        if [[ ! ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name not provided" 1>&2 ; \return 1 ; fi
         eval 'local -A disk='"@{config.wip.fs.disks.devices[$name]}"
         if [[ ${blockDevs[$name]} != /dev/* ]] ; then
             local outFile=${blockDevs[$name]} &&
-            install -o root -g root -m 640 -T /dev/null "$outFile" && truncate -s "${disk[size]}" "$outFile" &&
-            blockDevs[$name]=$( losetup --show -f "$outFile" ) && prepend_trap "losetup -d '${blockDevs[$name]}'" EXIT # NOTE: this must not be inside a sub-shell!
+            install -m 640 -T /dev/null "$outFile" && truncate -s "${disk[size]}" "$outFile" || return
+            if [[ ${args[image-owner]:-} ]] ; then chown "${args[image-owner]}" "$outFile" || return ; fi
+            if [[ ${2:-} ]] ; then continue ; fi
+            blockDevs[$name]=$( losetup --show -f "$outFile" ) && prepend_trap "losetup -d '${blockDevs[$name]}'" EXIT || return
         else
             local size=$( blockdev --getsize64 "${blockDevs[$name]}" || : ) ; local waste=$(( size - ${disk[size]} ))
-            if [[ ! $size ]] ; then echo "Block device $name does not exist at ${blockDevs[$name]}" 1>&2 ; return 1 ; fi
-            if (( waste < 0 )) ; then echo "Block device ${blockDevs[$name]}'s size $size is smaller than the size ${disk[size]} declared for $name" ; return 1 ; fi
-            if (( waste > 0 )) && [[ ! ${disk[allowLarger]:-} ]] ; then echo "Block device ${blockDevs[$name]}'s size $size is bigger than the size ${disk[size]} declared for $name" 1>&2 ; return 1 ; fi
+            if [[ ! $size ]] ; then echo "Block device $name does not exist at ${blockDevs[$name]}" 1>&2 ; \return 1 ; fi
+            if (( waste < 0 )) ; then echo "Block device ${blockDevs[$name]}'s size $size is smaller than the size ${disk[size]} declared for $name" 1>&2 ; \return 1 ; fi
+            if (( waste > 0 )) && [[ ! ${disk[allowLarger]:-} ]] ; then echo "Block device ${blockDevs[$name]}'s size $size is bigger than the size ${disk[size]} declared for $name" 1>&2 ; \return 1 ; fi
             if (( waste > 0 )) ; then echo "Wasting $(( waste / 1024))K of ${blockDevs[$name]} due to the size declared for $name (should be ${size}b)" 1>&2 ; fi
-            blockDevs[$name]=$(realpath "${blockDevs[$name]}")
+            blockDevs[$name]=$( realpath "${blockDevs[$name]}" ) || return
         fi
     done
+}
+
+
+## Partitions the »blockDevs« (matching »config.wip.fs.disks.devices«) to ensure that all specified »config.wip.fs.disks.partitions« exist.
+#  Tries to abort if any partition already exists on the host.
+function partition-disks {
+    local beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
+    local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
 
     for partDecl in "@{config.wip.fs.disks.partitionList[@]}" ; do
         eval 'local -A part='"$partDecl"
-        if [[ -e /dev/disk/by-partlabel/"${part[name]}" ]] && ! is-partition-on-disks /dev/disk/by-partlabel/"${part[name]}" "${blockDevs[@]}" ; then echo "Partition /dev/disk/by-partlabel/${part[name]} already exists on this host and does not reside on one of the target disks ${blockDevs[@]}. Refusing to create another partition with the same partlabel!" 1>&2 ; return 1 ; fi
+        if [[ -e /dev/disk/by-partlabel/"${part[name]}" ]] && ! is-partition-on-disks /dev/disk/by-partlabel/"${part[name]}" "${blockDevs[@]}" ; then echo "Partition /dev/disk/by-partlabel/${part[name]} already exists on this host and does not reside on one of the target disks ${blockDevs[@]}. Refusing to create another partition with the same partlabel!" 1>&2 ; \return 1 ; fi
     done
 
     for name in "@{!config.wip.fs.disks.devices[@]}" ; do
         eval 'local -A disk='"@{config.wip.fs.disks.devices[$name]}"
         if [[ ${disk[serial]:-} ]] ; then
             actual=$( udevadm info --query=property --name="$blockDev" | grep -oP 'ID_SERIAL_SHORT=\K.*' || echo '<none>' )
-            if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev's serial ($actual) does not match the serial (${disk[serial]}) declared for ${disk[name]}" 1>&2 ; return 1 ; fi
+            if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev's serial ($actual) does not match the serial (${disk[serial]}) declared for ${disk[name]}" 1>&2 ; \return 1 ; fi
         fi
         # can (and probably should) restore the backup:
-        ( PATH=@{native.gptfdisk}/bin ; ${_set_x:-:} ; sgdisk --zap-all --load-backup=@{config.wip.fs.disks.partitioning}/"${disk[name]}".backup ${disk[allowLarger]:+--move-second-header} "${blockDevs[${disk[name]}]}" >$beLoud 2>$beSilent || exit ) || return
-        #partition-disk "${disk[name]}" "${blockDevs[${disk[name]}]}"
+        ( PATH=@{native.gptfdisk}/bin ; ${_set_x:-:} ; sgdisk --zap-all --load-backup=@{config.wip.fs.disks.partitioning}/"${disk[name]}".backup ${disk[allowLarger]:+--move-second-header} "${blockDevs[${disk[name]}]}" >$beLoud 2>$beSilent ) || return
+        #partition-disk "${disk[name]}" "${blockDevs[${disk[name]}]}" || return
     done
     @{native.parted}/bin/partprobe "${blockDevs[@]}" &>$beLoud || return
     @{native.systemd}/bin/udevadm settle -t 15 || true # sometimes partitions aren't quite made available yet
@@ -127,10 +135,10 @@ function partition-disk { # 1: name, 2: blockDev, 3?: devSize
         sgdisk+=( --hybrid "${disk[mbrParts]}" ) # --hybrid: create MBR in addition to GPT; ${disk[mbrParts]}: make these GPT part 1 MBR parts 2[3[4]]
     fi
 
-    ( PATH=@{native.gptfdisk}/bin ; ${_set_x:-:} ; sgdisk "${sgdisk[@]}" "$blockDev" >$ || exit ) || return # running all at once is much faster
+    ( PATH=@{native.gptfdisk}/bin ; ${_set_x:-:} ; sgdisk "${sgdisk[@]}" "$blockDev" >$ ) || return # running all at once is much faster
 
     if [[ ${disk[mbrParts]:-} ]] ; then
-        printf "
+        printf %s "
             M                                # edit hybrid MBR
             d;1                              # delete parts 1 (GPT)
 
@@ -147,46 +155,44 @@ function partition-disk { # 1: name, 2: blockDev, 3?: devSize
 
             ${disk[extraFDiskCommands]}
             p;w;q                            # print ; write ; quit
-        " | @{native.gnused}/bin/sed -E 's/^ *| *(#.*)?$//g' | @{native.gnused}/bin/sed -E 's/\n\n+| *; */\n/g' | tee >((echo -n '++ ' ; tr $'\n' '|' ; echo) 1>&2) | ( PATH=@{native.util-linux}/bin ; ${_set_x:-:} ; fdisk "$blockDev" &>$beLoud || exit ) || return
+        " | @{native.gnused}/bin/sed -E 's/^ *| *(#.*)?$//g' | @{native.gnused}/bin/sed -E 's/\n\n+| *; */\n/g' |
+        tee >( [[ ! ${_set_x:-} ]] || ( echo -n '++ ' ; tr $'\n' '|' ; echo ) 1>&2 ; cat >/dev/null ) |
+        ( PATH=@{native.util-linux}/bin ; ${_set_x:-:} ; fdisk "$blockDev" &>$beLoud ) || return
     fi
 }
 
 ## Checks whether a »partition« resides on one of the provided »blockDevs«.
 function is-partition-on-disks { # 1: partition, ...: blockDevs
     local partition=$1 ; shift ; local -a blockDevs=( "$@" )
-    local blockDev=$(realpath "$partition") ; if [[ $blockDev == /dev/sd* ]] ; then
-        blockDev=$( shopt -s extglob ; echo "${blockDev%%+([0-9])}" )
-    else
-        blockDev=$( shopt -s extglob ; echo "${blockDev%%p+([0-9])}" )
-    fi
-    [[ ' '"${blockDevs[@]}"' ' == *' '"$blockDev"' '* ]]
+    local blockDev=/dev/$( basename "$( readlink -f /sys/class/block/"$( basename "$( realpath "$partition" )" )"/.. )" ) || return
+    [[ ' '"${blockDevs[@]}"' ' == *' '"$blockDev"' '* ]] || return
 }
 
 ## For each filesystem in »config.fileSystems« whose ».device« is in »/dev/disk/by-partlabel/«, this creates the specified file system on that partition.
-function format-partitions {( set -u
-    beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
-    beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
+function format-partitions {
+    local beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
+    local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
     for fsDecl in "@{config.fileSystems[@]}" ; do
         eval 'declare -A fs='"$fsDecl"
         if [[ ${fs[device]} == /dev/disk/by-partlabel/* ]] ; then
-            if ! is-partition-on-disks "${fs[device]}" "${blockDevs[@]}" ; then echo "Partition alias ${fs[device]} used by mount ${fs[mountPoint]} does not point at one of the target disks ${blockDevs[@]}" ; exit 1 ; fi
+            if ! is-partition-on-disks "${fs[device]}" "${blockDevs[@]}" ; then echo "Partition alias ${fs[device]} used by mount ${fs[mountPoint]} does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
         elif [[ ${fs[device]} == /dev/mapper/* ]] ; then
-            if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${fs[device]/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device ${fs[device]} used by mount ${fs[mountPoint]} does not point at one of the device mappings ${!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ; exit 1 ; fi
+            if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${fs[device]/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device ${fs[device]} used by mount ${fs[mountPoint]} does not point at one of the device mappings ${!config.boot.initrd.luks.devices!catAttrSets.device[@]}" 1>&2 ; \return 1 ; fi
         else continue ; fi
         #if [[ ${fs[fsType]} == ext4 && ' '${fs[formatOptions]}' ' != *' -F '* ]] ; then fs[formatOptions]+=' -F' ; fi
         #if [[ ${fs[fsType]} == f2fs && ' '${fs[formatOptions]}' ' != *' -f '* ]] ; then fs[formatOptions]+=' -f' ; fi
-        ( PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH ; ${_set_x:-:} ; mkfs.${fs[fsType]} ${fs[formatOptions]} "${fs[device]}" >$beLoud 2>$beSilent ) || exit
+        ( PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH ; ${_set_x:-:} ; mkfs.${fs[fsType]} ${fs[formatOptions]} "${fs[device]}" >$beLoud 2>$beSilent ) || return
         @{native.parted}/bin/partprobe "${fs[device]}" || true
     done
     for swapDev in "@{config.swapDevices!catAttrs.device[@]}" ; do
         if [[ $swapDev == /dev/disk/by-partlabel/* ]] ; then
-            if ! is-partition-on-disks "$swapDev" "${blockDevs[@]}" ; then echo "Partition alias $swapDev used for SWAP does not point at one of the target disks ${blockDevs[@]}" ; exit 1 ; fi
+            if ! is-partition-on-disks "$swapDev" "${blockDevs[@]}" ; then echo "Partition alias $swapDev used for SWAP does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
         elif [[ $swapDev == /dev/mapper/* ]] ; then
-            if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${swapDev/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device $swapDev used for SWAP does not point at one of the device mappings @{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ; exit 1 ; fi
+            if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${swapDev/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device $swapDev used for SWAP does not point at one of the device mappings @{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" 1>&2 ; \return 1 ; fi
         else continue ; fi
-        ( ${_set_x:-:} ; mkswap "$swapDev" >$beLoud 2>$beSilent ) || exit
+        ( ${_set_x:-:} ; mkswap "$swapDev" >$beLoud 2>$beSilent ) || return
     done
-)}
+}
 
 ## This makes the installation of grub to loop devices shut up, but booting still does not work (no partitions are found). I'm done with GRUB; EXTLINUX works.
 #  (This needs to happen before mounting.)
@@ -197,7 +203,7 @@ function fix-grub-install {
             if [[ ! @{config.fileSystems[$mount]:-} ]] ; then continue ; fi
             device=$( eval 'declare -A fs='"@{config.fileSystems[$mount]}" ; echo "${fs[device]}" )
             label=${device/\/dev\/disk\/by-partlabel\//}
-            if [[ $label == "$device" || $label == *' '* || ' '@{config.wip.fs.disks.partitions!attrNames[@]}' ' != *' '$label' '* ]] ; then echo "" 1>&2 ; return 1 ; fi
+            if [[ $label == "$device" || $label == *' '* || ' '@{config.wip.fs.disks.partitions!attrNames[@]}' ' != *' '$label' '* ]] ; then echo "" 1>&2 ; \return 1 ; fi
             bootLoop=$( losetup --show -f /dev/disk/by-partlabel/$label ) || return ; prepend_trap "losetup -d $bootLoop" EXIT
             ln -sfT ${bootLoop/\/dev/..\/..} /dev/disk/by-partlabel/$label || return
         done
@@ -215,13 +221,13 @@ function mount-system {( set -eu # 1: mnt, 2?: fstabPath, 3?: allowFail
     mnt=$1 ; fstabPath=${2:-"@{config.system.build.toplevel}/etc/fstab"} ; allowFail=${3:-}
     PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH
 
-    <$fstabPath grep -v '^#' | while read source target type options numbers ; do
+    while read -u3 source target type options numbers ; do
         if [[ ! $target || $target == none ]] ; then continue ; fi
         options=,$options, ; options=${options//,ro,/,}
 
         if ! mountpoint -q "$mnt"/"$target" ; then (
             mkdir -p "$mnt"/"$target" || exit
-            [[ $type == tmpfs || $type == */* ]] || @{native.kmod}/bin/modprobe --quiet $type || true # (this does help sometimes)
+            [[ $type == tmpfs || $type == auto || $type == */* ]] || @{native.kmod}/bin/modprobe --quiet $type || true # (this does help sometimes)
 
             if [[ $type == overlay ]] ; then
                 options=${options//,workdir=/,workdir=$mnt\/} ; options=${options//,upperdir=/,upperdir=$mnt\/} # Work and upper dirs must be in target.
@@ -238,16 +244,16 @@ function mount-system {( set -eu # 1: mnt, 2?: fstabPath, 3?: allowFail
             mount -t $type -o "${options:1:(-1)}" "$source" "$mnt"/"$target" || exit
 
         ) || [[ $options == *,nofail,* || $allowFail ]] || exit ; fi # (actually, nofail already makes mount fail silently)
-    done || exit
+    done 3< <( <$fstabPath grep -v '^#' )
 )}
 
 ## Unmounts all file systems (that would be mounted during boot / by »mount-system«).
 function unmount-system {( set -eu # 1: mnt, 2?: fstabPath
     mnt=$1 ; fstabPath=${2:-"@{config.system.build.toplevel}/etc/fstab"}
-    <$fstabPath grep -v '^#' | LC_ALL=C sort -k2 -r | while read source target rest ; do
+    while read -u3 source target rest ; do
         if [[ ! $target || $target == none ]] ; then continue ; fi
         if mountpoint -q "$mnt"/"$target" ; then
             umount "$mnt"/"$target"
         fi
-    done
+    done 3< <( { <$fstabPath grep -v '^#' ; echo ; } | tac )
 )}

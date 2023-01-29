@@ -33,3 +33,15 @@ Once done, the disk can be transferred -- or the image be copied -- to the final
 If the host's hardware target allows, a resulting image can also be passed to [`register-vbox`](./maintenance.sh#register-vbox) to create a bootable VirtualBox instance for the current user, or to [`run-qemu`](./maintenance.sh#run-qemu) to start it in a qemu VM.
 
 The "Installation" section of each host's documentation should contain host specific details, if any.
+
+
+## Development Notes
+
+* The functions are designed to be (and by default are) executed with the bash options `pipefail` and `nounset` (`-u`) set.
+* When the functions are executed, `generic-arg-parse` has already been called on the CLI arguments, and the parsed result can be accessed as `"${args[<name>]:-}"` for named arguments and `"${argv[<index>]}"` for positional arguments (except the first one, which has been removed and used as the command or name of the entry function to run).
+* Do not use `set -e`. It has some unexpected and unpredictable behavior, and *does not* actually provide the expected semantic of "exit the shell if a command fails (exits != 0)". For example, the internal exit behavior of commands in a function depends on *how the function is called*.
+* If the `--debug` flag is passed, then `return` and `exit` are aliased to open a shell when `$?` is not zero. This effectively turns any `|| return` / `|| exit` into break-on-error point.
+    * The aliasing does not work if an explicit code is provided to `return` or `exit`. In these cases, or where the breakpoint behavior is not desired, use `\return` or `\exit` (since the `\` suppresses the alias expansion).
+    * For/in loops, do not write to / `read` from stdin/fd1, which conflicts with the `return`/`exit` aliasing. Instead use a different file descriptor, e.g.: `while read -u3 a b c ; do ... done 3< <( LC_ALL=C sort ... )`.
+    * Similarly in functions that expect stdin data, read all of it before using the first `|| return`.
+* `@{native}` is an instance of `nixpkgs` for the calling system (not the target system) with the overlays (implicitly or explicitly) passed to `mkSystemsFlake` applied, but without other `nixpkgs.overlays` set by the system configuration itself.

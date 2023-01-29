@@ -1,0 +1,13 @@
+diff --git a/lib/modules.nix b/lib/modules.nix
+index caabfee5710..bd39e8666eb 100644
+--- a/lib/modules.nix
++++ b/lib/modules.nix
+@@ -449,7 +449,7 @@ rec {
+         }
+     else
+       # shorthand syntax
+-      lib.throwIfNot (isAttrs m) "module ${file} (${key}) does not look like a module."
++      if ! (isAttrs m) then throw "module ${file} (${key}) does not look like a module." else
+       { _file = toString m._file or file;
+         key = toString m.key or key;
+         disabledModules = m.disabledModules or [];

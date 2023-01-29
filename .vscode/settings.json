@@ -14,6 +14,7 @@
 		"ashift", // zfs
 		"askpass", // program
 		"attrset", "attrsets", // nix/abbr (attribute set)
+		"autoexpand", // zfs option
 		"autologin", // agetty
 		"autotrim", // zpool property
 		"binfmt", // abbr "binary format"
@@ -25,6 +26,7 @@
 		"bootloader", // word
 		"bridgeadapter", // virtual box
 		"bridgedifs", // virtual box
+		"btrfs", // filesystem
 		"builtins", // nix
 		"cachefile", // zfs
 		"canmount", // zfs
@@ -43,6 +45,7 @@
 		"cryptsetup", // program
 		"ctxify", // abbr (~= add context)
 		"CWD", // abbr
+		"cykerway", // name
 		"dedup", // zfs
 		"deps", // abbr dependencies
 		"devs", // abbr (devices)
@@ -52,6 +55,7 @@
 		"dnodesize", // zfs
 		"dontUnpack", // nixos
 		"dosfstools", // package
+		"dpkg", // file format
 		"draid", // zfs
 		"dropbear", // program
 		"dtoverlay", // option
@@ -60,6 +64,8 @@
 		"eeprom", // abbr
 		"elif", // abbr (else if)
 		"encryptionroot", // zfs
+		"errexit", // bash
+		"expandsz", // zfs property
 		"extglob", // cli arg
 		"extlinux", // program
 		"extra_isize", // ext4 option
@@ -69,15 +75,19 @@
 		"fetchurl", // nix function
 		"filesystems", // plural
 		"findutils", // package
+		"firejail", // program
 		"firmwareLinuxNonfree", // nixos
 		"fmask", // mount
 		"foldl", // nix (fold left)
 		"foldr", // nix (fold right)
+		"fstrim", // program
 		"FUNCNAME", // bash var
+		"fuser", // optoin
 		"fw_printenv", // program
 		"fw_setenv", // program
 		"gcroots", // Nix
 		"gdisk", // program
+		"genkeytypes", // concat
 		"getsize64", // cli arg
 		"getty", // serice
 		"gids", // abbr/plural (group IDs)
@@ -86,6 +96,7 @@
 		"gollenstede", // name
 		"gpio", // abbr (general purpose IO)
 		"gptfdisk", // package
+		"hcloud", // program
 		"headlessly", // word
 		"hetzner", // comapny
 		"HISTCONTROL", // bash option
@@ -100,6 +111,7 @@
 		"inodes", // plural
 		"internalcommands", // virtual box
 		"ints", // plural
+		"journalctl", // program
 		"keydev", // cli arg
 		"keyformat", // zfs
 		"keylocation", // zfs
@@ -113,6 +125,7 @@
 		"libubootenv", // package
 		"libutil", // concat
 		"logbias", // zfs
+		"logind", // program
 		"losetup", // program / function
 		"lowerdir", // mount overlay option
 		"lsusb", // program / function
@@ -125,11 +138,15 @@
 		"mmap", // abbr "memory map"
 		"modifyvm", // virtual box
 		"mountpoint", // program / function
+		"msize", // option
 		"mtab", // linux
+		"namei", // program
 		"namespacing", // word
 		"netbootxyz", // option
 		"netdev", // cli arg
+		"netns", // linux
 		"niklas", // name
+		"nixbld", // nix
 		"nixos", // (duh)
 		"nixpkgs", // nix
 		"noatime", // mount option
@@ -139,15 +156,20 @@
 		"nodiscard", // cli arg
 		"noexec", // mount option
 		"nofail", // cli arg
+		"nofile", // option (number of files)
 		"nographic", // cli arg
 		"noheadings", // cli arg
 		"nohibernate", // kernel param
+		"noprofile", // option
 		"nosuid", // mount option
 		"notrunc", // dd option
+		"nounset", // bash
+		"ntfs", // filesystem
 		"ondemand", // concat
 		"oneshot", // systemd
 		"optimise", // B/E
 		"ostype", // virtual box
+		"overlayed", // word
 		"OVMF", // package
 		"partlabel", // linux
 		"partprobe", // program / function
@@ -155,12 +177,16 @@
 		"passthru", // nix
 		"pbkdf", // cli arg
 		"pflash", // cli arg
+		"pipefail", // bash
 		"pkgs", // nix
 		"pname", // nix/abbr (package name)
 		"portcount", // virtual box
 		"posix", // word
 		"posixacl", // zfs
 		"poweroff", // program / function
+		"poweron", // concat
+		"pwauth", // abbr (password authentication)
+		"qcow", // file type (qemu)
 		"raidz", // zfs
 		"ramdisk", // word
 		"ramfs", // linux
@@ -168,10 +194,14 @@
 		"raspberrypifw", // package
 		"raspi3b", // cli arg
 		"rawdisk", // virtual box
+		"readlink", // command
 		"realpath", // program / function
 		"redistributable", // word
+		"reexec", // option
 		"refreservation", // zfs
 		"relatime", // mount option
+		"robotnix", // package
+		"rootfs", // abbr (root filesystem)
 		"rpiboot", // package
 		"rpicm4", // abbr (Raspberry PI Compute Module 4)
 		"rpool", // zfs
@@ -195,7 +225,10 @@
 		"swsuspend", // parameter
 		"syncoid", // program
 		"syslinux", // package
+		"sysrq-trigger", // linux
+		"sysrq", // linux
 		"temproot", // abbr (temporary root (FS))
+		"timefmt", // option
 		"timesync", // systemd
 		"TMPDIR", // env var
 		"tmpfiles", // nixos option
@@ -220,16 +253,18 @@
 		"vdev", "vdevs", // zfs
 		"vfat", // linux
 		"virt", // abbr (virtualization)
+		"virtfs", // qemu / filesystem
 		"virtio", // cli arg
+		"virtualisation", // british english
 		"vmdk", // file type (virtual disk format)
 		"wipefs", // program
 		"wiplib", // name / abbr (WIP library)
 		"workdir", // mount overlay option
 		"xattr", // zfs
+		"xchg", // abbr (exchange)
 		"xfsprogs", // package
 		"ykchalresp", // program
 		"ykinfo", // program
-		"yubikey", // program
 		"yubikey", // program
 		"YubiKeys", // plural
 		"zfsutil", // program / function

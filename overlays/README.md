@@ -92,5 +92,13 @@ in {
             platforms = lib.platforms.linux;
         };
     };
+
+    # e.g.: override a python package:
+    pythonPackagesExtensions = (prev.pythonPackagesExtensions or [ ]) ++ [ (final: prev: {
+        mox = prev.mox.overridePythonAttrs (old: {
+            disabled = false; # (with the way that "disabled" is currently being evaluated, this does not apply in time)
+            # (other attributes should work, though)
+        });
+    }) ];
 }
 ````

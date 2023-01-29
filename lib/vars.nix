@@ -33,7 +33,7 @@ in rec {
                 then merge (attrPath ++ [ name ]) values
             else builtins.elemAt values (builtins.length values - 1)
         );
-    in merge [ ] attrsList;
+    in if builtins.length attrsList == 1 then builtins.head attrsList else merge [ ] attrsList;
 
     getListAttr = name: attrs: if attrs != null then ((attrs."${name}s" or [ ]) ++ (if attrs?${name} then [ attrs.${name} ] else [ ])) else [ ];
 
@@ -116,7 +116,7 @@ in rec {
     in ''${type} ${if pathSubstitute then esc path else noSub (esc path)} ${esc mode} ${esc user} ${esc group} ${esc age} ${if pathSubstitute then argument'' else noSub argument''}'';
 /*
     systemd.tmpfiles.rules = [
-        (lib.my.mkTmpfile { type = "f+"; path = "/home/user/t\"e\t%t\n!"; user = "user"; argument = " . foo\nbar\r\n\tba%!\n"; })
+        (lib.wip.mkTmpfile { type = "f+"; path = "/home/user/t\"e\t%t\n!"; user = "user"; argument = " . foo\nbar\r\n\tba%!\n"; })
         ''f+ "/home/user/test!\"!\t!%%!\x20! !\n!${"\n"}%!%a!\\!" - "user" "user" - \x20. foo%a!\nbar\r\n\tba%%!\n''
     ];
  */

@@ -15,10 +15,10 @@ dirname: inputs: specialArgs@{ config, pkgs, lib, ... }: let inherit (inputs.sel
 in {
 
     imports = [
-        (lib.wip.overrideNixpkgsModule ({ inherit inputs; } // specialArgs) "profiles/qemu-guest.nix" (module: {
+        (args@{ config, pkgs, lib, modulesPath, utils, ... }: {
             options.profiles.qemu-guest.enable = (lib.mkEnableOption "qemu-guest profile");
-            config = lib.mkIf config.profiles.qemu-guest.enable module;
-        }))
+            config = lib.mkIf config.profiles.qemu-guest.enable (import "${modulesPath}/profiles/qemu-guest.nix" args);
+        })
         # Could do this automatically for all files in the directory ...
     ];
 

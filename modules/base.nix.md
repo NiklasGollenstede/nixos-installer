@@ -9,21 +9,22 @@ Things that really should be (more like) this by default.
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: specialArgs@{ config, pkgs, lib, name, ... }: let inherit (inputs.self) lib; in let
+dirname: inputs: specialArgs@{ config, options, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
     prefix = inputs.config.prefix;
     cfg = config.${prefix}.base;
+    outputName = specialArgs.outputName or null;
 in {
 
     options.${prefix} = { base = {
         enable = lib.mkEnableOption "saner defaults";
         includeInputs = lib.mkOption { description = "The system's build inputs, to be included in the flake registry, and on the »NIX_PATH« entry, such that they are available for self-rebuilds and e.g. as »pkgs« on the CLI."; type = lib.types.attrsOf lib.types.anything; apply = lib.filterAttrs (k: v: v != null); default = { }; };
         panic_on_fail = lib.mkEnableOption "Kernel parameter »boot.panic_on_fail«" // { default = true; example = false; }; # It's stupidly hard to remove items from lists ...
-        autoUpgrade = lib.mkEnableOption "automatic NixOS updates and garbage collection" // { default = cfg.includeInputs?self.nixosConfigurations.${name}; defaultText = lib.literalExpression "config.${prefix}.base.includeInputs?self.nixosConfigurations.\${name}"; example = false; };
+        autoUpgrade = lib.mkEnableOption "automatic NixOS updates and garbage collection" // { default = outputName != null && cfg.includeInputs?self.nixosConfigurations.${outputName}; defaultText = lib.literalExpression "config.${prefix}.base.includeInputs?self.nixosConfigurations.\${outputName}"; example = false; };
         bashInit = lib.mkEnableOption "pretty defaults for interactive bash shells" // { default = true; example = false; };
     }; };
 
     # Bugfix:
-    imports = [ (lib.wip.overrideNixpkgsModule ({ inherit inputs; } // specialArgs) "misc/extra-arguments.nix" (old: { config._module.args.utils = old._module.args.utils // {
+    imports = [ (lib.wip.overrideNixpkgsModule "misc/extra-arguments.nix" { } (old: { config._module.args.utils = old._module.args.utils // {
         escapeSystemdPath = s: builtins.replaceStrings [ "/" "-" " " "." ] [ "-" "\\x2d" "\\x20" "\\x2e" ] (lib.removePrefix "/" s); # BUG(PR): The original function does not escape ».«, resulting in mismatching names with units generated from paths with ».« in them (e.g. overwrites for implicit mount units).
     }; })) ];
 
@@ -37,6 +38,7 @@ in {
         documentation.man.enable = lib.mkDefault config.documentation.enable;
         nix.settings.auto-optimise-store = lib.mkDefault true; # file deduplication, see https://nixos.org/manual/nix/stable/command-ref/new-cli/nix3-store-optimise.html#description
         boot.loader.timeout = lib.mkDefault 1; # save 4 seconds on startup
+        services.getty.helpLine = lib.mkForce "";
 
         system.extraSystemBuilderCmds = (if !config.boot.initrd.enable then "" else ''
             ln -sT ${builtins.unsafeDiscardStringContext config.system.build.bootStage1} $out/boot-stage-1.sh # (this is super annoying to locate otherwise)
@@ -46,6 +48,17 @@ in {
             if [[ -e /run/current-system ]] ; then ${pkgs.nix}/bin/nix --extra-experimental-features nix-command store diff-closures /run/current-system "$systemConfig" ; fi
         ''; deps = [ "etc" ]; }; # (to deactivate this, set »system.activationScripts.diff-systems = lib.mkForce "";«)
 
+        virtualisation = lib.wip.mapMerge (vm: { ${vm} = let
+            config' = config.virtualisation.${vm};
+        in {
+            virtualisation.graphics = lib.mkDefault false;
+            virtualisation.writableStore = lib.mkDefault false;
+
+            # BUG(PR): When removing all device definitions, also don't use the »resumeDevice«:
+            boot.resumeDevice = lib.mkIf (!config'.virtualisation?useDefaultFilesystems || config'.virtualisation.useDefaultFilesystems) (lib.mkVMOverride "");
+
+        }; }) [ "vmVariant" "vmVariantWithBootLoader" "vmVariantExec" ];
+
     }) ({
         # Robustness/debugging:
 
@@ -54,13 +67,13 @@ in {
         systemd.extraConfig = "StatusUnitFormat=name"; # Show unit names instead of descriptions during boot.
 
 
-    }) (lib.mkIf (cfg.includeInputs?self.nixosConfigurations.${name}) { # non-flake
+    }) (lib.mkIf (outputName != null && cfg.includeInputs?self.nixosConfigurations.${outputName}) { # non-flake
 
         # Importing »<nixpkgs>« as non-flake returns a lambda returning the evaluated Nix Package Collection (»pkgs«). The most accurate representation of what that should be on the target host is the »pkgs« constructed when building it:
         system.extraSystemBuilderCmds = ''
             ln -sT ${pkgs.writeText "pkgs.nix" ''
                 # Provide the exact same version of (nix)pkgs on the CLI as in the NixOS-configuration (but note that this ignores the args passed to it; and it'll be a bit slower, as it partially evaluates the host's configuration):
-                args: (builtins.getFlake ${builtins.toJSON cfg.includeInputs.self}).nixosConfigurations.${name}.pkgs
+                args: (builtins.getFlake ${builtins.toJSON cfg.includeInputs.self}).nixosConfigurations.${outputName}.pkgs
             ''} $out/pkgs # (nixpkgs with overlays)
         ''; # (use this indirection so that all open shells update automatically)
 
@@ -93,7 +106,8 @@ in {
 
         system.autoUpgrade = {
             enable = lib.mkDefault true;
-            flake = config.environment.etc.nixos.source; flags = map (dep: if dep == "self" then "" else "--update-input ${dep}") (builtins.attrNames cfg.includeInputs); # there is no "--update-inputs"?
+            flake = "${config.environment.etc.nixos.source}#${outputName}";
+            flags = map (dep: if dep == "self" then "" else "--update-input ${dep}") (builtins.attrNames cfg.includeInputs); # there is no "--update-inputs"
             # (Since all inputs to the system flake are linked as system-level flake registry entries, even "indirect" references that don't really exist on the target can be "updated" (which keeps the same hash but changes the path to point directly to the nix store).)
             dates = "05:40"; randomizedDelaySec = "30min";
             allowReboot = lib.mkDefault false;
@@ -112,7 +126,7 @@ in {
                     if [[ $1 == -h ]] ; then echo "$help" ; exit 0 ; fi
                     if [[ $1 == -- ]] ; then shift ; break ; fi ; pkgs+=( "$1" )
                 } ; shift ; done
-                if (( ''${#pkgs[@]} == 0 )) ; then echo "$help" ; exit 1 ; fi
+                if (( ''${#pkgs[@]} == 0 )) ; then echo "$help" 1>&2 ; exit 1 ; fi
                 if (( "$#" == 0 )) ; then set -- bash --login ; fi
                 nix-shell --run "$( printf ' %q' "$@" )" -p "''${pkgs[@]}"
                 #function run { bash -xc "$( printf ' %q' "$@" )" ; }

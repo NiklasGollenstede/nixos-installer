@@ -7,7 +7,7 @@ function prompt-for-user-passwords { # (void)
         userPasswords[$user]=@{config.users.users!catAttrSets.password[$user]}
     done
     for user in "@{!config.users.users!catAttrSets.passwordFile[@]}" ; do
-        if ! userPasswords[$user]=$(prompt-new-password "for the user account »$user«") ; then return 1 ; fi
+        if ! userPasswords[$user]=$(prompt-new-password "for the user account »$user«") ; then true ; \return 1 ; fi
     done
 }
 
@@ -37,37 +37,37 @@ function populate-keystore { { # (void)
         if [[ "${methods[$usage]}" == home-composite || "${methods[$usage]}" == copy ]] ; then continue ; fi
         for attempt in 2 3 x ; do
             if gen-key-"${methods[$usage]}" "$usage" "${options[$usage]}" | write-secret "$keystore"/"$usage".key ; then break ; fi
-            if [[ $attempt == x ]] ; then return 1 ; fi ; echo "Retrying ($attempt/3):"
+            if [[ $attempt == x ]] ; then \exit 1 ; fi ; echo "Retrying ($attempt/3):"
         done
     done
     for usage in "${!methods[@]}" ; do
         if [[ "${methods[$usage]}" != home-composite ]] ; then continue ; fi
-        gen-key-"${methods[$usage]}" "$usage" "${options[$usage]}" | write-secret "$keystore"/"$usage".key || return 1
+        gen-key-"${methods[$usage]}" "$usage" "${options[$usage]}" | write-secret "$keystore"/"$usage".key || \exit 1
     done
     for usage in "${!methods[@]}" ; do
         if [[ "${methods[$usage]}" != copy ]] ; then continue ; fi
-        gen-key-"${methods[$usage]}" "$usage" "${options[$usage]}" | write-secret "$keystore"/"$usage".key || return 1
+        gen-key-"${methods[$usage]}" "$usage" "${options[$usage]}" | write-secret "$keystore"/"$usage".key || \exit 1
     done
 )}
 
 
 ## Creates the LUKS devices specified by the host using the keys created by »populate-keystore«.
-function create-luks-layers {( set -eu # (void)
+function create-luks-layers { # (void)
     keystore=/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}
     for luksName in "@{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ; do
         rawDev=@{config.boot.initrd.luks.devices!catAttrSets.device[$luksName]}
-        if ! is-partition-on-disks "$rawDev" "${blockDevs[@]}" ; then echo "Partition alias $rawDev used by LUKS device $luksName does not point at one of the target disks ${blockDevs[@]}" ; exit 1 ; fi
+        if ! is-partition-on-disks "$rawDev" "${blockDevs[@]}" ; then echo "Partition alias $rawDev used by LUKS device $luksName does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
         primaryKey="$keystore"/luks/"$luksName"/0.key
 
         keyOptions=( --pbkdf=pbkdf2 --pbkdf-force-iterations=1000 )
-        ( PATH=@{native.cryptsetup}/bin ; ${_set_x:-:} ; cryptsetup --batch-mode luksFormat --key-file="$primaryKey" "${keyOptions[@]}" -c aes-xts-plain64 -s 512 -h sha256 "$rawDev" )
+        ( PATH=@{native.cryptsetup}/bin ; ${_set_x:-:} ; cryptsetup --batch-mode luksFormat --key-file="$primaryKey" "${keyOptions[@]}" -c aes-xts-plain64 -s 512 -h sha256 "$rawDev" ) || return
         for index in 1 2 3 4 5 6 7 ; do
             if [[ -e "$keystore"/luks/"$luksName"/"$index".key ]] ; then
-                ( PATH=@{native.cryptsetup}/bin ; ${_set_x:-:} ; cryptsetup luksAddKey --key-file="$primaryKey" "${keyOptions[@]}" "$rawDev" "$keystore"/luks/"$luksName"/"$index".key )
+                ( PATH=@{native.cryptsetup}/bin ; ${_set_x:-:} ; cryptsetup luksAddKey --key-file="$primaryKey" "${keyOptions[@]}" "$rawDev" "$keystore"/luks/"$luksName"/"$index".key ) || return
             fi
         done
     done
-)}
+}
 
 ## Opens the LUKS devices specified by the host, using the opened host's keystore.
 function open-luks-layers { # (void)
@@ -76,8 +76,7 @@ function open-luks-layers { # (void)
         if [[ -e /dev/mapper/$luksName ]] ; then continue ; fi
         rawDev=@{config.boot.initrd.luks.devices!catAttrSets.device[$luksName]}
         primaryKey="$keystore"/luks/"$luksName"/0.key
-
-        ( PATH=@{native.cryptsetup}/bin ; ${_set_x:-:} ; cryptsetup --batch-mode luksOpen --key-file="$primaryKey" "$rawDev" "$luksName" ) &&
-        prepend_trap "@{native.cryptsetup}/bin/cryptsetup close $luksName" EXIT
+        @{native.cryptsetup}/bin/cryptsetup --batch-mode luksOpen --key-file="$primaryKey" "$rawDev" "$luksName" || return
+        prepend_trap "@{native.cryptsetup}/bin/cryptsetup close $luksName" EXIT || return
     done
 }

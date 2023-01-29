@@ -4,6 +4,14 @@ dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (import "${dirname}/misc.nix" dirname inputs) trace;
 in rec {
 
+    ## Builds an attrset that, for each file with extension »ext« in »dir«, maps the the base name of that file, to its full path.
+    getFilesExt = ext: dir: builtins.removeAttrs (builtins.listToAttrs (map (name: let
+        match = builtins.match ''^(.*)[.]${builtins.replaceStrings [ "." ] [ "[.]" ] ext}$'' name;
+    in if (match != null) then {
+        name = builtins.head match; value = "${dir}/${name}";
+    } else { name = ""; value = null; }) (builtins.attrNames (builtins.readDir dir)))) [ "" ];
+
+
     # Builds an attrset that, for each folder that contains a »default.nix«, and for each ».nix« or ».nix.md« file in »dir«, maps the the name of that folder, or the name of the file without extension(s), to its full path.
     getNixFiles = dir: mapMergeUnique (name: type: if (type == "directory") then (
         if (builtins.pathExists "${dir}/${name}/default.nix") then { ${name} = "${dir}/${name}/default.nix"; } else { }
@@ -96,6 +104,12 @@ in rec {
         overlays = builtins.concatLists (map (input: if input?overlay then [ input.overlay ] else if input?overlays then builtins.attrValues input.overlays else [ ]) (builtins.attrValues inputs));
     } // args);
 
+    ## Given an attrset of nix flake »inputs«, returns the list of all default overlays defined by those other flakes (non-recursive).
+    getOverlaysFromInputs = inputs: (lib.remove null (map (input: if input?overlays.default then input.overlays.default else if input?overlay then input.overlay else null) (builtins.attrValues inputs)));
+
+    ## Given an attrset of nix flake »inputs«, returns the list of all default NixOS modules defined by those other flakes (non-recursive).
+    getModulesFromInputs = inputs: (lib.remove null (map (input: if input?nixosModules.default then input.nixosModules.default else if input?nixosModule then input.nixosModule else null) (builtins.attrValues inputs)));
+
     # Given a list of »overlays« and »pkgs« with them applied, returns the subset of »pkgs« that was directly modified by the overlays.
     # (But this only works for top-level / non-scoped packages.)
     getModifiedPackages = pkgs: overlays: let
@@ -108,29 +122,31 @@ in rec {
     #  This is similar to adding the path to »disabledModules«, but:
     #  * leaves the module's other definitions (options, imports) untouched, preventing further breakage due to missing options
     #  * makes the disabling an option, i.e. it can be changed dynamically based on other config values
-    makeNixpkgsModuleConfigOptional = specialArgs: modulePath: let
-        fullPath = "${specialArgs.inputs.nixpkgs.outPath}/nixos/modules/${modulePath}";
-        moduleArgs = { utils = import "${specialArgs.inputs.nixpkgs.outPath}/nixos/lib/utils.nix" { inherit (specialArgs) lib config pkgs; }; } // specialArgs;
-        module = import fullPath moduleArgs;
+    # NOTE: This can only be used once per module import graph (~= NixOS configuration) and »modulePath«!
+    makeNixpkgsModuleConfigOptional = modulePath: extraOriginalModuleArgs: args@{ config, pkgs, lib, modulesPath, utils, ... }: let
+        fullPath = "${modulesPath}/${modulePath}";
+        module = import fullPath (args // extraOriginalModuleArgs);
     in { _file = fullPath; imports = [
         { options.disableModule.${modulePath} = lib.mkOption { description = "Disable the nixpkgs module ${modulePath}"; type = lib.types.bool; default = false; }; }
         (if module?config then (
-            module // { config = lib.mkIf (!specialArgs.config.disableModule.${modulePath}) module.config; }
+            module // { config = lib.mkIf (!config.disableModule.${modulePath}) module.config; }
         ) else (
-            { config = lib.mkIf (!specialArgs.config.disableModule.${modulePath}) module; }
+            { config = lib.mkIf (!config.disableModule.${modulePath}) module; }
         ))
         { disabledModules = [ modulePath ]; }
     ]; };
 
-    ## Given a path to a module, and a function that takes the instantiation of the original module and returns a partial module as override, this recursively applies that override to the original module definition.
+    ## Given a path to a module, and a function that takes the instantiation of the original module and returns a partial module as override, this recursively merges that override onto the original module definition.
     #  Used as an »imports« entry, this allows for much more fine-grained overriding of the configuration (or even other parts) of a module than »makeNixpkgsModuleConfigOptional«, but the override function needs to be tailored to internal implementation details of the original module.
-    #  Esp. it is important to know that »mkIf« both existing in the original module and in the return from the override results in an attrset »{ _type="if"; condition; content; }«. Accessing content of an existing »mkIf« thus requires adding ».content« to the lookup path, and the »content« of returned »mkIf«s will get merged with any existing attribute of that name.
-    overrideNixpkgsModule = specialArgs: modulePath: override: let
-        fullPath = "${specialArgs.inputs.nixpkgs.outPath}/nixos/modules/${modulePath}";
-        moduleArgs = { utils = import "${specialArgs.inputs.nixpkgs.outPath}/nixos/lib/utils.nix" { inherit (specialArgs) lib config pkgs; }; } // specialArgs;
-        module = import fullPath moduleArgs;
-    in { _file = fullPath; imports = [
-        (mergeAttrsRecursive ([ { imports = module.imports or [ ]; options = module.options or { }; config = module.config or { }; } ] ++ (lib.toList (override module))))
+    #  Esp., it is important to know that »mkIf« both existing in the original module and in the return from the override results in an attrset »{ _type="if"; condition; content; }«. Accessing content of an existing »mkIf« thus requires adding ».content« to the lookup path, and the »content« of returned »mkIf«s will get merged with any existing attribute of that name.
+    # Also, only use this on modules that are imported by default; otherwise, it gets really confusing if something somewhere imports the module and that has no effect.
+    overrideNixpkgsModule = modulePath: extraOriginalModuleArgs: override: args@{ config, pkgs, lib, modulesPath, utils, ... }: let
+        fullPath = "${modulesPath}/${modulePath}";
+        module = import fullPath (args // extraOriginalModuleArgs);
+        overrides = lib.toList (override module);
+        _file = if (lib.head overrides)?config then let pos = builtins.unsafeGetAttrPos "config" (lib.head overrides); in "${pos.file}:${toString pos.line}(override)" else "${fullPath}#override";
+    in { inherit _file; imports = [
+        (mergeAttrsRecursive ([ { imports = module.imports or [ ]; options = module.options or { }; config = module.config or { }; } ] ++ overrides))
         { disabledModules = [ modulePath ]; }
     ]; };
 }

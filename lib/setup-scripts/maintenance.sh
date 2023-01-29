@@ -47,52 +47,78 @@ function register-vbox {( set -eu # 1: diskImages, 2?: bridgeTo
 
 ## Runs a host in QEMU, taking the same disk specification as the installer. It infers a number of options from he target system's configuration.
 #  Currently, this only works for x64 (on x64) ...
-function run-qemu {( set -eu # 1: diskImages
-    generic-arg-parse "$@"
-    diskImages=${argv[0]}
-    if [[ ${args[debug]:-} ]] ; then set -x ; fi
+function run-qemu { # 1: diskImages, ...: qemuArgs
+    if [[ ${args[install]:-} && ! ${argv[0]:-} ]] ; then argv[0]=/tmp/nixos-vm/@{outputName:-@{config.system.name}}/ ; fi
+    diskImages=${argv[0]:?} ; argv=( "${argv[@]:1}" )
 
-    qemu=( @{native.qemu_full}/bin/qemu-system-@{config.wip.preface.hardware} )
-    qemu+=( -m ${args[mem]:-2048} -smp ${args[smp]:-4} )
+    local qemu=( )
 
-    if [[ @{config.wip.preface.hardware}-linux == "@{native.system}" && ! ${args[no-kvm]:-} ]] ; then
-        qemu+=( -cpu host -enable-kvm ) # For KVM to work vBox may not be running anything at the same time (and vBox hangs on start if qemu runs). Pass »--no-kvm« and accept ~10x slowdown, or stop vBox.
-    elif [[ @{config.wip.preface.hardware} == aarch64 ]] ; then # assume it's a raspberry PI (or compatible)
-        # TODO: this does not work yet:
-        qemu+=( -machine type=raspi3b -m 1024 ) ; args[no-nat]=1
-        # ... and neither does this:
-        #qemu+=( -M virt -m 1024 -smp 4 -cpu cortex-a53  ) ; args[no-nat]=1
-    fi # else things are going to be quite slow
+    if [[ @{pkgs.system} == "@{native.system}" ]] ; then
+        qemu=( $( @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --json @{native.qemu_kvm.drvPath} | @{native.jq}/bin/jq -r .[0].outputs.out )/bin/qemu-kvm ) || return
+        if [[ ! ${args[no-kvm]:-} && -r /dev/kvm && -w /dev/kvm ]] ; then
+            # For KVM to work, vBox must not be running anything at the same time (and vBox hangs on start if qemu runs). Pass »--no-kvm« and accept ~10x slowdown, or stop vBox.
+            qemu+=( -enable-kvm -cpu host )
+            if [[ ! ${args[smp]:-} ]] ; then qemu+=( -smp 4 ) ; fi # else the emulation is single-threaded anyway
+        else
+            if [[ ! ${args[no-kvm]:-} && ! ${args[quiet]:-} ]] ; then
+                echo "KVM is not available (for the current user). Running without hardware acceleration." 1>&2
+            fi
+            qemu+=( -machine accel=tcg ) # this may suppress warnings that qemu is using tcg (slow) instead of kvm
+            if [[ @{pkgs.system} == aarch64-* ]] ; then qemu+=( -cpu max ) ; fi
+        fi
+        if [[ @{pkgs.system} == aarch64-* ]] ; then
+            qemu+=( -machine type=virt -cpu max ) # aarch64 has no default, but this seems good
+        fi
+    else
+        qemu=( $( @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --json @{native.qemu_full.drvPath} | @{native.jq}/bin/jq -r .[0].outputs.out )/bin/qemu-system-@{config.wip.preface.hardware} ) || return
+        if [[ @{config.wip.preface.hardware} == aarch64 ]] ; then # assume it's a raspberry PI (or compatible)
+            # TODO: this does not work yet:
+            qemu+=( -machine type=raspi3b -m 1024 ) ; args[no-nat]=1
+            # ... and neither does this:
+            #qemu+=( -machine type=virt -m 1024 -smp 4 -cpu cortex-a53  ) ; args[no-nat]=1
+        fi
+    fi
+
+    qemu+=( -m ${args[mem]:-2048} )
+    if [[ ${args[smp]:-} ]] ; then qemu+=( -smp ${args[smp]} ) ; fi
+
+    if [[ @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots SeaBIOS.
+        local ovmf ; ovmf=$( @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --json @{native.OVMF.drvPath} | @{native.jq}/bin/jq -r .[0].outputs.fd ) || return
+        #qemu+=( -bios ${ovmf}/FV/OVMF.fd ) # This works, but is a legacy fallback that stores the EFI vars in /NvVars on the EFI partition (which is really bad).
+        local fwName=OVMF ; if [[ @{pkgs.system} == aarch64-* ]] ; then fwName=AAVMF ; fi # fwName=QEMU
+        qemu+=( -drive file=${ovmf}/FV/${fwName}_CODE.fd,if=pflash,format=raw,unit=0,readonly=on )
+        local efiVars=${args[efi-vars]:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/qemu-@{outputName:-@{config.system.name}}-VARS.fd}
+        qemu+=( -drive file="$efiVars",if=pflash,format=raw,unit=1 )
+        if [[ ! -e "$efiVars" ]] ; then cat ${ovmf}/FV/${fwName}_VARS.fd >"$efiVars" || return ; fi
+        # https://lists.gnu.org/archive/html/qemu-discuss/2018-04/msg00045.html
+    fi
+#   if [[ @{config.wip.preface.hardware} == aarch64 ]] ; then
+#       qemu+=( -kernel @{config.system.build.kernel}/Image -initrd @{config.system.build.initialRamdisk}/initrd -append "$(echo -n "@{config.boot.kernelParams[@]}")" )
+#   fi
 
     if [[ $diskImages == */ ]] ; then
         disks=( ${diskImages}primary.img ) ; for name in "@{!config.wip.fs.disks.devices[@]}" ; do if [[ $name != primary ]] ; then disks+=( ${diskImages}${name}.img ) ; fi ; done
-        #disks=( "@{!config.wip.fs.disks.devices[@]}" ) ; disks=( "${disks[@]/#/$diskImages}" )
     else disks=( ${diskImages//:/ } ) ; fi
-    for index in ${!disks[@]} ; do
+    local index ; for index in ${!disks[@]} ; do
 #       qemu+=( -drive format=raw,if=ide,file="${disks[$index]/*=/}" ) # »if=ide« is the default, which these days isn't great for driver support inside the VM
-        qemu+=( # not sure how correct the interpretations if the command are, and whether this works for more than one disk
+        qemu+=( # not sure how correct the interpretations of the command are
             -drive format=raw,file="${disks[$index]/*=/}",media=disk,if=none,index=${index},id=drive${index} # create the disk drive, without attaching it, name it driveX
-            -device ahci,acpi-index=${index},id=ahci${index} # create an (ich9-)AHCI bus named »ahciX«
-            -device ide-hd,drive=drive${index},bus=ahci${index}.${index} # attach IDE?! disk driveX as device X on bus »ahciX«
-            #-device virtio-blk-pci,drive=drive${index},disable-modern=on,disable-legacy=off # alternative to the two lines above (implies to be faster, but seems to require guest drivers)
+            #-device ahci,acpi-index=${index},id=ahci${index} # create an (ich9-)AHCI bus named »ahciX«
+            #-device ide-hd,drive=drive${index},bus=ahci${index}.${index} # attach IDE?! disk driveX as device X on bus »ahciX«
+            -device virtio-blk-pci,drive=drive${index},disable-modern=on,disable-legacy=off # alternative to the two lines above (implies to be faster, but seems to require guest drivers)
         )
     done
 
-    if [[ @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots something much like a classic BIOS?
-        ovmf=$( @{native.nixVersions.nix_2_9}/bin/nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths @{inputs.nixpkgs}'#'legacyPackages.@{pkgs.system}.OVMF.fd )
-        #qemu+=( -bios ${ovmf}/FV/OVMF.fd ) # This works, but is a legacy fallback that stores the EFI vars in /NvVars on the EFI partition (which is really bad).
-        qemu+=( -drive file=${ovmf}/FV/OVMF_CODE.fd,if=pflash,format=raw,unit=0,readonly=on )
-        qemu+=( -drive file="${args[efi-vars]:-/tmp/qemu-@{config.networking.hostName}-VARS.fd}",if=pflash,format=raw,unit=1 )
-        if [[ ! -e "${args[efi-vars]:-/tmp/qemu-@{config.networking.hostName}-VARS.fd}" ]] ; then cat ${ovmf}/FV/OVMF_VARS.fd > "${args[efi-vars]:-/tmp/qemu-@{config.networking.hostName}-VARS.fd}" ; fi
-        # https://lists.gnu.org/archive/html/qemu-discuss/2018-04/msg00045.html
-    fi
-    if [[ @{config.wip.preface.hardware} == aarch64 ]] ; then
-        qemu+=( -kernel @{config.system.build.kernel}/Image -initrd @{config.system.build.initialRamdisk}/initrd -append "$(echo -n "@{config.boot.kernelParams[@]}")" )
+    if [[ ${args[share]:-} ]] ; then # e.g. --share='foo:/home/user/foo,readonly=on bar:/tmp/bar'
+        local share ; for share in ${args[share]} ; do
+            qemu+=( -virtfs local,security_model=none,mount_tag=${share/:/,path=} )
+            # In the VM: $ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo
+        done
     fi
 
     # Add »config.boot.kernelParams = [ "console=tty1" "console=ttyS0" ]« to log to serial (»ttyS0«) and/or the display (»tty1«), preferring the last »console« option for the initrd shell (if enabled and requested).
-    logSerial= ; if [[ ' '"@{config.boot.kernelParams[@]}"' ' == *' console=ttyS0'@( |,)* ]] ; then logSerial=1 ; fi
-    logScreen= ; if [[ ' '"@{config.boot.kernelParams[@]}"' ' == *' console=tty1 '* ]] ; then logScreen=1 ; fi
+    local logSerial= ; if [[ ' '"@{config.boot.kernelParams[@]}"' ' == *' console=ttyS0'@( |,)* ]] ; then logSerial=1 ; fi
+    local logScreen= ; if [[ ' '"@{config.boot.kernelParams[@]}"' ' == *' console=tty1 '* ]] ; then logScreen=1 ; fi
     if [[ ! ${args[no-serial]:-} && $logSerial ]] ; then
         if [[ $logScreen || ${args[graphic]:-} ]] ; then
             qemu+=( -serial mon:stdio )
@@ -101,8 +127,8 @@ function run-qemu {( set -eu # 1: diskImages
         fi
     fi
 
-    if [[ ! ${args[no-nat]:-} ]] ; then # e.g. --nat-fw=8000-:8000,8001-:8001,2022-:22
-        qemu+=( -nic user,model=virtio-net-pci${args[nat-fw]:+,hostfwd=tcp::${args[nat-fw]//,/,hostfwd=tcp::}} ) # NATed, IPs: 10.0.2.15+/32, gateway: 10.0.2.2
+    if [[ ! ${args[no-nat]:-} ]] ; then # e.g. --nat-fw=:8000-:8000,:8001-:8001,127.0.0.1:2022-:22
+        qemu+=( -nic user,model=virtio-net-pci${args[nat-fw]:+,hostfwd=tcp:${args[nat-fw]//,/,hostfwd=tcp:}} ) # NATed, IPs: 10.0.2.15+/32, gateway: 10.0.2.2
     fi
 
     # TODO: network bridging:
@@ -110,19 +136,27 @@ function run-qemu {( set -eu # 1: diskImages
     #qemu+=( -netdev bridge,id=enp0s3,macaddr=$mac -device virtio-net-pci,netdev=hn0,id=nic1 )
 
     # To pass a USB device (e.g. a YubiKey for unlocking), add pass »--usb-port=${bus}-${port}«, where bus and port refer to the physical USB port »/sys/bus/usb/devices/${bus}-${port}« (see »lsusb -tvv«). E.g.: »--usb-port=3-1.1.1.4«
-    if [[ ${args[usb-port]:-} ]] ; then for decl in ${args[usb-port]//:/ } ; do
+    if [[ ${args[usb-port]:-} ]] ; then local decl ; for decl in ${args[usb-port]//:/ } ; do
         qemu+=( -usb -device usb-host,hostbus="${decl/-*/}",hostport="${decl/*-/}" )
     done ; fi
 
+    if [[ ${args[install]:-} == 1 ]] ; then local disk ; for disk in "${disks[@]}" ; do
+        if [[ ! -e $disk ]] ; then args[install]=always ; fi
+    done ; fi
+    if [[ ${args[install]:-} == always ]] ; then
+        local verbosity=--quiet ; if [[ ${args[debug]:-} ]] ; then verbosity=--debug ; fi
+        ${args[dry-run]:+echo} $0 install-system "$diskImages" $verbosity --no-inspect || return
+    fi
+
+    qemu+=( "${argv[@]}" )
     if [[ ${args[dry-run]:-} ]] ; then
-        ( echo "${qemu[@]}" )
+        echo "${qemu[@]}"
     else
-        ( set -x ; "${qemu[@]}" )
+        ( set -x ; "${qemu[@]}" ) || return
     fi
 
     # https://askubuntu.com/questions/54814/how-can-i-ctrl-alt-f-to-get-to-a-tty-in-a-qemu-session
-
-)}
+}
 
 ## Creates a random static key on a new key partition on the GPT partitioned »$blockDev«. The drive can then be used as headless but removable disk unlock method.
 #  To create/clear the GPT: $ sgdisk --zap-all "$blockDev"

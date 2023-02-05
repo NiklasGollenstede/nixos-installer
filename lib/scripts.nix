@@ -98,7 +98,7 @@ in rec {
     wrap-script = args@{ pkgs, src, deps, ... }: let
         name = args.name or (builtins.baseNameOf (builtins.unsafeDiscardStringContext "${src}"));
     in pkgs.runCommandLocal name {
-        script = src; nativeBuildInputs = [ pkgs.makeWrapper ];
+        script = src; nativeBuildInputs = [ pkgs.buildPackages.makeWrapper ];
     } ''makeWrapper $script $out/bin/${name} --prefix PATH : ${lib.makeBinPath deps}'';
 
     # Simplifies a path (or any other string) such that it can be used as a systemd unit name.

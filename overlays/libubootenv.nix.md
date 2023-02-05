@@ -31,8 +31,8 @@ in {
             owner = "sbabic"; repo = pname; rev = "ba7564f5006d09bec51058cf4f5ac90d4dc18b3c"; # 2018-11-18
             hash = "sha256-6cHkr3s7/2BVXBTn9bUfPFbYAfv9VYh6C9GAbWILNjs=";
         };
-        nativeBuildInputs = [ pkgs.cmake ];
-        buildInputs = [ pkgs.cmake pkgs.zlib ];
+        nativeBuildInputs = [ pkgs.buildPackages.cmake ];
+        buildInputs = [ pkgs.zlib ];
         outputs = [ "out" "lib" ];
 
         meta = {

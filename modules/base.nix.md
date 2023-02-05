@@ -23,10 +23,9 @@ in {
         bashInit = lib.mkEnableOption "pretty defaults for interactive bash shells" // { default = true; example = false; };
     }; };
 
-    # Bugfix:
-    imports = [ (lib.wip.overrideNixpkgsModule "misc/extra-arguments.nix" { } (old: { config._module.args.utils = old._module.args.utils // {
-        escapeSystemdPath = s: builtins.replaceStrings [ "/" "-" " " "." ] [ "-" "\\x2d" "\\x20" "\\x2e" ] (lib.removePrefix "/" s); # BUG(PR): The original function does not escape ».«, resulting in mismatching names with units generated from paths with ».« in them (e.g. overwrites for implicit mount units).
-    }; })) ];
+    imports = lib.optional ((builtins.substring 0 5 inputs.nixpkgs.lib.version) <= "22.05") (lib.wip.overrideNixpkgsModule "misc/extra-arguments.nix" { } (old: { config._module.args.utils = old._module.args.utils // {
+        escapeSystemdPath = s: let n = builtins.replaceStrings [ "/" "-" " " ] [ "-" "\\x2d" "\\x20" ] (lib.removePrefix "/" s); in if lib.hasPrefix "." n then "\\x2e" (lib.substring 1 (lib.stringLength (n - 1)) n) else n; # (a better implementation has been merged in 22.11)
+    }; }));
 
     config = let
 

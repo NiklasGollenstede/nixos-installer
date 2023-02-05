@@ -102,3 +102,9 @@ function run-hook-script {( set -eu # 1: title, 2: scriptPath
     fi
     source "$2"
 )}
+
+## Lazily builds a nix derivation at run time, instead of when building the script.
+#  When maybe-using packages that take long to build, instead of »at{some.package.out}«, use: »$( build-lazy at{some.package.drvPath!unsafeDiscardStringContext} out )«
+function build-lazy { # 1: drvPath, 2?: output
+    PATH=$PATH:@{native.openssh}/bin @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --json ${args[quiet]:+--quiet} $1 | @{native.jq}/bin/jq -r .[0].outputs.${2:-out}
+}

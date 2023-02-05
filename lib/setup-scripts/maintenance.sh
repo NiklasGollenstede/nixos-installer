@@ -54,7 +54,7 @@ function run-qemu { # 1: diskImages, ...: qemuArgs
     local qemu=( )
 
     if [[ @{pkgs.system} == "@{native.system}" ]] ; then
-        qemu=( $( @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --json @{native.qemu_kvm.drvPath} | @{native.jq}/bin/jq -r .[0].outputs.out )/bin/qemu-kvm ) || return
+        qemu=( $( build-lazy @{native.qemu_kvm.drvPath!unsafeDiscardStringContext} )/bin/qemu-kvm ) || return
         if [[ ! ${args[no-kvm]:-} && -r /dev/kvm && -w /dev/kvm ]] ; then
             # For KVM to work, vBox must not be running anything at the same time (and vBox hangs on start if qemu runs). Pass »--no-kvm« and accept ~10x slowdown, or stop vBox.
             qemu+=( -enable-kvm -cpu host )
@@ -64,32 +64,25 @@ function run-qemu { # 1: diskImages, ...: qemuArgs
                 echo "KVM is not available (for the current user). Running without hardware acceleration." 1>&2
             fi
             qemu+=( -machine accel=tcg ) # this may suppress warnings that qemu is using tcg (slow) instead of kvm
-            if [[ @{pkgs.system} == aarch64-* ]] ; then qemu+=( -cpu max ) ; fi
-        fi
-        if [[ @{pkgs.system} == aarch64-* ]] ; then
-            qemu+=( -machine type=virt -cpu max ) # aarch64 has no default, but this seems good
         fi
     else
-        qemu=( $( @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --json @{native.qemu_full.drvPath} | @{native.jq}/bin/jq -r .[0].outputs.out )/bin/qemu-system-@{config.wip.preface.hardware} ) || return
-        if [[ @{config.wip.preface.hardware} == aarch64 ]] ; then # assume it's a raspberry PI (or compatible)
-            # TODO: this does not work yet:
-            qemu+=( -machine type=raspi3b -m 1024 ) ; args[no-nat]=1
-            # ... and neither does this:
-            #qemu+=( -machine type=virt -m 1024 -smp 4 -cpu cortex-a53  ) ; args[no-nat]=1
-        fi
+        qemu=( $( build-lazy @{native.qemu_full.drvPath!unsafeDiscardStringContext} )/bin/qemu-system-@{config.wip.preface.hardware} ) || return
     fi
+    if [[ @{pkgs.system} == aarch64-* ]] ; then
+        qemu+=( -machine type=virt ) # aarch64 has no default, but this seems good
+    fi ; qemu+=( -cpu max )
 
     qemu+=( -m ${args[mem]:-2048} )
     if [[ ${args[smp]:-} ]] ; then qemu+=( -smp ${args[smp]} ) ; fi
 
     if [[ @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots SeaBIOS.
-        local ovmf ; ovmf=$( @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --json @{native.OVMF.drvPath} | @{native.jq}/bin/jq -r .[0].outputs.fd ) || return
+        local ovmf ; ovmf=$( build-lazy @{pkgs.OVMF.drvPath!unsafeDiscardStringContext} fd ) || return
         #qemu+=( -bios ${ovmf}/FV/OVMF.fd ) # This works, but is a legacy fallback that stores the EFI vars in /NvVars on the EFI partition (which is really bad).
         local fwName=OVMF ; if [[ @{pkgs.system} == aarch64-* ]] ; then fwName=AAVMF ; fi # fwName=QEMU
         qemu+=( -drive file=${ovmf}/FV/${fwName}_CODE.fd,if=pflash,format=raw,unit=0,readonly=on )
         local efiVars=${args[efi-vars]:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/qemu-@{outputName:-@{config.system.name}}-VARS.fd}
         qemu+=( -drive file="$efiVars",if=pflash,format=raw,unit=1 )
-        if [[ ! -e "$efiVars" ]] ; then cat ${ovmf}/FV/${fwName}_VARS.fd >"$efiVars" || return ; fi
+        if [[ ! -e "$efiVars" ]] ; then mkdir -pm700 "$( dirname "$efiVars" )" ; cat ${ovmf}/FV/${fwName}_VARS.fd >"$efiVars" || return ; fi
         # https://lists.gnu.org/archive/html/qemu-discuss/2018-04/msg00045.html
     fi
 #   if [[ @{config.wip.preface.hardware} == aarch64 ]] ; then
@@ -99,14 +92,18 @@ function run-qemu { # 1: diskImages, ...: qemuArgs
     if [[ $diskImages == */ ]] ; then
         disks=( ${diskImages}primary.img ) ; for name in "@{!config.wip.fs.disks.devices[@]}" ; do if [[ $name != primary ]] ; then disks+=( ${diskImages}${name}.img ) ; fi ; done
     else disks=( ${diskImages//:/ } ) ; fi
+
+    [[ ' '"@{boot.initrd.availableKernelModules[@]}"' ' != *' 'virtio_blk' '* ]] || args[virtio-blk]=1
     local index ; for index in ${!disks[@]} ; do
 #       qemu+=( -drive format=raw,if=ide,file="${disks[$index]/*=/}" ) # »if=ide« is the default, which these days isn't great for driver support inside the VM
-        qemu+=( # not sure how correct the interpretations of the command are
-            -drive format=raw,file="${disks[$index]/*=/}",media=disk,if=none,index=${index},id=drive${index} # create the disk drive, without attaching it, name it driveX
-            #-device ahci,acpi-index=${index},id=ahci${index} # create an (ich9-)AHCI bus named »ahciX«
-            #-device ide-hd,drive=drive${index},bus=ahci${index}.${index} # attach IDE?! disk driveX as device X on bus »ahciX«
-            -device virtio-blk-pci,drive=drive${index},disable-modern=on,disable-legacy=off # alternative to the two lines above (implies to be faster, but seems to require guest drivers)
-        )
+        qemu+=( -drive format=raw,file="${disks[$index]/*=/}",media=disk,if=none,index=${index},id=drive${index} ) # create the disk drive, without attaching it, name it driveX
+
+        if [[ ! ${args[virtio-blk]:-} ]] ; then
+            qemu+=( -device ahci,acpi-index=${index},id=ahci${index} ) # create an (ich9-)AHCI bus named »ahciX«
+            qemu+=( -device ide-hd,drive=drive${index},bus=ahci${index}.${index} ) # attach IDE?! disk driveX as device X on bus »ahciX«
+        else
+            qemu+=( -device virtio-blk-pci,drive=drive${index},disable-modern=on,disable-legacy=off ) # this should be faster, but seems to require guest drivers
+        fi
     done
 
     if [[ ${args[share]:-} ]] ; then # e.g. --share='foo:/home/user/foo,readonly=on bar:/tmp/bar'
@@ -144,8 +141,8 @@ function run-qemu { # 1: diskImages, ...: qemuArgs
         if [[ ! -e $disk ]] ; then args[install]=always ; fi
     done ; fi
     if [[ ${args[install]:-} == always ]] ; then
-        local verbosity=--quiet ; if [[ ${args[debug]:-} ]] ; then verbosity=--debug ; fi
-        ${args[dry-run]:+echo} $0 install-system "$diskImages" $verbosity --no-inspect || return
+        local verbosity=--quiet ; if [[ ${args[trace]:-} ]] ; then verbosity=--trace ; fi ; if [[ ${args[debug]:-} ]] ; then verbosity=--debug ; fi
+        hostPath=${hostPath:-} ${args[dry-run]:+echo} $0 install-system "$diskImages" $verbosity --no-inspect || return
     fi
 
     qemu+=( "${argv[@]}" )

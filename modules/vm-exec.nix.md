@@ -29,23 +29,23 @@ nix run .../nixos-config'#'nixosConfigurations.${hostName}.config.system.build.v
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: { config, pkgs, lib, modulesPath, extendModules, ... }: let inherit (inputs.self) lib; in let
+dirname: inputs: { config, options, pkgs, lib, modulesPath, extendModules, ... }: let inherit (inputs.self) lib; in let
     prefix = inputs.config.prefix;
     cfg = config.virtualisation.vmVariantExec;
-in {
+in let hostModule = {
 
     options = { virtualisation.vmVariantExec = lib.mkOption {
         description = lib.mdDoc ''Machine configuration to be added to the system's qemu exec VM.'';
-        inherit (extendModules { modules = [ "${modulesPath}/virtualisation/qemu-vm.nix" ]; }) type;
+        inherit (extendModules { modules = [ "${modulesPath}/virtualisation/qemu-vm.nix" vmModule ]; }) type;
         default = { }; visible = "shallow";
     }; };
 
     config = {
 
-        system.build.vmExec = (let vmPkgs = pkgs; in let
+        system.build.vmExec = (let hostPkgs = pkgs; in let
             name = "run-${config.system.name}-vm-exec";
             launch = "${cfg.system.build.vm}/bin/${cfg.system.build.vm.meta.mainProgram}";
-            pkgs = if cfg.virtualisation?host.pkgs then cfg.virtualisation.host.pkgs else vmPkgs;
+            pkgs = if cfg.virtualisation?host.pkgs then cfg.virtualisation.host.pkgs else hostPkgs;
         in pkgs.runCommand "nixos-vm" {
             preferLocalBuild = true; meta.mainProgram = name;
         } ''
@@ -79,8 +79,11 @@ in {
             ''} $out/bin/${name}
         '');
 
+    };
 
-    } // { virtualisation.vmVariantExec = lib.mkMerge [ ({
+}; vmModule = { config, ... }: {
+    _file = "${dirname}/vm-exec.nix.md#vmModule";
+    imports = [ ({
 
         # Instead of tearing down the initrd environment, adjust some mounts and run the »command« in the initrd:
         boot.initrd.postMountCommands = ''
@@ -150,9 +153,21 @@ in {
         }; };
         virtualisation.diskSize = 4; #MB, not needed at all
 
+    }) ({
+
+        virtualisation = if (lib.fileContents "${pkgs.path}/.version") > "22.05" then { host.pkgs = pkgs.buildPackages; } else { };
+    }) ({
+        virtualisation.qemu.package = lib.mkIf (pkgs.buildPackages.system != pkgs.system) cfg.virtualisation.host.pkgs.qemu_full;
+
+    }) ({
+
+        specialisation = lib.mkForce { };
+        services.qemuGuest.enable = lib.mkForce false;
+
         # tag this to make clearer what's what
         system.nixos.tags = [ "vmExec" ];
         system.build.isVmExec = true;
 
-    }) ]; };
-}
+    }) ];
+
+}; in hostModule

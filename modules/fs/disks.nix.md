@@ -71,18 +71,18 @@ in {
 
         fs.disks.partitioning = let
             partition-disk = { name = "partition-disk"; text = lib.wip.extractBashFunction (builtins.readFile lib.wip.setup-scripts.disk) "partition-disk"; };
-            esc = lib.escapeShellArg;
+            esc = lib.escapeShellArg; native = pkgs.buildPackages;
         in pkgs.runCommand "partitioning-${config.networking.hostName}" { } ''
-            ${lib.wip.substituteImplicit { inherit pkgs; scripts = [ partition-disk ]; context = { inherit config; native = pkgs; }; }} # inherit (builtins) trace;
+            ${lib.wip.substituteImplicit { inherit pkgs; scripts = [ partition-disk ]; context = { inherit config native; }; }} # inherit (builtins) trace;
             set -u ; mkdir -p $out ; declare -A args=([debug]=1)
             ${lib.concatStrings (lib.mapAttrsToList (name: disk: ''
                 name=${esc name} ; img=$name.img
-                ${pkgs.coreutils}/bin/truncate -s ${esc disk.size} "$img"
+                ${native.coreutils}/bin/truncate -s ${esc disk.size} "$img"
                 partition-disk "$name" "$img" ${toString (lib.wip.parseSizeSuffix disk.size)}
-                ${pkgs.gptfdisk}/bin/sgdisk --backup=$out/"$name".backup "$img"
-                ${pkgs.gptfdisk}/bin/sgdisk --print "$img" >$out/"$name".gpt
+                ${native.gptfdisk}/bin/sgdisk --backup=$out/"$name".backup "$img"
+                ${native.gptfdisk}/bin/sgdisk --print "$img" >$out/"$name".gpt
                 ${if disk.mbrParts != null then ''
-                    ${pkgs.util-linux}/bin/fdisk --type mbr --list "$img" >$out/"$name".mbr
+                    ${native.util-linux}/bin/fdisk --type mbr --list "$img" >$out/"$name".mbr
                 '' else ""}
             '') cfg.devices)}
         '';

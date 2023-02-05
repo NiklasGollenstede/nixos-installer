@@ -77,13 +77,14 @@ in rec {
         entryPath ? null, config ? null, preface ? null,
         inputs ? { }, overlays ? (getOverlaysFromInputs inputs), modules ? (getModulesFromInputs inputs),
         peers ? { }, nixosSystem ? inputs.nixpkgs.lib.nixosSystem, localSystem ? null,
+        renameOutputs ? (name: null), # If not supplied (explicitly or as »false« by »mkSystemsFlake«), assume the system is not exported.
     ... }: let
         preface = args.preface or (getSystemPreface inputs entryPath (specialArgs // { inherit name; }));
         targetSystem = "${preface.hardware}-linux"; buildSystem = if localSystem != null then localSystem else targetSystem;
         specialArgs = (args.specialArgs or { }) // {
             nodes = peers; # NixOPS
         };
-        outputName = if args?renameOutputs then args.renameOutputs name else name;
+        outputName = if renameOutputs != false then renameOutputs name else name;
     in let system = { inherit preface; } // (nixosSystem {
         system = buildSystem; # (this actually does nothing more than setting »config.nixpkgs.system« and can be null here)
 
@@ -190,9 +191,9 @@ in rec {
         # If provided, then cross compilation is enabled for all hosts whose target architecture is different from this. Since cross compilation currently fails for (some stuff in) NixOS, better don't set »localSystem«. Without it, building for other platforms works fine (just slowly) if »boot.binfmt.emulatedSystems« on the building system is configured for the respective target(s).
         localSystem ? null,
         ## If provided, then change the name of each output attribute by passing it through this function. Allows exporting of multiple variants of a repo's hosts from a single flake:
-        renameOutputs ? null,
+        renameOutputs ? false,
     ... }: let
-        otherArgs = args // { inherit inputs overlays modules specialArgs nixosSystem localSystem; };
+        otherArgs = args // { inherit inputs overlays modules specialArgs nixosSystem localSystem renameOutputs; };
         nixosConfigurations = if builtins.isList systems then mergeAttrsUnique (map (systems: mkNixosConfigurations (otherArgs // systems)) systems) else mkNixosConfigurations (otherArgs // systems);
     in let outputs = {
         inherit nixosConfigurations;
@@ -207,11 +208,11 @@ in rec {
         packages.all-systems = pkgs.runCommandLocal "all-systems" { } ''
             ${''
                 mkdir -p $out/systems
-                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${system.config.system.build.toplevel} $out/systems/${name}") nixosConfigurations)}
+                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${system.config.system.build.toplevel} $out/systems/${if renameOutputs == false then name else renameOutputs name}") nixosConfigurations)}
             ''}
             ${''
                 mkdir -p $out/scripts
-                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${outputs.apps.${localSystem}.${name}.program} $out/scripts/${name}") nixosConfigurations)}
+                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${outputs.apps.${localSystem}.${name}.program} $out/scripts/${if renameOutputs == false then name else renameOutputs name}") nixosConfigurations)}
             ''}
             ${lib.optionalString (inputs != { }) ''
                 mkdir -p $out/inputs
@@ -220,7 +221,7 @@ in rec {
         '';
         checks.all-systems = packages.all-systems;
 
-    })); in if renameOutputs == null then outputs else {
+    })); in if renameOutputs == false then outputs else {
         nixosConfigurations = mapMerge (k: v: { ${renameOutputs k} = v; }) outputs.nixosConfigurations;
     } // (forEachSystem [ "aarch64-linux" "x86_64-linux" ] (localSystem: {
         apps = mapMerge (k: v: { ${renameOutputs k} = v; }) outputs.apps.${localSystem};

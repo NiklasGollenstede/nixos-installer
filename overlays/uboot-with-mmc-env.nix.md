@@ -35,7 +35,7 @@ in {
             # Creates a (user) env blob for this u-boot by merging »env« over its »defaultEnv«. The resulting file can be flashed to »CONFIG_ENV_OFFSET« to replace the default env.
             mkEnv = env: pkgs.runCommandLocal "uboot-env.img" {
                 env = envTxt (defaultEnv' // env);
-            } "${pkgs.ubootTools}/bin/mkenvimage -p 0x00 -s ${toString envSize} -o $out $env";
+            } "${pkgs.buildPackages.ubootTools}/bin/mkenvimage -p 0x00 -s ${toString envSize} -o $out $env";
 
         };
         extraConfig = (old.extraConfig or "") + "${lib.concatStringsSep "\n" ([

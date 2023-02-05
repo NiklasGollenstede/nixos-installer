@@ -97,7 +97,7 @@ in {
                     fi
                 done
                 if ! ${pkgs.gnugrep}/bin/grep -qP '^UI ' ${esc cfg.targetDir}/extlinux/extlinux.conf ; then # `extlinux-conf-builder` above would have recreated this, so the check should always be true
-                    ${pkgs.perl}/bin/perl -i -pe 's/TIMEOUT/UI menu.c32\nTIMEOUT/' ${esc cfg.targetDir}/extlinux/extlinux.conf
+                    ${pkgs.gnused}/bin/sed -i 's/^TIMEOUT /UI menu.c32\nTIMEOUT /' ${esc cfg.targetDir}/extlinux/extlinux.conf
                 fi
             else
                 : # delete library files?

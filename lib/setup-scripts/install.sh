@@ -16,12 +16,13 @@ function prepare-installer { # (void)
 
     : ${argv[0]:?"Required: Target disk or image paths."}
 
+    umask g-w,o-w # Ensure that files created without explicit permissions are not writable for group and other (0022).
+
     if [[ "$(id -u)" != '0' ]] ; then
         if [[ ! ${args[no-vm]:-} ]] ; then reexec-in-qemu || return ; \exit 0 ; fi
         echo 'Script must be run as root or in qemu (without »--no-vm«).' 1>&2 ; \return 1
     fi
     if [[ ${args[vm]:-} ]] ; then reexec-in-qemu || return ; \exit 0 ; fi
-    umask 0022 # Ensure consistent umask (default permissions for new files).
 
     if [[ -e "/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}" ]] ; then echo "Keystore »/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}/« is already open. Close it and remove the mountpoint before running the installer." 1>&2 ; \return 1 ; fi
 
@@ -33,7 +34,7 @@ function prepare-installer { # (void)
         if @{native.zfs}/bin/zfs get -o value -H name "$poolName" &>/dev/null ; then echo "ZFS pool »$poolName« is already imported. Export the pool before running the installer." 1>&2 ; \return 1 ; fi
     done
 
-    if [[ ${SUDO_USER:-} ]] ; then # use Nix as the user who called this script, as Nix may not be set up for root
+    if [[ ${SUDO_USER:-} && $( PATH=$hostPath which su 2>/dev/null ) ]] ; then # use Nix as the user who called this script, as Nix may not be set up for root
         function nix {( set +x ; declare -a args=("$@") ; PATH=$hostPath su - "$SUDO_USER" -c "$(declare -p args)"' ; nix "${args[@]}"' )}
     else # use Nix by absolute path, as it won't be on »$PATH«
         PATH=$PATH:@{native.nix}/bin
@@ -50,6 +51,8 @@ function prepare-installer { # (void)
 ## Re-executes the current system's installation in a qemu VM.
 function reexec-in-qemu {
 
+    if [[ @{pkgs.buildPackages.system} != "@{native.system}" ]] ; then echo "VM installation (implicit when not running as root) of a system built on a different ISA than the current host's is not supported (yet)." 1>&2 ; \return 1 ; fi
+
     # (not sure whether this works for block devices)
     ensure-disks "${argv[0]}" 1 || return
     qemu=( -m 2048 ) ; declare -A qemuDevs=( )
@@ -65,16 +68,19 @@ function reexec-in-qemu {
         let index+=1
     done
 
-    args[vm]=''
+    args[vm]='' ; args[no-vm]=1
     newArgs=( ) ; for arg in "${!args[@]}" ; do newArgs+=( --"$arg"="${args[$arg]}" ) ; done
     devSpec= ; for name in "${!qemuDevs[@]}" ; do devSpec+="$name"="${qemuDevs[$name]}": ; done
     newArgs+=( ${devSpec%:} ) ; (( ${#argv[@]} > 1 )) && args+=( "${argv[@]:1}" )
 
     #local output=@{inputs.self}'#'nixosConfigurations.@{outputName:?}.config.system.build.vmExec
-    local output=@{config.system.build.vmExec.drvPath} # this is more accurate, but also means another system needs to get evaluated every time
-    local command="$0 install-system $( printf '%q ' "${newArgs[@]}" ) || exit"
+    local output=@{config.system.build.vmExec.drvPath!unsafeDiscardStringContext} # this is more accurate, but also means another system needs to get evaluated every time
+    local scripts=$0 ; if [[ @{pkgs.system} != "@{native.system}" ]] ; then
+        scripts=$( build-lazy @{inputs.self}'#'apps.@{pkgs.system}.@{outputName:?}.derivation )
+    fi
+    local command="$scripts install-system $( printf '%q ' "${newArgs[@]}" ) || exit"
 
-    local runInVm ; runInVm=$( @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --json ${args[quiet]:+--quiet} $output | @{native.jq}/bin/jq -r .[0].outputs.out )/bin/run-@{config.system.name}-vm-exec || return
+    local runInVm ; runInVm=$( build-lazy $output )/bin/run-@{config.system.name}-vm-exec || return
 
     $runInVm ${args[vm-shared]:+--shared="${args[vm-shared]}"} ${args[debug]:+--initrd-console} ${args[trace]:+--initrd-console} ${args[quiet]:+--quiet} -- "$command" "${qemu[@]}" || return # --initrd-console
 }
@@ -118,8 +124,8 @@ function install-system-to {( set -u # 1: mnt
 
     # Support cross architecture installation (not sure if this is actually required)
     if [[ $(cat /run/current-system/system 2>/dev/null || echo "x86_64-linux") != "@{config.wip.preface.hardware}"-linux ]] ; then
-        mkdir -p $mnt/run/binfmt || exit ; [[ ! -e /run/binfmt/"@{config.wip.preface.hardware}"-linux ]] || cp -a {,$mnt}/run/binfmt/"@{config.wip.preface.hardware}"-linux || exit
-        # Ubuntu (by default) expects the "interpreter" at »/usr/bin/qemu-@{config.wip.preface.hardware}-static«.
+        mkdir -p $mnt/run/binfmt || exit ; [[ ! -e /run/binfmt/"@{config.wip.preface.hardware}"-linux ]] || cp -a {,$mnt}/run/binfmt/"@{config.wip.preface.hardware}"-linux || exit # On NixOS, this is a symlink or wrapper script, pointing to the store.
+        # Ubuntu (20.04, by default) uses a statically linked, already loaded qemu binary (F-flag), which therefore does not need to be reference-able from within the chroot.
     fi
 
     # Copy system closure to new nix store:

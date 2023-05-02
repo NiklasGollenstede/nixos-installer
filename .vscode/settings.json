@@ -8,6 +8,7 @@
 	"cSpell.diagnosticLevel": "Information", // to find spelling mistakes
 	"cSpell.words": [
 		"aarch64", // processor architecture
+		"AAVMF", // qemu aarch64
 		"acltype", // zfs
 		"acpi", // abbr
 		"ahci", // abbr

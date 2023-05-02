@@ -151,7 +151,7 @@ in ({
 
         services.openssh.enable = true;
         services.openssh.extraConfig = lib.mkOrder (-1) "Include ${builtins.toFile "user-root.conf" ''Match User root
-            AuthorizedKeysFile /local/etc/ssh/login.pub
+            AuthorizedKeysFile /local/etc/ssh/loginKey.pub
         ''}";
         networking.firewall.logRefusedConnections = false; # it's super spam-my and pretty irrelevant
         documentation.nixos.enable = lib.mkDefault false; # It just takes way to long to make these, and they rebuild way too often ...
@@ -273,88 +273,44 @@ in ({
     cerateCmd = ''
         ${prepend_trap}
         set -o pipefail -u${if debug then "x" else ""}
-        beQuiet=cat ; if [[ ''${quiet:-} ]] ; then beQuiet=: ; fi
 
         keys=${keysOutPath} ; rm -rf "$keys" && mkdir -p "$keys" && chmod 750 "$keys" || exit
-        for name in setupHost workerHost login ; do
-            ${pkgs.openssh}/bin/ssh-keygen -q -N "" -t ed25519 -f "$keys"/$name -C $name || exit
+        for ketName in hostKey loginKey ; do
+            ${pkgs.openssh}/bin/ssh-keygen -q -N "" -t ed25519 -f "$keys"/$ketName -C $ketName || exit
         done
 
-        echo 'Building the worker image'
-        image=$(mktemp -u) && prepend_trap "rm -f '$image'" EXIT
-        SUDO_USER= ${lib.wip.writeSystemScripts { inherit system pkgs; }} install-system --inspect-cmd='
-            keys='$( printf %q "$keys" )' ; if [[ -r /tmp/shared/workerHost ]] ; then keys=/tmp/shared ; fi
+        SUDO_USER= ${lib.wip.writeSystemScripts { inherit system pkgs; }} deploy-system-to-hetzner-vps --inspect-cmd='
+            keys='$( printf %q "$keys" )' ; if [[ ''${args[no-vm]:-} ]] ; then keys=/tmp/shared ; fi # "no-vm" is set inside the VM
             mkdir -p $mnt/local/etc/ssh/ || exit
-            cp -aT "$keys"/login.pub      $mnt/local/etc/ssh/login.pub || exit
-            cp -aT "$keys"/workerHost     $mnt/local/etc/ssh/ssh_host_ed25519_key || exit
-            cp -aT "$keys"/workerHost.pub $mnt/local/etc/ssh/ssh_host_ed25519_key.pub || exit
+            cp -aT "$keys"/loginKey.pub  $mnt/local/etc/ssh/loginKey.pub || exit
+            cp -aT "$keys"/hostKey       $mnt/local/etc/ssh/ssh_host_ed25519_key || exit
+            cp -aT "$keys"/hostKey.pub   $mnt/local/etc/ssh/ssh_host_ed25519_key.pub || exit
             chown 0:0 $mnt/local/etc/ssh/* || exit
-        ' ''${forceVmBuild:+--vm} --vm-shared="$keys" ${if debug then "--trace" else "--quiet"}  -- $image & buildPid=$!
-        wait $buildPid || exit
-
-        echo 'Creating the VPS'
-        prepend_trap 'if [[ ! ''${buildSucceeded:-} ]] ; then ( '${esc killCmd}' ) ; fi' EXIT
-        cat ${ubuntu-init} |
-        ${pkgs.perl}/bin/perl -pe 's|[@]sshLoginPub[@]|'"$( cat "$keys"/login.pub )"'|' |
-        ${pkgs.perl}/bin/perl -pe 's|[@]sshSetupHostPub[@]|'"$( cat "$keys"/setupHost.pub )"'|' |
-        ${pkgs.perl}/bin/perl -pe 's|[@]sshSetupHostPriv_prefix8[@]|'"$( cat "$keys"/setupHost | ${pkgs.perl}/bin/perl -pe 's/^/        /' )"'|' |
-        ${hcloud} server create --image=ubuntu-22.04 --name=${esc name} --type=${esc serverType} --user-data-from-file - ${if suppressCreateEmail then "--ssh-key dummy" else ""} | $beQuiet || exit
-        # ${hcloud} server poweron ${esc name} || exit # --start-after-create=false
+        ' ''${forceVmBuild:+--vm} --vm-shared="$keys" ${if debug then "--trace" else "--quiet"} ${lib.optionalString ignoreKill "--vps-keep-on-build-failure"} ${lib.optionalString suppressCreateEmail "--vps-suppress-create-email"} "$@" -- ${esc name} ${esc serverType} || exit # --parallel-build-deploy
+        rm "$keys"/hostKey || exit # don't need this anymore
 
         ip=$( ${hcloud} server ip ${esc name} ) ; echo "$ip" >"$keys"/ip
-        printf "%s %s\n" "$ip" "$( cat "$keys"/setupHost.pub )" >"$keys"/known_hosts
-
-        printf %s 'Preparing the VPS/worker for image transfer '
-        sleep 5 ; for i in $(seq 20) ; do sleep 1 ; if ${sshCmd} -- true &>/dev/null ; then break ; fi ; printf . ; done ; printf ' '
-        # The system takes a minimum of time to boot, so might as well chill first. Then the loop fails (loops) only before the VM is created, afterwards it blocks until sshd is up.
-        ${sshCmd} 'set -o pipefail -u -e
-            # echo u > /proc/sysrq-trigger # remount all FSes as r/o (did not cut it)
-            mkdir /tmp/tmp-root ; mount -t tmpfs -o size=100% none /tmp/tmp-root
-            umount /boot/efi ; rm -rf /var/lib/{apt,dpkg} /var/cache /usr/lib/firmware /boot ; printf .
-            cp -axT / /tmp/tmp-root/ ; printf .
-            mount --make-rprivate / ; mkdir -p /tmp/tmp-root/old-root
-            pivot_root /tmp/tmp-root /tmp/tmp-root/old-root
-            for i in dev proc run sys ; do mkdir -p /$i ; mount --move /old-root/$i /$i ; done
-            systemctl daemon-reexec ; systemctl restart sshd
-        ' || exit ; echo .
-
-        wait $buildPid || exit ; echo 'Writing worker image to VPS'
-        cat $image | ${pkgs.zstd}/bin/zstd | ${sshCmd} 'set -o pipefail -u -e
-            </dev/null fuser -mk /old-root 2>&1 | '$beQuiet' ; sleep 2
-            </dev/null umount /old-root
-            </dev/null blkdiscard -f /dev/sda &>/dev/null
-            </dev/null sync # this seems to be crucial
-            zstdcat >/dev/sda
-            </dev/null sync # this seems to be crucial
-        ' || exit
-        ${hcloud} server reset ${esc name} | $beQuiet || exit
-        printf "%s %s\n" "$ip" "$( cat "$keys"/workerHost.pub )" >"$keys"/known_hosts
-
-        printf %s 'Waiting for the worker to boot '
-        sleep 2 ; for i in $(seq 20) ; do sleep 1 ; if ${sshCmd} -- true &>/dev/null ; then buildSucceeded=1 ; break ; fi ; printf . ; done ; echo
-
-        if [[ ! ''${buildSucceeded:-} ]] ; then echo 'Unable to connect to VPS worker, it may not have booted correctly ' 1>&2 ; exit 1 ; fi
-
-        echo '${sshCmd} "$@"' >"$keys"/ssh ; chmod 555 "$keys"/ssh
+        printf "%s %s\n" "$ip" "$( cat "$keys"/hostKey.pub )" >"$keys"/known_hosts
+        printf '%s\n' '#!${pkgs.bash}' 'exec ${sshCmd} "$@"' >"$keys"/ssh ; chmod 555 "$keys"/ssh
         echo ${remoteStore.urlArg} >"$keys"/store ; echo ${remoteStore.builderArg} >"$keys"/builder
-        echo 'nix ${lib.concatStringsSep " " remoteStore.builderArgs} "$@"' >"$keys"/remote ; chmod 555 "$keys"/remote
+        printf '%s\n' '#!${pkgs.bash}' 'exec nix ${lib.concatStringsSep " " remoteStore.builderArgs} "$@"' >"$keys"/remote ; chmod 555 "$keys"/remote
     '';
 
-    sshCmd = ''${pkgs.openssh}/bin/ssh -oUserKnownHostsFile=${keysOutPath}/known_hosts -i ${keysOutPath}/login root@$( cat ${keysOutPath}/ip )'';
+    sshCmd = ''${pkgs.openssh}/bin/ssh -oUserKnownHostsFile=${keysOutPath}/known_hosts -i ${keysOutPath}/loginKey root@$( cat ${keysOutPath}/ip )'';
 
     killCmd = if ignoreKill then ''echo 'debug mode, keeping server '${esc name}'' else ''${hcloud} server delete ${esc name}'';
 
     remoteStore = rec {
-        urlArg = '''ssh://root@'$( cat ${keysOutPath}/ip )'?compress=true&ssh-key='${keysOutPath}'/login&base64-ssh-public-host-key='$( cat ${keysOutPath}/workerHost.pub | ${pkgs.coreutils}/bin/base64 -w0 )'';
+        urlArg = '''ssh://root@'$( cat ${keysOutPath}/ip )'?compress=true&ssh-key='${keysOutPath}'/loginKey&base64-ssh-public-host-key='$( cat ${keysOutPath}/hostKey.pub | ${pkgs.coreutils}/bin/base64 -w0 )'';
         builderArg = (lib.concatStringsSep "' '" [
             "'ssh://root@'$( cat ${keysOutPath}/ip )'?compress=true'" # 1. URL (including the keys, the URL gets too ong to create the lockfile path)
             "i686-linux,x86_64-linux" # 2. platform type
-            "${keysOutPath}/login" # 3. SSH login key
+            "${keysOutPath}/loginKey" # 3. SSH login key
             "${toString (serverTypes.${serverType} or { cpu = 4; }).cpu}" # 4. max parallel builds
             "-" # 5. speed factor (relative to other builders, so irrelevant)
             "nixos-test,benchmark,big-parallel" # 6. builder supported features (no kvm)
             "-" # 7. job required features
-            ''$( cat ${keysOutPath}/workerHost.pub | ${pkgs.coreutils}/bin/base64 -w0 )'' # 8. builder host key
+            ''$( cat ${keysOutPath}/hostKey.pub | ${pkgs.coreutils}/bin/base64 -w0 )'' # 8. builder host key
         ]);
         builderArgs = [
             "--max-jobs" "0" # don't build locally
@@ -365,7 +321,7 @@ in ({
     };
 
     shell = pkgs.writeShellScriptBin "shell-${name}" ''
-        quiet=1 ${createScript} || exit ; trap ${killScript} EXIT || exit
+        ${createScript} "$@" || exit ; trap ${killScript} EXIT || exit
 
         ${pkgs.bashInteractive}/bin/bash --init-file ${pkgs.writeText "init-${name}" ''
             # Execute bash's default logic if no --init-file was provided (to inherit from a normal shell):

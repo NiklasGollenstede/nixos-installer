@@ -12,10 +12,10 @@ See its [README](../lib/setup-scripts/README.md) for more documentation.
 ```bash
 
 # Replace the entry point with the same function:
-function install-system {( set -o pipefail -u # (void)
+function install-system {( # 1: diskPaths
     trap - EXIT # start with empty traps for sub-shell
-    prepare-installer || exit
-    do-disk-setup "${argv[0]}" || exit
+    prepare-installer "$@" || exit
+    do-disk-setup "$1" || exit
     install-system-to $mnt || exit
 )}
 

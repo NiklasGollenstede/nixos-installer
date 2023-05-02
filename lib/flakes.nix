@@ -1,6 +1,6 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
-    inherit (import "${dirname}/vars.nix"    dirname inputs) mapMerge mapMergeUnique mergeAttrsUnique flipNames;
+    inherit (import "${dirname}/vars.nix"    dirname inputs) namesToAttrs mapMerge mapMergeUnique mergeAttrsUnique flipNames;
     inherit (import "${dirname}/imports.nix" dirname inputs) getNixFiles importWrapped getOverlaysFromInputs getModulesFromInputs;
     inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit extractBashFunction;
     setup-scripts = (import "${dirname}/setup-scripts" "${dirname}/setup-scripts"  inputs);
@@ -9,36 +9,39 @@ dirname: inputs@{ self, nixpkgs, ...}: let
 in rec {
 
     # Simplified implementation of »flake-utils.lib.eachSystem«.
-    forEachSystem = systems: do: flipNames (mapMerge (arch: { ${arch} = do arch; }) systems);
+    forEachSystem = systems: getSystemOutputs: flipNames (namesToAttrs getSystemOutputs systems);
 
     # Sooner or later this should be implemented in nix itself, for now require »inputs.nixpkgs« and a system that can run »x86_64-linux« (native or through qemu).
     patchFlakeInputs = inputs: patches: outputs: let
         inherit ((import inputs.nixpkgs { overlays = [ ]; config = { }; system = "x86_64-linux"; }).pkgs) applyPatches fetchpatch;
     in outputs (builtins.mapAttrs (name: input: if name != "self" && patches?${name} && patches.${name} != [ ] then (let
         patched = applyPatches {
-            name = "${name}-patched"; src = "${input}";
+            name = "${name}-patched"; src = "${input.sourceInfo or input}";
             patches = map (patch: if patch ? url then fetchpatch patch else patch) patches.${name};
         };
-        sourceInfo = (input.sourceInfo or input) // patched;
+        sourceInfo = (builtins.removeAttrs (input.sourceInfo or input) [ "narHash"]) // patched; # (keeps (short)rev, which is not really correct)
+        dir = if input?sourceInfo.outPath && lib.hasPrefix input.outPath input.sourceInfo.outPath then lib.removePrefix input.sourceInfo.outPath input.outPath else ""; # this should work starting with nix version 2.14 (before, they are the same path)
     in (
-        # sourceInfo = { lastModified; narHash; rev; lastModifiedDate; outPath; shortRev; }
+        # sourceInfo = { lastModified; lastModifiedDate; narHash; outPath; rev?; shortRev?; }
         # A non-flake has only the attrs of »sourceInfo«.
         # A flake has »{ inputs; outputs; sourceInfo; } // outputs // sourceInfo«, where »inputs« is what's passed to the outputs function without »self«, and »outputs« is the result of calling the outputs function. Don't know the merge priority.
+        # Since nix v2.14, the direct »outPath« has the relative location of the »dir« containing the »flake.nix« as suffix (if not "").
         if (!input?sourceInfo) then sourceInfo else (let
-            outputs = (import "${patched.outPath}/flake.nix").outputs ({ self = sourceInfo // outputs; } // input.inputs);
-        in outputs // sourceInfo // { inherit (input) inputs; inherit outputs; inherit sourceInfo; })
+            outputs = (import "${patched.outPath}${dir}/flake.nix").outputs ({ self = sourceInfo // outputs; } // input.inputs);
+        in outputs // sourceInfo // { outPath = "${patched.outPath}${dir}"; inherit (input) inputs; inherit outputs; inherit sourceInfo; })
     )) else input) inputs);
 
     # Generates implicit flake outputs by importing conventional paths in the local repo. E.g.:
     # outputs = inputs@{ self, nixpkgs, wiplib, ... }: wiplib.lib.wip.importRepo inputs ./. (repo@{ overlays, lib, ... }: let ... in [ repo ... ])
-    importRepo = inputs: repoPath': outputs: let
-        repoPath = builtins.path { path = repoPath'; name = "source"; }; # referring to the current flake directory as »./.« is quite intuitive (and »inputs.self.outPath« causes infinite recursion), but without this it adds another hash to the path (because it copies it)
+    importRepo = inputs: flakePath': outputs: let
+        flakePath = builtins.path { path = flakePath'; name = "source"; }; # Referring to the current flake directory as »./.« is quite intuitive (and »inputs.self.outPath« causes infinite recursion), but without this it adds another hash to the path (because it copies it). For flakes with »dir != ""«, this includes only the ».« directory, making references to »./..« invalid, but ensuring that »./flake.nix« exists (there), and the below default paths are relative to that (and not whatever nix thought is the root of the repo).
+        # TODO: should _not_ do the above if it is not a direct store path
     in let result = (outputs (
-        (let it                = importWrapped inputs "${repoPath}/lib";      in if it.exists then {
+        (let it                = importWrapped inputs "${flakePath}/lib";      in if it.exists then {
             lib = it.result;
-        } else { }) // (let it = importWrapped inputs "${repoPath}/overlays"; in if it.exists then {
+        } else { }) // (let it = importWrapped inputs "${flakePath}/overlays"; in if it.exists then {
             overlays = { default = final: prev: builtins.foldl' (prev: overlay: prev // (overlay final prev)) prev (builtins.attrValues it.result); } // it.result;
-        } else { }) // (let it = importWrapped inputs "${repoPath}/modules";  in if it.exists then {
+        } else { }) // (let it = importWrapped inputs "${flakePath}/modules";  in if it.exists then {
             nixosModules = { default = { imports = builtins.attrValues it.result; }; } // it.result;
         } else { })
     )); in if (builtins.isList result) then mergeOutputs result else result;
@@ -50,9 +53,9 @@ in rec {
     #         # local: ./overlays/patches/nixpkgs-###.patch # (use long native path to having the path change if any of the other files in ./. change)
     #     ]; # ...
     # }; in inputs.wiplib.lib.wip.patchFlakeInputsAndImportRepo inputs patches ./. (inputs@{ self, nixpkgs, ... }: repo@{ nixosModules, overlays, lib, ... }: let ... in [ repo ... ])
-    patchFlakeInputsAndImportRepo = inputs: patches: repoPath: outputs: (
-        patchFlakeInputs inputs patches (inputs: importRepo inputs repoPath (outputs (inputs // {
-            self = inputs.self // { outPath = builtins.path { path = repoPath; name = "source"; }; }; # If the »flake.nix is in a sub dir of a repo, "${inputs.self}" would otherwise refer to the parent. (?)
+    patchFlakeInputsAndImportRepo = inputs: patches: flakePath: outputs: (
+        patchFlakeInputs inputs patches (inputs: importRepo inputs flakePath (outputs (inputs // {
+            self = inputs.self // { outPath = builtins.path { path = flakePath; name = "source"; }; }; # If the »flake.nix is in a sub dir of a repo, "${inputs.self}" would otherwise refer to the parent. (?)
         })))
     );
 
@@ -235,7 +238,7 @@ in rec {
     # Where »REPO« is the path to a flake repo using »mkSystemsFlake« for it's »apps« output, and »HOST« is the name of a host it defines.
     # If the first argument (after  »--«) is »sudo«, then the program will re-execute itself as root using sudo (minus that »sudo« argument).
     # If the (then) first argument is »bash«, or if there are no (more) arguments or options, it will execute an interactive shell with the variables and functions sourced.
-    # If an option »--command« is supplied, then the first argument evaluated as bash instructions, otherwise the first argument is called as a function (or program).
+    # If an option »--command« is supplied, then the first positional argument is `eval`ed as bash instructions, otherwise the first argument is called as a function (or program).
     # Either way, the remaining arguments and options have been parsed by »generic-arg-parse« and are available in »argv« and »args«.
     # Examples:
     # Install the host named »$target« to the image file »/tmp/system-$target.img«:
@@ -252,23 +255,21 @@ in rec {
     in pkgs.writeShellScript "scripts-${name}" ''
 
         # if first arg is »sudo«, re-execute this script with sudo (as root)
-        if [[ $1 == sudo ]] ; then shift ; exec sudo --preserve-env=SSH_AUTH_SOCK -- "$0" "$@" ; fi
+        if [[ ''${1:-} == sudo ]] ; then shift ; exec sudo --preserve-env=SSH_AUTH_SOCK -- "$0" "$@" ; fi
 
         # if the (now) first arg is »bash« or there are no args, re-execute this script as bash »--init-file«, starting an interactive bash in the context of the script
-        if [[ $1 == bash ]] || [[ $# == 0 && $0 == *-scripts-${name} ]] ; then
-            exec ${pkgs.bashInteractive}/bin/bash --init-file <(cat << "EOS"${"\n"+''
+        if [[ ''${1:-} == bash ]] || [[ $# == 0 && $0 == *-scripts-${name} ]] ; then
+            shift ; exec ${pkgs.bashInteractive}/bin/bash --init-file <(cat << "EOS"${"\n"+''
                 # prefix the script to also include the default init files
                 ! [[ -e /etc/profile ]] || . /etc/profile
                 for file in ~/.bash_profile ~/.bash_login ~/.profile ; do
                     if [[ -r $file ]] ; then . $file ; break ; fi
                 done ; unset $file
 
-                set -o pipefail -o nounset # (do not rely on errexit)
-                declare -A args=( ) ; declare -a argv=( ) # some functions expect these
                 # add active »hostName« to shell prompt
                 PS1=''${PS1/\\$/\\[\\e[93m\\](${name})\\[\\e[97m\\]\\$}
             ''}EOS
-            cat $0) -i
+            cat $0) -i -s ':' "$@"
         fi
 
         # provide installer tools (native to localSystem, not targetSystem)
@@ -291,11 +292,11 @@ in rec {
         # either call »argv[0]« with the remaining parameters as arguments, or if »$1« is »-c« eval »$2«.
         if [[ ''${args[debug]:-} || ''${args[trace]:-} ]] ; then set -x ; fi
         if [[ ''${args[command]:-} ]] ; then
-            command=''${argv[0]:?'With --command, the first positional argument must specify the commands to run.'}
-            argv=( "''${argv[@]:1}" ) ; set -- "''${argv[@]}" ; eval "$command"
+            command=''${argv[0]:?'With --command, the first positional argument must specify the commands to run.'} || exit
+            argv=( "''${argv[@]:1}" ) ; set -- "''${argv[@]}" ; eval "$command" || exit
         else
-            entry=''${argv[0]:?}
-            argv=( "''${argv[@]:1}" ) ; "$entry" "''${argv[@]}"
+            entry=''${argv[0]:?} || exit
+            argv=( "''${argv[@]:1}" ) ; "$entry" "''${argv[@]}" || exit
         fi
     '';
 

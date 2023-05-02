@@ -119,11 +119,16 @@ in {
         environment.shellAliases = {
 
             "with" = pkgs.writeShellScript "with" ''
-                help='Synopsys: With the Nix packages »PKGS« (as attribute path read from the imported »nixpkgs« specified on the »NIX_PATH«), run »CMD« with »ARGS«, or »bash --login« if no »CMD« is supplied.
-                Usage: with [-h] PKGS... [-- [CMD [ARGS...]]]'
+                help='Synopsys: With the Nix packages »PKGS« (as attribute path read from the imported »nixpkgs« specified on the »NIX_PATH«), run »CMD« with »ARGS«, or »bash --login« if no »CMD« is supplied. In the second form, »CMD« is the same as the last »PKGS« entry.
+                Usage: with [-h] PKGS... [-- [CMD [ARGS...]]]
+                       with [-h] PKGS... [. [ARGS...]]'
                 pkgs=( ) ; while (( "$#" > 0 )) ; do {
                     if [[ $1 == -h ]] ; then echo "$help" ; exit 0 ; fi
-                    if [[ $1 == -- ]] ; then shift ; break ; fi ; pkgs+=( "$1" )
+                    if [[ $1 == -- ]] ; then shift ; break ; fi
+                    if [[ $1 == . ]] ; then
+                        shift ; (( ''${#pkgs[@]} == 0 )) || set -- "''${pkgs[-1]}" "$@" ; break
+                    fi
+                    pkgs+=( "$1" )
                 } ; shift ; done
                 if (( ''${#pkgs[@]} == 0 )) ; then echo "$help" 1>&2 ; exit 1 ; fi
                 if (( "$#" == 0 )) ; then set -- bash --login ; fi

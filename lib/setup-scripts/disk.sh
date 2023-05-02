@@ -6,12 +6,12 @@
 ## Prepares the disks of the target system for the copying of files.
 function do-disk-setup { # 1: diskPaths
 
+    ensure-disks "$1" || return
     prompt-for-user-passwords || return
     populate-keystore || return
 
     mnt=/tmp/nixos-install-@{config.networking.hostName} && mkdir -p "$mnt" && prepend_trap "rmdir $mnt" EXIT || return # »mnt=/run/user/0/...« would be more appropriate, but »nixos-install« does not like the »700« permissions on »/run/user/0«
 
-    ensure-disks "$1" || return
     partition-disks || return
     create-luks-layers && open-luks-layers || return # other block layers would go here too (but figuring out their dependencies would be difficult)
     run-hook-script 'Post Partitioning' @{config.wip.fs.disks.postPartitionCommands!writeText.postPartitionCommands} || return
@@ -51,6 +51,7 @@ function ensure-disks { # 1: diskPaths, 2?: skipLosetup
     fi
 
     local name ; for name in "@{!config.wip.fs.disks.devices[@]}" ; do
+        if [[ ! @{config.wip.fs.disks.devices!catAttrSets.partitionDuringInstallation[$name]} ]] ; then continue ; fi
         if [[ ! ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name not provided" 1>&2 ; \return 1 ; fi
         eval 'local -A disk='"@{config.wip.fs.disks.devices[$name]}"
         if [[ ${blockDevs[$name]} != /dev/* ]] ; then
@@ -58,9 +59,9 @@ function ensure-disks { # 1: diskPaths, 2?: skipLosetup
             install -m 640 -T /dev/null "$outFile" && truncate -s "${disk[size]}" "$outFile" || return
             if [[ ${args[image-owner]:-} ]] ; then chown "${args[image-owner]}" "$outFile" || return ; fi
             if [[ ${2:-} ]] ; then continue ; fi
-            blockDevs[$name]=$( losetup --show -f "$outFile" ) && prepend_trap "losetup -d '${blockDevs[$name]}'" EXIT || return
+            blockDevs[$name]=$( @{native.util-linux}/bin/losetup --show -f "$outFile" ) && prepend_trap "@{native.util-linux}/bin/losetup -d '${blockDevs[$name]}'" EXIT || return
         else
-            local size=$( blockdev --getsize64 "${blockDevs[$name]}" || : ) ; local waste=$(( size - ${disk[size]} ))
+            local size=$( @{native.util-linux}/bin/blockdev --getsize64 "${blockDevs[$name]}" || : ) ; local waste=$(( size - ${disk[size]} ))
             if [[ ! $size ]] ; then echo "Block device $name does not exist at ${blockDevs[$name]}" 1>&2 ; \return 1 ; fi
             if (( waste < 0 )) ; then echo "Block device ${blockDevs[$name]}'s size $size is smaller than the size ${disk[size]} declared for $name" 1>&2 ; \return 1 ; fi
             if (( waste > 0 )) && [[ ! ${disk[allowLarger]:-} ]] ; then echo "Block device ${blockDevs[$name]}'s size $size is bigger than the size ${disk[size]} declared for $name" 1>&2 ; \return 1 ; fi
@@ -83,9 +84,10 @@ function partition-disks {
     done
 
     for name in "@{!config.wip.fs.disks.devices[@]}" ; do
+        if [[ ! @{config.wip.fs.disks.devices!catAttrSets.partitionDuringInstallation[$name]} ]] ; then continue ; fi
         eval 'local -A disk='"@{config.wip.fs.disks.devices[$name]}"
         if [[ ${disk[serial]:-} ]] ; then
-            actual=$( udevadm info --query=property --name="$blockDev" | grep -oP 'ID_SERIAL_SHORT=\K.*' || echo '<none>' )
+            actual=$( @{native.systemd}/bin/udevadm info --query=property --name="$blockDev" | grep -oP 'ID_SERIAL_SHORT=\K.*' || echo '<none>' )
             if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev's serial ($actual) does not match the serial (${disk[serial]}) declared for ${disk[name]}" 1>&2 ; \return 1 ; fi
         fi
         # can (and probably should) restore the backup:
@@ -96,7 +98,8 @@ function partition-disks {
     @{native.systemd}/bin/udevadm settle -t 15 || true # sometimes partitions aren't quite made available yet
 
     # ensure that filesystem creation does not complain about the devices already being occupied by a previous filesystem
-    wipefs --all "@{config.wip.fs.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" >$beLoud 2>$beSilent || return
+    local toWipe=( ) ; for part in "@{config.wip.fs.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" ; do [[ ! -e "$part" ]] || toWipe+=( "$part" ) ; done
+    @{native.util-linux}/bin/wipefs --all "${toWipe[@]}" >$beLoud 2>$beSilent || return
     #</dev/zero head -c 4096 | tee "@{config.wip.fs.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" >/dev/null
     #for part in "@{config.wip.fs.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" ; do @{native.util-linux}/bin/blkdiscard -f "$part" || return ; done
 }
@@ -190,7 +193,7 @@ function format-partitions {
         elif [[ $swapDev == /dev/mapper/* ]] ; then
             if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${swapDev/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device $swapDev used for SWAP does not point at one of the device mappings @{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" 1>&2 ; \return 1 ; fi
         else continue ; fi
-        ( ${_set_x:-:} ; mkswap "$swapDev" >$beLoud 2>$beSilent ) || return
+        ( PATH=@{native.util-linux}/bin ; ${_set_x:-:} ; mkswap "$swapDev" >$beLoud 2>$beSilent ) || return
     done
 }
 
@@ -204,7 +207,7 @@ function fix-grub-install {
             device=$( eval 'declare -A fs='"@{config.fileSystems[$mount]}" ; echo "${fs[device]}" )
             label=${device/\/dev\/disk\/by-partlabel\//}
             if [[ $label == "$device" || $label == *' '* || ' '@{config.wip.fs.disks.partitions!attrNames[@]}' ' != *' '$label' '* ]] ; then echo "" 1>&2 ; \return 1 ; fi
-            bootLoop=$( losetup --show -f /dev/disk/by-partlabel/$label ) || return ; prepend_trap "losetup -d $bootLoop" EXIT
+            bootLoop=$( @{native.util-linux}/bin/losetup --show -f /dev/disk/by-partlabel/$label ) || return ; prepend_trap "@{native.util-linux}/bin/losetup -d $bootLoop" EXIT
             ln -sfT ${bootLoop/\/dev/..\/..} /dev/disk/by-partlabel/$label || return
         done
         #umount $mnt/boot/grub || true ; umount $mnt/boot || true ; mount $mnt/boot || true ; mount $mnt/boot/grub || true
@@ -213,7 +216,7 @@ function fix-grub-install {
 
 
 ## Mounts all file systems as it would happen during boot, but at path prefix »$mnt« (instead of »/«).
-function mount-system {( set -eu # 1: mnt, 2?: fstabPath, 3?: allowFail
+function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowFail
     # While not generally required for fstab, nixos uses the dependency-sorted »config.system.build.fileSystems« list (instead of plain »builtins.attrValues config.fileSystems«) to generate »/etc/fstab« (provided »config.fileSystems.*.depends« is set correctly, e.g. for overlay mounts).
     # This function depends on the file at »fstabPath« to be sorted like that.
 
@@ -225,7 +228,7 @@ function mount-system {( set -eu # 1: mnt, 2?: fstabPath, 3?: allowFail
         if [[ ! $target || $target == none ]] ; then continue ; fi
         options=,$options, ; options=${options//,ro,/,}
 
-        if ! mountpoint -q "$mnt"/"$target" ; then (
+        if ! @{native.util-linux}/bin/mountpoint -q "$mnt"/"$target" ; then (
             mkdir -p "$mnt"/"$target" || exit
             [[ $type == tmpfs || $type == auto || $type == */* ]] || @{native.kmod}/bin/modprobe --quiet $type || true # (this does help sometimes)
 
@@ -241,19 +244,19 @@ function mount-system {( set -eu # 1: mnt, 2?: fstabPath, 3?: allowFail
                 source=$mnt/$source ; if [[ ! -e $source ]] ; then mkdir -p "$source" || exit ; fi
             fi
 
-            mount -t $type -o "${options:1:(-1)}" "$source" "$mnt"/"$target" || exit
+            @{native.util-linux}/bin/mount -t $type -o "${options:1:(-1)}" "$source" "$mnt"/"$target" || exit
 
         ) || [[ $options == *,nofail,* || $allowFail ]] || exit ; fi # (actually, nofail already makes mount fail silently)
     done 3< <( <$fstabPath grep -v '^#' )
 )}
 
 ## Unmounts all file systems (that would be mounted during boot / by »mount-system«).
-function unmount-system {( set -eu # 1: mnt, 2?: fstabPath
-    mnt=$1 ; fstabPath=${2:-"@{config.system.build.toplevel}/etc/fstab"}
+function unmount-system { # 1: mnt, 2?: fstabPath
+    local mnt=$1 ; local fstabPath=${2:-"@{config.system.build.toplevel}/etc/fstab"}
     while read -u3 source target rest ; do
         if [[ ! $target || $target == none ]] ; then continue ; fi
-        if mountpoint -q "$mnt"/"$target" ; then
-            umount "$mnt"/"$target"
+        if @{native.util-linux}/bin/mountpoint -q "$mnt"/"$target" ; then
+            @{native.util-linux}/bin/umount "$mnt"/"$target" || return
         fi
     done 3< <( { <$fstabPath grep -v '^#' ; echo ; } | tac )
-)}
+}

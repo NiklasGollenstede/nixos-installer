@@ -33,6 +33,7 @@ in {
                     t;1;c  # type ; part1 ; W95 FAT32 (LBA)
                     a;1    # active/boot ; part1
                 ''; };
+                partitionDuringInstallation = (lib.mkEnableOption "partitioning of this disk during system installation. If disabled, the disk needs be partitioned, and its filesystems formatted, already or manually. Declaring filesystems or LUKS mappings on unpartitioned devices via `/dev/disk/by-partlabel/...` will currently break the installation.") // { default = true; };
             }; })));
             default = { primary = { }; };
             apply = lib.filterAttrs (k: v: v != null);

@@ -4,27 +4,27 @@
 ##
 
 ## On the host and for the user it is called by, creates/registers a VirtualBox VM meant to run the shells target host. Requires the path to the target host's »diskImage« as the result of running the install script. The image file may not be deleted or moved. If »bridgeTo« is set (to a host interface name, e.g. as »eth0«), it is added as bridged network "Adapter 2" (which some hosts need).
-function register-vbox {( set -eu # 1: diskImages, 2?: bridgeTo
+function register-vbox {( # 1: diskImages, 2?: bridgeTo
     diskImages=$1 ; bridgeTo=${2:-}
     vmName="nixos-@{config.networking.hostName}"
-    VBoxManage=$( PATH=$hostPath which VBoxManage ) # The host is supposed to run these anyway, and »pkgs.virtualbox« is marked broken on »aarch64«.
+    VBoxManage=$( PATH=$hostPath which VBoxManage ) || exit # The host is supposed to run these anyway, and »pkgs.virtualbox« is marked broken on »aarch64«.
 
-    $VBoxManage createvm --name "$vmName" --register --ostype Linux26_64
-    $VBoxManage modifyvm "$vmName" --memory 2048 --pae off --firmware efi
+    $VBoxManage createvm --name "$vmName" --register --ostype Linux26_64 || exit
+    $VBoxManage modifyvm "$vmName" --memory 2048 --pae off --firmware efi || exit
 
-    $VBoxManage storagectl "$vmName" --name SATA --add sata --portcount 4 --bootable on --hostiocache on
+    $VBoxManage storagectl "$vmName" --name SATA --add sata --portcount 4 --bootable on --hostiocache on || exit
 
     index=0 ; for decl in ${diskImages//:/ } ; do
         diskImage=${decl/*=/}
         if [[ ! -e $diskImage.vmdk ]] ; then
-            $VBoxManage internalcommands createrawvmdk -filename $diskImage.vmdk -rawdisk $diskImage # pass-through
+            $VBoxManage internalcommands createrawvmdk -filename $diskImage.vmdk -rawdisk $diskImage || exit # pass-through
             #VBoxManage convertfromraw --format VDI $diskImage $diskImage.vmdk && rm $diskImage # convert
         fi
-        $VBoxManage storageattach "$vmName" --storagectl SATA --port $(( index++ )) --device 0 --type hdd --medium $diskImage.vmdk
+        $VBoxManage storageattach "$vmName" --storagectl SATA --port $(( index++ )) --device 0 --type hdd --medium $diskImage.vmdk || exit
     done
 
     if [[ $bridgeTo ]] ; then # VBoxManage list bridgedifs
-        $VBoxManage modifyvm "$vmName" --nic2 bridged --bridgeadapter2 $bridgeTo
+        $VBoxManage modifyvm "$vmName" --nic2 bridged --bridgeadapter2 $bridgeTo || exit
     fi
 
     # The serial settings between qemu and vBox seem incompatible. With a simple »console=ttyS0«, vBox hangs on start. So just disable this for now an use qemu for headless setups. The UX here is awful anyway.
@@ -80,7 +80,7 @@ function run-qemu { # 1: diskImages, ...: qemuArgs
         #qemu+=( -bios ${ovmf}/FV/OVMF.fd ) # This works, but is a legacy fallback that stores the EFI vars in /NvVars on the EFI partition (which is really bad).
         local fwName=OVMF ; if [[ @{pkgs.system} == aarch64-* ]] ; then fwName=AAVMF ; fi # fwName=QEMU
         qemu+=( -drive file=${ovmf}/FV/${fwName}_CODE.fd,if=pflash,format=raw,unit=0,readonly=on )
-        local efiVars=${args[efi-vars]:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/qemu-@{outputName:-@{config.system.name}}-VARS.fd}
+        local efiVars=${args[efi-vars]:-"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/qemu-@{outputName:-@{config.system.name}}-VARS.fd"}
         qemu+=( -drive file="$efiVars",if=pflash,format=raw,unit=1 )
         if [[ ! -e "$efiVars" ]] ; then mkdir -pm700 "$( dirname "$efiVars" )" ; cat ${ovmf}/FV/${fwName}_VARS.fd >"$efiVars" || return ; fi
         # https://lists.gnu.org/archive/html/qemu-discuss/2018-04/msg00045.html
@@ -157,26 +157,26 @@ function run-qemu { # 1: diskImages, ...: qemuArgs
 
 ## Creates a random static key on a new key partition on the GPT partitioned »$blockDev«. The drive can then be used as headless but removable disk unlock method.
 #  To create/clear the GPT: $ sgdisk --zap-all "$blockDev"
-function add-bootkey-to-keydev {( set -eu # 1: blockDev, 2?: hostHash
-    blockDev=$1 ; hostHash=${2:-@{config.networking.hostName!hashString.sha256}}
-    bootkeyPartlabel=bootkey-${hostHash:0:8}
-    @{native.gptfdisk}/bin/sgdisk --new=0:0:+1 --change-name=0:"$bootkeyPartlabel" --typecode=0:0000 "$blockDev" # create new 1 sector (512b) partition
-    @{native.parted}/bin/partprobe "$blockDev" ; @{native.systemd}/bin/udevadm settle -t 15 # wait for partitions to update
-    </dev/urandom tr -dc 0-9a-f | head -c 512 >/dev/disk/by-partlabel/"$bootkeyPartlabel"
-)}
+function add-bootkey-to-keydev { # 1: blockDev, 2?: hostHash
+    local blockDev=$1 ; local hostHash=${2:-@{config.networking.hostName!hashString.sha256}}
+    local bootkeyPartlabel=bootkey-${hostHash:0:8}
+    @{native.gptfdisk}/bin/sgdisk --new=0:0:+1 --change-name=0:"$bootkeyPartlabel" --typecode=0:0000 "$blockDev" || exit # create new 1 sector (512b) partition
+    @{native.parted}/bin/partprobe "$blockDev" && @{native.systemd}/bin/udevadm settle -t 15 || exit # wait for partitions to update
+    </dev/urandom tr -dc 0-9a-f | head -c 512 >/dev/disk/by-partlabel/"$bootkeyPartlabel" || exit
+}
 
 ## Tries to open and mount the systems keystore from its LUKS partition. If successful, adds the traps to close it when the parent shell exits.
+#  For the exit traps to trigger on exit from the calling script / shell, this can't run in a sub shell (and therefore can't be called from a pipeline).
 #  See »open-system«'s implementation for some example calls to this function.
 function mount-keystore-luks { # ...: cryptsetupOptions
-    # (For the traps to work, this can't run in a sub shell. The function therefore can't use »( set -eu ; ... )« internally and instead has to use »&&« after every command and in place of most »;«, and the function can't be called from a pipeline.)
     local keystore=keystore-@{config.networking.hostName!hashString.sha256:0:8}
     mkdir -p -- /run/$keystore && prepend_trap "[[ ! -e /run/$keystore ]] || rmdir /run/$keystore" EXIT || return
     @{native.cryptsetup}/bin/cryptsetup open "$@" /dev/disk/by-partlabel/$keystore $keystore && prepend_trap "@{native.cryptsetup}/bin/cryptsetup close $keystore" EXIT || return
-    mount -o nodev,umask=0077,fmask=0077,dmask=0077,ro /dev/mapper/$keystore /run/$keystore && prepend_trap "umount /run/$keystore" EXIT || return
+    @{native.util-linux}/bin/mount -o nodev,umask=0077,fmask=0077,dmask=0077,ro /dev/mapper/$keystore /run/$keystore && prepend_trap "@{native.util-linux}/bin/umount /run/$keystore" EXIT || return
 }
 
 ## Performs any steps necessary to mount the target system at »/tmp/nixos-install-@{config.networking.hostName}« on the current host.
-#  For any steps taken, it also adds the steps to undo them on exit from the calling shell, and it always adds the exit trap to do the unmounting itself.
+#  For any steps taken, it also adds the steps to undo them on exit from the calling shell (so don't call this from a sub-shell that exits too early).
 #  »diskImages« may be passed in the same format as to the installer. If so, any image files are ensured to be loop-mounted.
 #  Perfect to inspect/update/amend/repair a system's installation afterwards, e.g.:
 #  $ source ${config_wip_fs_disks_initSystemCommands1writeText_initSystemCommands}
@@ -185,23 +185,20 @@ function mount-keystore-luks { # ...: cryptsetupOptions
 #  $ nixos-install --system ${config_system_build_toplevel} --no-root-passwd --no-channel-copy --root $mnt
 #  $ nixos-enter --root $mnt
 function open-system { # 1?: diskImages
-    # (for the traps to work, this can't run in a sub shell, so also can't »set -eu«, so use »&&« after every command and in place of most »;«)
-
     local diskImages=${1:-} # If »diskImages« were specified and they point at files that aren't loop-mounted yet, then loop-mount them now:
-    local images=$( losetup --list --all --raw --noheadings --output BACK-FILE )
+    local images=$( @{native.util-linux}/bin/losetup --list --all --raw --noheadings --output BACK-FILE )
     local decl ; for decl in ${diskImages//:/ } ; do
         local image=${decl/*=/} ; if [[ $image != /dev/* ]] && ! <<<$images grep -xF $image ; then
-            local blockDev=$( losetup --show -f "$image" ) && prepend_trap "losetup -d '$blockDev'" EXIT || return
+            local blockDev=$( @{native.util-linux}/bin/losetup --show -f "$image" ) && prepend_trap "@{native.util-linux}/bin/losetup -d '$blockDev'" EXIT || return
             @{native.parted}/bin/partprobe "$blockDev" || return
-
         fi
     done
     @{native.systemd}/bin/udevadm settle -t 15 || true # sometimes partitions aren't quite made available yet
 
     if [[ @{config.wip.fs.keystore.enable} && ! -e /dev/mapper/keystore-@{config.networking.hostName!hashString.sha256:0:8} ]] ; then # Try a bunch of approaches for opening the keystore:
-        mount-keystore-luks --key-file=<( printf %s "@{config.networking.hostName}" ) ||
-        mount-keystore-luks --key-file=/dev/disk/by-partlabel/bootkey-@{config.networking.hostName!hashString.sha256:0:8} ||
-        mount-keystore-luks --key-file=<( read -s -p PIN: pin && echo ' touch!' >&2 && ykchalresp -2 "$pin" ) ||
+        mount-keystore-luks --key-file=<( printf %s "@{config.networking.hostName}" ) || return
+        mount-keystore-luks --key-file=/dev/disk/by-partlabel/bootkey-@{config.networking.hostName!hashString.sha256:0:8} || return
+        mount-keystore-luks --key-file=<( read -s -p PIN: pin && echo ' touch!' >&2 && @{native.yubikey-personalization}/bin/ykchalresp -2 "$pin" ) || return
         # TODO: try static yubikey challenge
         mount-keystore-luks || return
     fi
@@ -212,12 +209,13 @@ function open-system { # 1?: diskImages
     open-luks-layers || return # Load crypt layers and zfs pools:
     if [[ $( LC_ALL=C type -t ensure-datasets ) == 'function' ]] ; then
         local poolName ; for poolName in "@{!config.wip.fs.zfs.pools[@]}" ; do
-            if ! zfs get -o value -H name "$poolName" &>/dev/null ; then
-                zpool import -f -N -R "$mnt" "$poolName" ; prepend_trap "zpool export '$poolName'" EXIT || return
+            if [[ ! @{config.wip.fs.zfs.pools!catAttrSets.createDuringInstallation[$poolName]} ]] ; then continue ; fi
+            if ! @{native.zfs}/bin/zfs get -o value -H name "$poolName" &>/dev/null ; then
+                @{native.zfs}/bin/zpool import -f -N -R "$mnt" "$poolName" && prepend_trap "@{native.zfs}/bin/zpool export '$poolName'" EXIT || return
             fi
-            : | zfs load-key -r "$poolName" || true
+            : | @{native.zfs}/bin/zfs load-key -r "$poolName" || true
+            ensure-datasets "$mnt" '^'"$poolName"'($|[/])' || return
         done
-        ensure-datasets "$mnt" || return
     fi
 
     prepend_trap "unmount-system '$mnt'" EXIT && mount-system "$mnt" '' 1 || return

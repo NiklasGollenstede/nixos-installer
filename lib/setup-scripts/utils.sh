@@ -93,18 +93,30 @@ function prompt-new-password {( set -u # 1: usage
 )}
 
 ## Runs an installer hook script, optionally stepping through the script.
-function run-hook-script {( set -eu # 1: title, 2: scriptPath
+function run-hook-script {( # 1: title, 2: scriptPath
     trap - EXIT # start with empty traps for sub-shell
     if [[ ${args[inspectScripts]:-} && "$(cat "$2")" != $'' ]] ; then
         echo "Running $1 commands. For each command printed, press Enter to continue or Ctrl+C to abort the installation:" 1>&2
         # (this does not help against intentionally malicious scripts, it's quite easy to trick this)
         BASH_PREV_COMMAND= ; set -o functrace ; trap 'if [[ $BASH_COMMAND != "$BASH_PREV_COMMAND" ]] ; then echo -n "> $BASH_COMMAND" >&2 ; read ; fi ; BASH_PREV_COMMAND=$BASH_COMMAND' debug
     fi
+    set -e # The called script snippets should not rely on this, but neither should this function rely on the scripts correctly exiting on errors.
     source "$2"
 )}
 
 ## Lazily builds a nix derivation at run time, instead of when building the script.
 #  When maybe-using packages that take long to build, instead of »at{some.package.out}«, use: »$( build-lazy at{some.package.drvPath!unsafeDiscardStringContext} out )«
 function build-lazy { # 1: drvPath, 2?: output
-    PATH=$PATH:@{native.openssh}/bin @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --json ${args[quiet]:+--quiet} $1 | @{native.jq}/bin/jq -r .[0].outputs.${2:-out}
+    # Nix v2.14 introduced a new syntax for selecting the output of multi-output derivations, v2.15 then changed the default when passing the path to an on-disk derivation. »--print-out-paths« is also not available in older versions.
+    if version-gr-eq "@{native.nix.version}" '2.14' ; then
+        PATH=$PATH:@{native.openssh}/bin @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --print-out-paths ${args[quiet]:+--quiet} "$1"'^'"${2:-out}"
+    else
+        PATH=$PATH:@{native.openssh}/bin @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --json ${args[quiet]:+--quiet} "$1" | @{native.jq}/bin/jq -r .[0].outputs."${2:-out}"
+    fi
 }
+
+## Tests whether (returns 0/success if) the first version argument is greater/less than (or equal) the second version argument.
+function version-gr-eq { printf '%s\n%s' "$1" "$2" | sort -C -V -r; }
+function version-lt-eq { printf '%s\n%s' "$1" "$2" | sort -C -V ; }
+function version-gt { ! version-gt-eq "$2" "$1" ; }
+function version-lt { ! version-lt-eq "$2" "$1" ; }

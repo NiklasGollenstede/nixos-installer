@@ -92,7 +92,7 @@ in let module = {
             fs.disks.partitions."keystore-${hash}" = { type = lib.mkDefault "8309"; order = lib.mkDefault 1375; disk = lib.mkDefault "primary"; size = lib.mkDefault "32M"; };
             fs.disks.postFormatCommands = ''
                 ( : 'Copy the live keystore to its primary persistent location:'
-                    tmp=$(mktemp -d) ; mount "/dev/mapper/keystore-${hash}" $tmp ; trap "umount $tmp ; rmdir $tmp" EXIT
+                    tmp=$(mktemp -d) && ${pkgs.util-linux}/bin/mount "/dev/mapper/keystore-${hash}" $tmp && trap "${pkgs.util-linux}/bin/umount $tmp && rmdir $tmp" EXIT &&
                     ${pkgs.rsync}/bin/rsync -a ${keystore}/ $tmp/
                 )
             '';

@@ -9,10 +9,10 @@ Any script passed later in `scripts` can overwrite the functions of these (earli
 
 With the functions from here, [a simple three-liner](./install.sh) is enough to do a completely automated NixOS installation:
 ```bash
-function install-system {( set -eu # 1: diskPaths
-    prepare-installer "$@"
-    do-disk-setup "${argv[0]}"
-    install-system-to $mnt
+function install-system {( # 1: diskPaths
+    prepare-installer "$@" || exit
+    do-disk-setup "${argv[0]}" || exit
+    install-system-to $mnt || exit
 )}
 ```
 

@@ -4,6 +4,9 @@ in rec {
 
     ## Data Structures
 
+    ## Given a function mapping a name to its value and a list of names, generate that mapping as attribute set. (This is the same as »lib.attrsets.genAttrs« with swapped arguments.)
+    namesToAttrs = toValue: names: builtins.listToAttrs (map (name: { inherit name; value = toValue name; }) names);
+
     # Given a function and a list, calls the function for each list element, and returns the merge of all attr sets returned by the function
     # attrs = mapMerge (value: { "${newKey}" = newValue; }) list
     # attrs = mapMerge (key: value: { "${newKey}" = newValue; }) attrs
@@ -43,9 +46,9 @@ in rec {
     flipNames = attrs: let
         l1names = builtins.attrNames attrs;
         l2names = builtins.concatMap builtins.attrNames (builtins.attrValues attrs);
-    in mapMerge (l2name: {
-        ${l2name} = mapMerge (l1name: if attrs.${l1name}?${l2name} then { ${l1name} = attrs.${l1name}.${l2name}; } else { }) l1names;
-    }) l2names;
+    in namesToAttrs (l2name: (
+        mapMerge (l1name: if attrs.${l1name}?${l2name} then { ${l1name} = attrs.${l1name}.${l2name}; } else { }) l1names
+    )) l2names;
 
     # Like »builtins.catAttrs«, just for attribute sets instead of lists: Given an attribute set of attribute sets (»{ ${l1name}.${l2name} = value; }«) and the »name« of a second-level attribute, this returns the attribute set mapping directly from the first level's names to the second-level's values (»{ ${l1name} = value; }«), omitting any first-level attributes that lack the requested second-level attribute.
     catAttrSets = name: attrs: (builtins.mapAttrs (_: value: value.${name}) (lib.filterAttrs (_: value: value?${name}) attrs));

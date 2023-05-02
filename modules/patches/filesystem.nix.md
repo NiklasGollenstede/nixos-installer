@@ -14,7 +14,11 @@ in {
 
     options = {
         fileSystems = lib.mkOption { type = lib.types.attrsOf (lib.types.submodule [ { options = {
-            preMountCommands = lib.mkOption { description = "Commands to be run as root every time before mounting this filesystem, but after all its dependents were mounted (TODO: or does this run just once per boot?). This does not order itself before or after `systemd-fsck@\${utils.escapeSystemdPath device}.service`."; type = lib.types.lines; default = ""; };
+            preMountCommands = lib.mkOption { description = ''
+                Commands to be run as root every time before mounting this filesystem, but after all its dependents were mounted (TODO: or does this run just once per boot?).
+                This does not order itself before or after `systemd-fsck@''${utils.escapeSystemdPath device}.service`.
+                Note that if a symlink exists at a mount point when systemd's fstab-generator runs, it will read/resolve the symlink and use that as the mount point, resulting in mismatching unit names for that mount, effectively disabling its `preMountCommands`.
+            ''; type = lib.types.lines; default = ""; };
         }; } ]);
     }; };
 

@@ -138,11 +138,11 @@ in let hostModule = {
         fileSystems = lib.mkVMOverride {
             "/nix/var/nix/db.lower" = {
                 fsType = "9p"; device = "nix-var-nix-db"; neededForBoot = true;
-                options = [ "trans=virtio" "version=9p2000.L"  "msize=65536" "ro" ];
+                options = [ "trans=virtio" "version=9p2000.L"  "msize=4194304" "ro" ];
             };
-            "/nix/store".options = lib.mkAfter [ "ro" "msize=65536" ];
+            "/nix/store".options = lib.mkAfter [ "ro" "msize=4194304" ];
             "/nix/store".mountPoint = "/nix/store.lower";
-        }; # mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=65536 nix-var-nix-db /nix/var/nix/db
+        }; # mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 nix-var-nix-db /nix/var/nix/db
         virtualisation.qemu.options = [ "-virtfs local,path=/nix/var/nix/db,security_model=none,mount_tag=nix-var-nix-db,readonly=on" ]; # (doing this manually to pass »readonly«, to not ever corrupt the host's Nix DBs)
 
     }) ({
@@ -155,9 +155,9 @@ in let hostModule = {
 
     }) ({
 
-        virtualisation = if (lib.fileContents "${pkgs.path}/.version") > "22.05" then { host.pkgs = pkgs.buildPackages; } else { };
+        virtualisation = if (builtins.substring 0 5 pkgs.lib.version) > "22.05" then { host.pkgs = pkgs.buildPackages; } else { };
     }) ({
-        virtualisation.qemu.package = lib.mkIf (pkgs.buildPackages.system != pkgs.system) cfg.virtualisation.host.pkgs.qemu_full;
+        virtualisation.qemu.package = lib.mkIf (pkgs.buildPackages.system != pkgs.system) (cfg.virtualisation.host or { pkgs = pkgs.buildPackages; }).pkgs.qemu_full;
 
     }) ({
 

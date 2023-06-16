@@ -3,8 +3,10 @@
 # NixOS Maintenance
 ##
 
-## On the host and for the user it is called by, creates/registers a VirtualBox VM meant to run the shells target host. Requires the path to the target host's »diskImage« as the result of running the install script. The image file may not be deleted or moved. If »bridgeTo« is set (to a host interface name, e.g. as »eth0«), it is added as bridged network "Adapter 2" (which some hosts need).
-function register-vbox {( # 1: diskImages, 2?: bridgeTo
+declare-command register-vbox diskImages bridgeTo? << 'EOD'
+On the host and for the user it is called by, creates/registers a VirtualBox VM meant to run the shells target host. Requires the path to the target host's »diskImage« as the result of running the install script. The image file may not be deleted or moved. If »bridgeTo« is set (to a host interface name, e.g. as »eth0«), it is added as bridged network "Adapter 2" (which some hosts need).
+EOD
+function register-vbox {(
     diskImages=$1 ; bridgeTo=${2:-}
     vmName="nixos-@{config.networking.hostName}"
     VBoxManage=$( PATH=$hostPath which VBoxManage ) || exit # The host is supposed to run these anyway, and »pkgs.virtualbox« is marked broken on »aarch64«.
@@ -45,10 +47,27 @@ function register-vbox {( # 1: diskImages, 2?: bridgeTo
     echo " ssh $(@{native.inetutils}/bin/hostname) VBoxManage controlvm $vmName screenshotpng /dev/stdout | display"
 )}
 
-## Runs a host in QEMU, taking the same disk specification as the installer. It infers a number of options from he target system's configuration.
-#  Currently, this only works for x64 (on x64) ...
-function run-qemu { # 1: diskImages, ...: qemuArgs
-    if [[ ${args[install]:-} && ! ${argv[0]:-} ]] ; then argv[0]=/tmp/nixos-vm/@{outputName:-@{config.system.name}}/ ; fi
+declare-command run-qemu diskImages qemuArgs... << 'EOD'
+Runs a host in a QEMU VM, directly from its bootable disks, without requiring any change in it's configuration.
+This function infers many qemu options from the target system's configuration and the current host system.
+»diskImages« may be passed in the same format as to the installer. Any image files passed are ensured to be loop-mounted. »root« may also pass device paths.
+EOD
+declare-flag run-qemu dry-run           "" "Instead of running the (main) qemu (and install) command, only print it."
+declare-flag run-qemu efi               "" "Treat the target system as EFI system, even if not recognized as such automatically."
+declare-flag run-qemu efi-vars      "path" "For »--efi« systems, path to a file storing the EFI variables. The default is in »XDG_RUNTIME_DIR«, i.e. it does not persist across host reboots."
+declare-flag run-qemu graphic           "" "Open a graphical window even of the target system logs to serial and not (explicitly) TTY1."
+declare-flag run-qemu install   "[always]" "If any of the guest system's disk images does not exist, perform the its installation before starting the VM. If set to »always«, always install before starting the VM. With this flag set, »diskImages« defaults to paths in »/tmp/."
+declare-flag run-qemu mem            "num" "VM RAM in MiB (»qemu -m«)."
+declare-flag run-qemu nat-fw    "forwards" "Port forwards to the guest's NATed NIC. E.g: »--nat-fw=:8000-:8000,:8001-:8001,127.0.0.1:2022-:22«."
+declare-flag run-qemu no-kvm            "" "Do not rey to use (or complain about the unavailability of) KVM."
+declare-flag run-qemu no-nat            "" "Do not provide a NATed NIC to the guest."
+declare-flag run-qemu no-serial         "" "Do not connect the calling terminal to a serial adapter the guest can log to and open a terminal on the guests serial, as would be the default if the guests logs to ttyS0."
+declare-flag run-qemu share        "decls" "Host dirs to make available as network shares for the guest, as space separated list of »name:host-path,options. E.g. »--share='foo:/home/user/foo,readonly=on bar:/tmp/bar«. In the VM hte share can be mounted with: »$ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo«."
+declare-flag run-qemu smp            "num" "Number of guest CPU cores."
+declare-flag run-qemu usb-port      "path" "A physical USB port (or hub) to pass to the guest (e.g. a YubiKey for unlocking). Specified as »<bus>-<port>«, where bus and port refer to the physical USB port »/sys/bus/usb/devices/<bus>-<port>« (see »lsusb -tvv«). E.g.: »--usb-port=3-1.1.1.4«."
+declare-flag run-qemu virtio-blk        "" "Pass the system's disks/images as virtio disks, instead of using AHCI+IDE. Default iff »boot.initrd.availableKernelModules« includes »virtio_blk« (because it requires that driver)."
+function run-qemu {
+    if [[ ${args[install]:-} && ! ${argv[0]:-} ]] ; then argv[0]=/tmp/nixos-vm/@{config.installer.outputName:-@{config.system.name}}/ ; fi
     diskImages=${argv[0]:?} ; argv=( "${argv[@]:1}" )
 
     local qemu=( )
@@ -66,7 +85,7 @@ function run-qemu { # 1: diskImages, ...: qemuArgs
             qemu+=( -machine accel=tcg ) # this may suppress warnings that qemu is using tcg (slow) instead of kvm
         fi
     else
-        qemu=( $( build-lazy @{native.qemu_full.drvPath!unsafeDiscardStringContext} )/bin/qemu-system-@{config.wip.preface.hardware} ) || return
+        qemu=( $( build-lazy @{native.qemu_full.drvPath!unsafeDiscardStringContext} )/bin/qemu-system-@{pkgs.system%%-linux} ) || return
     fi
     if [[ @{pkgs.system} == aarch64-* ]] ; then
         qemu+=( -machine type=virt ) # aarch64 has no default, but this seems good
@@ -80,17 +99,17 @@ function run-qemu { # 1: diskImages, ...: qemuArgs
         #qemu+=( -bios ${ovmf}/FV/OVMF.fd ) # This works, but is a legacy fallback that stores the EFI vars in /NvVars on the EFI partition (which is really bad).
         local fwName=OVMF ; if [[ @{pkgs.system} == aarch64-* ]] ; then fwName=AAVMF ; fi # fwName=QEMU
         qemu+=( -drive file=${ovmf}/FV/${fwName}_CODE.fd,if=pflash,format=raw,unit=0,readonly=on )
-        local efiVars=${args[efi-vars]:-"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/qemu-@{outputName:-@{config.system.name}}-VARS.fd"}
+        local efiVars=${args[efi-vars]:-"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/qemu-@{config.installer.outputName:-@{config.system.name}}-VARS.fd"}
         qemu+=( -drive file="$efiVars",if=pflash,format=raw,unit=1 )
         if [[ ! -e "$efiVars" ]] ; then mkdir -pm700 "$( dirname "$efiVars" )" ; cat ${ovmf}/FV/${fwName}_VARS.fd >"$efiVars" || return ; fi
         # https://lists.gnu.org/archive/html/qemu-discuss/2018-04/msg00045.html
     fi
-#   if [[ @{config.wip.preface.hardware} == aarch64 ]] ; then
+#   if [[ @{pkgs.system} == aarch64-* ]] ; then
 #       qemu+=( -kernel @{config.system.build.kernel}/Image -initrd @{config.system.build.initialRamdisk}/initrd -append "$(echo -n "@{config.boot.kernelParams[@]}")" )
 #   fi
 
     if [[ $diskImages == */ ]] ; then
-        disks=( ${diskImages}primary.img ) ; for name in "@{!config.wip.fs.disks.devices[@]}" ; do if [[ $name != primary ]] ; then disks+=( ${diskImages}${name}.img ) ; fi ; done
+        disks=( ${diskImages}primary.img ) ; for name in "@{!config.setup.disks.devices[@]}" ; do if [[ $name != primary ]] ; then disks+=( ${diskImages}${name}.img ) ; fi ; done
     else disks=( ${diskImages//:/ } ) ; fi
 
     [[ ' '"@{boot.initrd.availableKernelModules[@]}"' ' != *' 'virtio_blk' '* ]] || args[virtio-blk]=1
@@ -155,9 +174,11 @@ function run-qemu { # 1: diskImages, ...: qemuArgs
     # https://askubuntu.com/questions/54814/how-can-i-ctrl-alt-f-to-get-to-a-tty-in-a-qemu-session
 }
 
-## Creates a random static key on a new key partition on the GPT partitioned »$blockDev«. The drive can then be used as headless but removable disk unlock method.
-#  To create/clear the GPT: $ sgdisk --zap-all "$blockDev"
-function add-bootkey-to-keydev { # 1: blockDev, 2?: hostHash
+declare-command add-bootkey-to-keydev blockDev << 'EOD'
+Creates a random static key on a new key partition on the GPT partitioned »$blockDev«. The drive can then be used as headless but removable disk unlock method.
+To create/clear the GPT beforehand, run: $ sgdisk --zap-all "$blockDev"
+EOD
+function add-bootkey-to-keydev {
     local blockDev=$1 ; local hostHash=${2:-@{config.networking.hostName!hashString.sha256}}
     local bootkeyPartlabel=bootkey-${hostHash:0:8}
     @{native.gptfdisk}/bin/sgdisk --new=0:0:+1 --change-name=0:"$bootkeyPartlabel" --typecode=0:0000 "$blockDev" || exit # create new 1 sector (512b) partition
@@ -165,26 +186,29 @@ function add-bootkey-to-keydev { # 1: blockDev, 2?: hostHash
     </dev/urandom tr -dc 0-9a-f | head -c 512 >/dev/disk/by-partlabel/"$bootkeyPartlabel" || exit
 }
 
-## Tries to open and mount the systems keystore from its LUKS partition. If successful, adds the traps to close it when the parent shell exits.
-#  For the exit traps to trigger on exit from the calling script / shell, this can't run in a sub shell (and therefore can't be called from a pipeline).
-#  See »open-system«'s implementation for some example calls to this function.
-function mount-keystore-luks { # ...: cryptsetupOptions
+declare-command mount-keystore-luks cryptsetupOptions... << 'EOD'
+Tries to open and mount the systems keystore from its LUKS partition. If successful, this also adds the traps to close the keystore when the parent shell exits (so this is not useful as a standalone »COMMAND«, use the »bash« or »--command« options).
+For the exit traps to trigger on exit from the calling script / shell, this can't run in a sub shell (and therefore can't be called from a pipeline).
+See »open-system«'s implementation for some example calls to this function.
+EOD
+function mount-keystore-luks {
     local keystore=keystore-@{config.networking.hostName!hashString.sha256:0:8}
     mkdir -p -- /run/$keystore && prepend_trap "[[ ! -e /run/$keystore ]] || rmdir /run/$keystore" EXIT || return
     @{native.cryptsetup}/bin/cryptsetup open "$@" /dev/disk/by-partlabel/$keystore $keystore && prepend_trap "@{native.cryptsetup}/bin/cryptsetup close $keystore" EXIT || return
     @{native.util-linux}/bin/mount -o nodev,umask=0077,fmask=0077,dmask=0077,ro /dev/mapper/$keystore /run/$keystore && prepend_trap "@{native.util-linux}/bin/umount /run/$keystore" EXIT || return
 }
 
-## Performs any steps necessary to mount the target system at »/tmp/nixos-install-@{config.networking.hostName}« on the current host.
-#  For any steps taken, it also adds the steps to undo them on exit from the calling shell (so don't call this from a sub-shell that exits too early).
-#  »diskImages« may be passed in the same format as to the installer. If so, any image files are ensured to be loop-mounted.
-#  Perfect to inspect/update/amend/repair a system's installation afterwards, e.g.:
-#  $ source ${config_wip_fs_disks_initSystemCommands1writeText_initSystemCommands}
-#  $ source ${config_wip_fs_disks_restoreSystemCommands1writeText_restoreSystemCommands}
-#  $ install-system-to $mnt
-#  $ nixos-install --system ${config_system_build_toplevel} --no-root-passwd --no-channel-copy --root $mnt
-#  $ nixos-enter --root $mnt
-function open-system { # 1?: diskImages
+declare-command open-system diskImages << 'EOD'
+Performs any steps necessary to mount the target system at »/tmp/nixos-install-@{config.networking.hostName}« on the current host.
+For any steps taken, it also adds the steps to undo them on exit from the calling shell (so this is not useful as a standalone »COMMAND«, use the »bash« or »--command« options, and don't call this from a sub-shell that exits too early).
+»diskImages« may be passed in the same format as to the installer. Any image files passed are ensured to be loop-mounted. »root« may also pass device paths.
+
+Perfect to inspect/update/amend/repair a system's installation afterwards, e.g.:
+$ install-system-to $mnt
+$ nixos-install --system ${config_system_build_toplevel} --no-root-passwd --no-channel-copy --root $mnt
+$ nixos-enter --root $mnt
+EOD
+function open-system {
     local diskImages=${1:-} # If »diskImages« were specified and they point at files that aren't loop-mounted yet, then loop-mount them now:
     local images=$( @{native.util-linux}/bin/losetup --list --all --raw --noheadings --output BACK-FILE )
     local decl ; for decl in ${diskImages//:/ } ; do
@@ -195,7 +219,7 @@ function open-system { # 1?: diskImages
     done
     @{native.systemd}/bin/udevadm settle -t 15 || true # sometimes partitions aren't quite made available yet
 
-    if [[ @{config.wip.fs.keystore.enable} && ! -e /dev/mapper/keystore-@{config.networking.hostName!hashString.sha256:0:8} ]] ; then # Try a bunch of approaches for opening the keystore:
+    if [[ @{config.setup.keystore.enable} && ! -e /dev/mapper/keystore-@{config.networking.hostName!hashString.sha256:0:8} ]] ; then # Try a bunch of approaches for opening the keystore:
         mount-keystore-luks --key-file=<( printf %s "@{config.networking.hostName}" ) || return
         mount-keystore-luks --key-file=/dev/disk/by-partlabel/bootkey-@{config.networking.hostName!hashString.sha256:0:8} || return
         mount-keystore-luks --key-file=<( read -s -p PIN: pin && echo ' touch!' >&2 && @{native.yubikey-personalization}/bin/ykchalresp -2 "$pin" ) || return
@@ -208,8 +232,8 @@ function open-system { # 1?: diskImages
 
     open-luks-layers || return # Load crypt layers and zfs pools:
     if [[ $( LC_ALL=C type -t ensure-datasets ) == 'function' ]] ; then
-        local poolName ; for poolName in "@{!config.wip.fs.zfs.pools[@]}" ; do
-            if [[ ! @{config.wip.fs.zfs.pools!catAttrSets.createDuringInstallation[$poolName]} ]] ; then continue ; fi
+        local poolName ; for poolName in "@{!config.setup.zfs.pools[@]}" ; do
+            if [[ ! @{config.setup.zfs.pools!catAttrSets.createDuringInstallation[$poolName]} ]] ; then continue ; fi
             if ! @{native.zfs}/bin/zfs get -o value -H name "$poolName" &>/dev/null ; then
                 @{native.zfs}/bin/zpool import -f -N -R "$mnt" "$poolName" && prepend_trap "@{native.zfs}/bin/zpool export '$poolName'" EXIT || return
             fi

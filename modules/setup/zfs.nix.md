@@ -10,13 +10,13 @@ Additionally, this module sets some defaults for ZFS (but only in a "always bett
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: { config, options, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
-    cfg = config.${prefix}.fs.zfs;
-    prefix = inputs.config.prefix;
+dirname: inputs: { config, options, pkgs, lib, ... }: let lib = inputs.self.lib.__internal__; in let
+    inherit (inputs.config.rename) setup;
+    cfg = config.${setup}.zfs;
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
 in let module = {
 
-    options.${prefix} = { fs.zfs = {
+    options.${setup} = { zfs = {
         enable = lib.mkEnableOption "NixOS managed ZFS pools and datasets";
 
         pools = lib.mkOption {
@@ -70,16 +70,16 @@ in let module = {
         networking.hostId = lib.mkDefault (builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName)); # ZFS requires one, so might as well set a default.
 
         ## Implement »cfg.datasets.*.mount«:
-        fileSystems = lib.wip.mapMerge (path: { props, mount, ... }: if mount != false then {
+        fileSystems = lib.fun.mapMerge (path: { props, mount, ... }: if mount != false then {
             "${props.mountpoint}" = { fsType = "zfs"; device = path; options = [ "zfsutil" ] ++ (lib.optionals (mount == "noauto") [ "noauto" ]); };
         } else { }) cfg.datasets;
 
         ## Load keys (only) for (all) datasets that are declared as encryption roots and aren't disabled:
-        boot.zfs.requestEncryptionCredentials = lib.attrNames (lib.filterAttrs (name: { props, ... }: if props?keylocation then props.keylocation != "file:///dev/null" else config.${prefix}.fs.keystore.keys?"zfs/${name}") cfg.datasets);
+        boot.zfs.requestEncryptionCredentials = lib.attrNames (lib.filterAttrs (name: { props, ... }: if props?keylocation then props.keylocation != "file:///dev/null" else config.${setup}.keystore.keys?"zfs/${name}") cfg.datasets);
 
-        ${prefix} = {
+        ${setup} = {
             # Set default root dataset properties for every pool:
-            fs.zfs.datasets = lib.mapAttrs (name: { ... }: { props = {
+            zfs.datasets = lib.mapAttrs (name: { ... }: { props = {
                 # Properties to set at the root dataset of the root pool at its creation. All are inherited by default, but some can't be changed later.
                 devices = lib.mkOptionDefault "off"; # Don't allow character or block devices on the file systems, where they might be owned by non-root users.
                 setuid = lib.mkOptionDefault "off"; # Don't allow suid binaries (NixOS puts them in »/run/wrappers/«).
@@ -95,12 +95,12 @@ in let module = {
             }; }) cfg.pools;
 
             # All pools that have at least one dataset that (explicitly or implicitly) has a key to be loaded from »/run/keystore-.../zfs/« have to be imported in the initramfs while the keystore is open (but only if the keystore is not disabled):
-            fs.zfs.extraInitrdPools = lib.mkIf (config.boot.initrd.luks.devices?"keystore-${hash}") (lib.mapAttrsToList (name: _: lib.head (lib.splitString "/" name)) (lib.filterAttrs (name: { props, ... }: if props?keylocation then lib.wip.startsWith "file:///run/keystore-${hash}/" props.keylocation else config.${prefix}.fs.keystore.keys?"zfs/${name}") cfg.datasets));
+            zfs.extraInitrdPools = lib.mkIf (config.boot.initrd.luks.devices?"keystore-${hash}") (lib.mapAttrsToList (name: _: lib.head (lib.splitString "/" name)) (lib.filterAttrs (name: { props, ... }: if props?keylocation then lib.fun.startsWith "file:///run/keystore-${hash}/" props.keylocation else config.${setup}.keystore.keys?"zfs/${name}") cfg.datasets));
 
             # Might as well set some defaults for all partitions required (though for all but one at least some of the values will need to be changed):
-            fs.disks.partitions = lib.wip.mapMergeUnique (name: { ${name} = { # (This also implicitly ensures that no partition is used twice for zpools.)
+            disks.partitions = lib.fun.mapMergeUnique (name: { ${name} = { # (This also implicitly ensures that no partition is used twice for zpools.)
                 type = lib.mkDefault "bf00"; size = lib.mkOptionDefault null; order = lib.mkDefault 500;
-            }; }) (lib.wip.filterMismatching ''/|^(mirror|raidz[123]?|draid[123]?.*|spare|log|dedup|special|cache)$'' (lib.concatLists (lib.catAttrs "vdevArgs" (lib.attrValues cfg.pools))));
+            }; }) (lib.fun.filterMismatching ''/|^(mirror|raidz[123]?|draid[123]?.*|spare|log|dedup|special|cache)$'' (lib.concatLists (lib.catAttrs "vdevArgs" (lib.attrValues cfg.pools))));
         };
 
 
@@ -156,14 +156,14 @@ in let module = {
         poolNames = filterBy: lib.attrNames (lib.filterAttrs (name: pool: pool.${filterBy}) cfg.pools);
         filter = pool: "^${pool}($|[/])";
         ensure-datasets = zfsPackage: pkgs.writeShellScript "ensure-datasets" ''
-            ${lib.wip.substituteImplicit { inherit pkgs; scripts = lib.attrValues { inherit (lib.wip.setup-scripts) zfs utils; }; context = { inherit config; native = pkgs // { zfs = zfsPackage; }; }; }}
+            ${lib.fun.substituteImplicit { inherit pkgs; scripts = lib.attrValues { inherit (lib.self.setup-scripts) zfs utils; }; context = { inherit config; native = pkgs // { zfs = zfsPackage; }; }; }}
             set -eu ; ensure-datasets "$@"
         '';
         ensure-datasets-for = filterBy: zfsPackage: ''( if [ ! "''${IN_NIXOS_ENTER:-}" ] && [ -e ${zfsPackage}/bin/zfs ] ; then
             ${lib.concatStrings (map (pool: ''
-                expected=${lib.escapeShellArg (builtins.toJSON (lib.mapAttrs (n: v: v.props // (if v.permissions != { } then { ":permissions" = v.permissions; } else { })) (lib.filterAttrs (path: _: path == pool || lib.wip.startsWith "${pool}/" path) cfg.datasets)))}
-                if [ "$(${zfsPackage}/bin/zfs get -H -o value nixos-${prefix}:applied-datasets ${pool})" != "$expected" ] ; then
-                    ${ensure-datasets zfsPackage} / ${lib.escapeShellArg (filter pool)} && ${zfsPackage}/bin/zfs set nixos-${prefix}:applied-datasets="$expected" ${pool}
+                expected=${lib.escapeShellArg (builtins.toJSON (lib.mapAttrs (n: v: v.props // (if v.permissions != { } then { ":permissions" = v.permissions; } else { })) (lib.filterAttrs (path: _: path == pool || lib.fun.startsWith "${pool}/" path) cfg.datasets)))}
+                if [ "$(${zfsPackage}/bin/zfs get -H -o value nixos-${setup}:applied-datasets ${pool})" != "$expected" ] ; then
+                    ${ensure-datasets zfsPackage} / ${lib.escapeShellArg (filter pool)} && ${zfsPackage}/bin/zfs set nixos-${setup}:applied-datasets="$expected" ${pool}
                 fi
             '') (poolNames filterBy))}
         fi )'';
@@ -173,7 +173,7 @@ in let module = {
             ${ensure-datasets-for "autoApplyDuringBoot" extraUtils}
         '');
         boot.initrd.supportedFilesystems = lib.mkIf (anyPool "autoApplyDuringBoot") [ "zfs" ];
-        ${prefix}.fs.zfs.extraInitrdPools = (poolNames "autoApplyDuringBoot");
+        ${setup}.zfs.extraInitrdPools = (poolNames "autoApplyDuringBoot");
 
         system.activationScripts.A_ensure-datasets = lib.mkIf (anyPool "autoApplyOnActivation") {
             text = ensure-datasets-for "autoApplyOnActivation" (pkgs.runCommandLocal "booted-system-link" { } ''ln -sT /run/booted-system/sw $out''); # (want to use the version of ZFS that the kernel module uses, also it's convenient that this does not yet exist during activation at boot)
@@ -183,7 +183,7 @@ in let module = {
     }) ])) (
         # Disable this module in VMs without filesystems:
         lib.mkIf (options.virtualisation?useDefaultFilesystems) { # (»nixos/modules/virtualisation/qemu-vm.nix« is imported, i.e. we are building a "vmVariant")
-            ${prefix}.fs.zfs.enable = lib.mkIf config.virtualisation.useDefaultFilesystems (lib.mkVMOverride false);
+            ${setup}.zfs.enable = lib.mkIf config.virtualisation.useDefaultFilesystems (lib.mkVMOverride false);
         }
     ) ];
 

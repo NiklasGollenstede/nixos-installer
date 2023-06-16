@@ -24,12 +24,12 @@ function generic-arg-parse { # ...
 #  Uses »allowedArgs« for the list of the named arguments (the values are the descriptions).
 #  »name« should be the program name/path (usually »$0«), »args« the form/names of any positional arguments expected (e.g. »SOURCE... DEST«) and is included in the "Usage" description,
 #  »description« the introductory text shown before the "Usage", and »suffix« any text printed after the argument list.
-function generic-arg-help { # 1: name, 2?: args, 3?: description, 4?: suffix
+function generic-arg-help { # 1: name, 2?: args, 3?: description, 4?: suffix, 5?: usageLine
     if [[ ! ${args[help]:-} ]] ; then : ${allowedArgs[help]:=1} ; \return 0 ; fi
     [[ ! ${3:-} ]] || echo "$3"
-    printf 'Usage:\n    %s [ARG[=value]]... [--] %s\n\nWhere »ARG« may be any of:\n' "$1" "${2:-}"
+    printf "${5:-'Usage:\n    %s [FLAG[=value]]... [--] %s\n\nWhere »FLAG« may be any of:\n'}" "$1" "${2:-}"
     local name ; while IFS= read -u3 -r name ; do
-        printf '    %s\n        %s\n' "$name" "${allowedArgs[$name]}"
+        printf '    %s\n        %s\n' "$name" "${allowedArgs[$name]//$'\n'/$'\n        '}"
     done 3< <( printf '%s\n' "${!allowedArgs[@]}" | LC_ALL=C sort )
     printf '    %s\n        %s\n' "--help" "Do nothing but print this message and exit with success."
     [[ ! ${4:-} ]] || echo "$4"
@@ -91,6 +91,8 @@ function prompt-new-password {( set -u # 1: usage
     if (( ${#password1} == 0 )) || [[ "$password1" != "$password2" ]] ; then printf 'Passwords empty or mismatch, aborting.\n' 1>&2 ; \exit 1 ; fi
     printf %s "$password1" || exit
 )}
+
+declare-flag install-system inspectScripts "" "When running installation hooks (»...*Commands« composed as Nix strings) print out and pause before each command. This works ... semi-well."
 
 ## Runs an installer hook script, optionally stepping through the script.
 function run-hook-script {( # 1: title, 2: scriptPath

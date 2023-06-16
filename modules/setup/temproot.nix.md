@@ -48,46 +48,46 @@ let hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networkin
 
 This completely configures the disks, partitions, pool, datasets, and mounts for a ZFS `rpool` on a three-disk `raidz1` with read and write cache on an additional SSD, which also holds the boot partition and swap:
 ```nix
-{ wip.fs.disks.devices = lib.genAttrs ([ "primary" "raidz1" "raidz2" "raidz3" ]) (name: { size = "16G"; }); # Need more than one disk, so must declare them. When installing to a physical disk, the declared size must match the actual size (or be smaller). The »primary« disk will hold all implicitly created partitions and those not stating a »disk«.
-  wip.fs.boot.enable = true; wip.fs.boot.size = "512M"; # See »./boot.nix.md«. Creates a FAT boot partition.
+{ setup.disks.devices = lib.genAttrs ([ "primary" "raidz1" "raidz2" "raidz3" ]) (name: { size = "16G"; }); # Need more than one disk, so must declare them. When installing to a physical disk, the declared size must match the actual size (or be smaller). The »primary« disk will hold all implicitly created partitions and those not stating a »disk«.
+  setup.bootpart.enable = true; setup.bootpart.size = "512M"; # See »./boot.nix.md«. Creates a FAT boot partition.
 
-  wip.fs.keystore.enable = true; # See »./keystore.nix.md«. With this enabled, »remote« will automatically be encrypted, with a random key by default.
+  setup.keystore.enable = true; # See »./keystore.nix.md«. With this enabled, »remote« will automatically be encrypted, with a random key by default.
 
-  wip.fs.temproot.enable = true; # Use ZFS for all categories.
-  wip.fs.temproot.temp.type = "zfs";
-  wip.fs.temproot.local.type = "zfs";
-  wip.fs.temproot.remote.type = "zfs";
+  setup.temproot.enable = true; # Use ZFS for all categories.
+  setup.temproot.temp.type = "zfs";
+  setup.temproot.local.type = "zfs";
+  setup.temproot.remote.type = "zfs";
 
   # Change/set the pools storage layout (see above), then adjust the partitions disks/sizes. Declaring disks requires them to be passed to the system installer.
-  wip.fs.zfs.pools."rpool-${hash}".vdevArgs = [ "raidz1" "rpool-rz1-${hash}" "rpool-rz2-${hash}" "rpool-rz3-${hash}" "log" "rpool-zil-${hash}" "cache" "rpool-arc-${hash}" ];
-  wip.fs.disks.partitions."rpool-rz1-${hash}" = { disk = "raidz1"; };
-  wip.fs.disks.partitions."rpool-rz2-${hash}" = { disk = "raidz2"; };
-  wip.fs.disks.partitions."rpool-rz3-${hash}" = { disk = "raidz3"; };
-  wip.fs.disks.partitions."rpool-zil-${hash}" = { size = "2G"; };
-  wip.fs.disks.partitions."rpool-arc-${hash}" = { }; } # (this is actually already implicitly declared)
+  setup.zfs.pools."rpool-${hash}".vdevArgs = [ "raidz1" "rpool-rz1-${hash}" "rpool-rz2-${hash}" "rpool-rz3-${hash}" "log" "rpool-zil-${hash}" "cache" "rpool-arc-${hash}" ];
+  setup.disks.partitions."rpool-rz1-${hash}" = { disk = "raidz1"; };
+  setup.disks.partitions."rpool-rz2-${hash}" = { disk = "raidz2"; };
+  setup.disks.partitions."rpool-rz3-${hash}" = { disk = "raidz3"; };
+  setup.disks.partitions."rpool-zil-${hash}" = { size = "2G"; };
+  setup.disks.partitions."rpool-arc-${hash}" = { }; } # (this is actually already implicitly declared)
 ```
 
 On a less beefy system, but also with less data to manage, `tmpfs` works fine for `tmp`, and `f2fs` promises to get more performance out of the flash/ram/cpu:
 ```nix
 { # See above for these:
-  #wip.fs.disks.devices.primary.size = "16G"; # (default)
-  wip.fs.boot.enable = true; wip.fs.boot.size = "512M";
-  wip.fs.keystore.enable = true;
-  wip.fs.temproot.enable = true;
+  #setup.disks.devices.primary.size = "16G"; # (default)
+  setup.bootpart.enable = true; setup.bootpart.size = "512M";
+  setup.keystore.enable = true;
+  setup.temproot.enable = true;
 
-  wip.fs.temproot.temp.type = "tmpfs"; # Put `/` on a `tmpfs`.
-  wip.fs.temproot.local.type = "bind"; # `bind`-mount all `local` locations to `/.local/*`, ...
-  wip.fs.temproot.local.bind.base = "f2fs-encrypted"; # ... where a LUKS-encrypted F2FS is mounted.
-  #wip.fs.keystore.keys."luks/local-${hash}/0" = "random"; # (implied by the »-encrypted« suffix above)
-  #wip.fs.disks.partitions."local-${hash}".size = "50%"; # (default, fixed after installation)
-  wip.fs.temproot.remote.type = "zfs";
-  #wip.fs.keystore.keys."zfs/rpool-${hash}/remote" = "random"; # (default)
-  #wip.fs.keystore.keys."luks/rpool-${hash}/0" = "random"; # Would also enable LUKS encryption of the pool, but there isn't too much point in encrypting twice.
-  #wip.fs.zfs.pools."rpool-${hash}".vdevArgs = [ "rpool-${hash}" ]; # (default)
-  #wip.fs.disks.partitions."rpool-${hash}" = { type = "bf00"; size = null; order = 500; }; # (default)
+  setup.temproot.temp.type = "tmpfs"; # Put `/` on a `tmpfs`.
+  setup.temproot.local.type = "bind"; # `bind`-mount all `local` locations to `/.local/*`, ...
+  setup.temproot.local.bind.base = "f2fs-encrypted"; # ... where a LUKS-encrypted F2FS is mounted.
+  #setup.keystore.keys."luks/local-${hash}/0" = "random"; # (implied by the »-encrypted« suffix above)
+  #setup.disks.partitions."local-${hash}".size = "50%"; # (default, fixed after installation)
+  setup.temproot.remote.type = "zfs";
+  #setup.keystore.keys."zfs/rpool-${hash}/remote" = "random"; # (default)
+  #setup.keystore.keys."luks/rpool-${hash}/0" = "random"; # Would also enable LUKS encryption of the pool, but there isn't too much point in encrypting twice.
+  #setup.zfs.pools."rpool-${hash}".vdevArgs = [ "rpool-${hash}" ]; # (default)
+  #setup.disks.partitions."rpool-${hash}" = { type = "bf00"; size = null; order = 500; }; # (default)
 
   # Default mounts/binds can also be removed, in this case causing logs to be removed on reboot:
-  wip.fs.temproot.local.mounts."/var/log" = lib.mkForce null; }
+  setup.temproot.local.mounts."/var/log" = lib.mkForce null; }
 ```
 
 
@@ -95,13 +95,13 @@ On a less beefy system, but also with less data to manage, `tmpfs` works fine fo
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: specialArgs@{ config, pkgs, lib, utils, ... }: let inherit (inputs.self) lib; in let
-    prefix = inputs.config.prefix;
-    cfg = config.${prefix}.fs.temproot;
+dirname: inputs: moduleArgs@{ config, options, pkgs, lib, utils, ... }: let lib = inputs.self.lib.__internal__; in let
+    inherit (inputs.config.rename) setup preMountCommands;
+    cfg = config.${setup}.temproot; opts = options.${setup}.temproot;
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
     keep = if cfg.remote.type == "none" then "local" else "remote"; # preferred place for data that should be kept
 
-    optionsFor = type: desc: lib.wip.mergeAttrsRecursive [ ({
+    optionsFor = type: desc: lib.fun.mergeAttrsRecursive [ ({
         zfs.dataset = lib.mkOption { description = "Dataset path under which to create the ${desc} »${type}« datasets."; type = lib.types.str; default = "rpool-${hash}/${type}"; };
     }) (lib.optionalAttrs (type != "temp") {
         bind.source = lib.mkOption { description = "Prefix for bind-mount targets."; type = lib.types.str; default = "/.${type}"; };
@@ -109,7 +109,7 @@ dirname: inputs: specialArgs@{ config, pkgs, lib, utils, ... }: let inherit (inp
         bind.base = lib.mkOption { description = "Filesystem to automatically create as the ».source« for the bind mounts."; type = lib.types.enum [ null "f2fs" "f2fs-encrypted" "ext4" "ext4-encrypted" ]; default = null; };
     }) ({
         mounts = lib.mkOption {
-            description = "Locations (for »temp« in addition to »/«) where a ${desc} filesystem should be mounted. Some are declared by default but may be removed by setting them to »null«.";
+            description = "Locations ${if type == "temp" then "(in addition to »/«)" else ""} where a ${desc} filesystem should be mounted. Some are declared by default but may be removed by setting them to »null«.";
             type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
                 target = lib.mkOption { description = "Attribute name as the mount target path."; type = lib.types.strMatching ''^/.*[^/]$''; default = name; readOnly = true; };
                 source = lib.mkOption { description = "Relative source path of the mount. (Irrelevant for »tmpfs«.)"; type = lib.types.str; default = builtins.substring 1 (builtins.stringLength name - 1) name; };
@@ -117,7 +117,7 @@ dirname: inputs: specialArgs@{ config, pkgs, lib, utils, ... }: let inherit (inp
                 gid = lib.mkOption { description = "GID owning the mounted target."; type = lib.types.ints.unsigned; default = 0; };
                 mode = lib.mkOption { description = "Permission mode of the mounted target."; type = lib.types.str; default = "750"; };
                 options = lib.mkOption { description = "Additional mount options to set. Note that not all mount types support all options, they may be silently ignored or cause errors. »bind« supports setting »nosuid«, »nodev«, »noexec«, »noatime«, »nodiratime«, and »relatime«. »zfs« will explicitly heed »noauto«, the other options are applied but may conflict with the ones implied by the ».zfsProps«."; type = lib.types.attrsOf (lib.types.oneOf [ lib.types.bool lib.types.str lib.types.str lib.types.int ]); default = { }; };
-                extraFsConfig = lib.mkOption { description = "Extra config options to set on the generated »fileSystems.*« entry (unless this mount is forced to »null«)."; type = lib.types.attrsOf lib.types.anything; default = { }; };
+                extraFsConfig = lib.mkOption { description = "Extra config options to set on the generated »fileSystems.*« entry (unless this mount is forced to »null«)."; type = options.fileSystems.type.nestedTypes.elemType // { visible = "shallow"; }; default = { }; };
                 zfsProps = lib.mkOption { description = "ZFS properties to set on the dataset, if mode type is »zfs«. Note that ZFS mounts made in the initramfs don't have the correct mount options from ZFS properties, so properties that affect mount options should (also) be set as ».options«."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; };
             }; })));
             default = { };
@@ -129,14 +129,15 @@ dirname: inputs: specialArgs@{ config, pkgs, lib, utils, ... }: let inherit (inp
     zfsNoSyncProps = { sync = "disabled"; logbias = "throughput"; }; # According to the documentation, »logbias« should be irrelevant without sync (i.e. no logging), but some claim setting it to »throughput« still improves performance.
 in {
 
-    options.${prefix} = { fs.temproot = {
+    options = { ${setup}.temproot = {
         enable = lib.mkEnableOption "filesystem layouts with ephemeral root";
 
         # Settings for filesystems that will be cleared on reboot:
         temp = {
             type = lib.mkOption { description = ''
+                The type of filesystem that holds the system's files that can (and should) be cleared on reboot:
                 "tmpfs": Creates »tmpfs« filesystems at »/« and all specified mount points.
-                "zfs": ...
+                "zfs": Creates a ZFS dataset for »/« and each specified mount point, as (nested) children of ».zfs.dataset«, which will have »sync« disabled. Also adds an pre-mount command that rolls back all children of that dataset to their »@empty« snapshots (which are taken right after the datasets are created).
                 "bind": Expects a filesystem to be mounted at »/«. Creates a hook to cre-create that filesystem on boot (TODO: implement and then enable this), and bind-mounts any additional mounts to ».bind.source+"/"+<mount.source>« (creating those paths if necessary).
             ''; type = lib.types.enum [ "tmpfs" "zfs" ]; default = "tmpfs"; };
         } // (optionsFor "temp" "temporary");
@@ -144,16 +145,18 @@ in {
         # Settings for filesystems that persist across reboots:
         local = {
             type = lib.mkOption { description = ''
-                "bind": Expects a (locally persistent) filesystem to be mounted at ».bind.target«, and bind-mounts any additional mounts to ».bind.source+"/"+<mount.source>« (creating those paths if necessary).
-                "zfs": ...
+                The type of filesystem that holds the system's files that needs (e.g. the Nix store) or should (e.g. caches, logs) be kept across reboots, but that can be regenerated or not worth backing up:
+                "bind": Expects a (locally persistent) filesystem to be mounted at ».bind.target«, and bind-mounts to ».bind.source+"/"+<mount.source>« (creating those paths if necessary). ».bind.base« can be used to automatically mount different default filesystems at ».bind.target«.
+                "zfs": Creates a ZFS dataset for »/« and each specified mount point, as (nested) children of ».zfs.dataset«.
             ''; type = lib.types.enum [ "bind" "zfs" ]; default = "bind"; };
         } // (optionsFor "local" "locally persistent");
 
         # Settings for filesystems that should have remote backups:
         remote = {
             type = lib.mkOption { description = ''
-                "bind": Expects a filesystem to be mounted at ».bind.target« that gets backed. Bind-mounts any additional mounts to ».bind.source+"/"+<mount.source>« (creating those paths if necessary).
-                "zfs": ...
+                The type of filesystem that holds the system's files that need to be backed up (which some external mechanism should then do):
+                "bind": Expects a filesystem to be mounted at ».bind.target« that gets backed. Bind-mounts to ».bind.source+"/"+<mount.source>« (creating those paths if necessary).
+                "zfs": Creates a ZFS dataset for »/« and each specified mount point, as (nested) children of ».zfs.dataset«.
                 "none": Don't provide a »/remote«. For hosts that have no secrets or important state.
             ''; type = lib.types.enum [ "bind" "zfs" "none" ]; default = "bind"; };
         } // (optionsFor "remote" "remotely backed-up");
@@ -174,27 +177,27 @@ in {
 
     in lib.mkIf cfg.enable (lib.mkMerge ([ ({
 
-        ${prefix} = {
-            fs.temproot.temp.mounts = {
+        ${setup} = {
+            temproot.temp.mounts = {
                 "/tmp" = { mode = "1777"; };
             };
-            fs.temproot.local.mounts = {
+            temproot.local.mounts = {
                 "/local" = { source = "system"; mode = "755"; };
                 "/nix" = { zfsProps = zfsNoSyncProps; mode = "755"; }; # this (or /nix/store) is required
                 "/var/log" = { source = "logs"; mode = "755"; };
                 # »/swap« is used by »cfg.swap.asPartition = false«
             };
-            fs.temproot.remote.mounts = {
-                "/remote" = { source = "system"; mode = "755"; extraFsConfig = { neededForBoot = true; }; }; # if any secrets need to be picked up by »activate«, they should be here
+            temproot.remote.mounts = {
+                "/remote" = { source = "system"; mode = "755"; extraFsConfig = { neededForBoot = lib.mkDefault true; }; }; # if any secrets need to be picked up by »activate«, they should be here
             };
         };
 
-        boot.tmpOnTmpfs = false; # This would create a systemd mount unit for »/tmp«.
+        boot = if options.boot?tmp then { tmp.useTmpfs = false; } else { tmpOnTmpfs = false; }; # This would create a systemd mount unit for »/tmp«.
 
 
-    }) ({ # Make each individual attribute on »wip.fs.temproot.*.mountOptions« a default, instead of having them be the default as a set:
+    }) ({ # Make each individual attribute on »setup.temproot.*.mountOptions« a default, instead of having them be the default as a set:
 
-        ${prefix}.fs.temproot = let
+        ${setup}.temproot = let
             it = { mountOptions = { nosuid = lib.mkOptionDefault true; nodev = lib.mkOptionDefault true; noatime = lib.mkOptionDefault true; }; };
         in { temp = it; local = it; remote = it; };
 
@@ -232,13 +235,13 @@ in {
 
 
     }) (lib.mkIf (cfg.swap.size != null && cfg.swap.asPartition) (let
-        useLuks = config.${prefix}.fs.keystore.keys?"luks/swap-${hash}/0";
-        device = "/dev/${if useLuks then "mapper" else "disk/by-partlabel"}/swap-${hash}";
+        device = "/dev/${if cfg.swap.encrypted then "mapper" else "disk/by-partlabel"}/swap-${hash}";
     in {
 
-        ${prefix} = {
-            fs.disks.partitions."swap-${hash}" = { type = lib.mkDefault "8200"; size = lib.mkDefault cfg.swap.size; order = lib.mkDefault 1250; };
-            fs.keystore.keys."luks/swap-${hash}/0" = lib.mkIf cfg.swap.encrypted (lib.mkOptionDefault "random");
+        ${setup} = {
+            disks.partitions."swap-${hash}" = { type = lib.mkDefault "8200"; size = lib.mkDefault cfg.swap.size; order = lib.mkDefault 1250; };
+            keystore.enable = lib.mkIf cfg.swap.encrypted true;
+            keystore.keys."luks/swap-${hash}/0" = lib.mkIf cfg.swap.encrypted (lib.mkOptionDefault "random");
         };
         swapDevices = [ { inherit device; } ];
         boot.resumeDevice = device;
@@ -246,17 +249,19 @@ in {
 
     })) (lib.mkIf (cfg.swap.size != null && !cfg.swap.asPartition) {
 
-        swapDevices = [ { device = "${cfg.local.bind.source}/swap"; size = (lib.wip.parseSizeSuffix cfg.swap.size) / 1024 / 1024; } ];
+        swapDevices = [ { device = "${cfg.local.bind.source}/swap"; size = (lib.fun.parseSizeSuffix cfg.swap.size) / 1024 / 1024; } ];
 
 
     }) (lib.mkIf (cfg.temp.type == "tmpfs") (let type = "temp"; in { # (only temp can be of type tmpfs)
 
         # TODO: this would probably be better implemented by creating a single /.temp tmpfs with a decent size restriction, and then bind-mounting all other mount points into that pool (or at least do that for any locations that are non-root writable?)
 
-        fileSystems = lib.mapAttrs (target: args@{ uid, gid, mode, extraFsConfig, ... }: (extraFsConfig // {
+        fileSystems = lib.mapAttrs (target: args@{ uid, gid, mode, ... }: (lib.mkMerge ((
+            map (def: def.${target}.extraFsConfig or { }) opts.${type}.mounts.definitions
+        ) ++ [ (rec {
             fsType = "tmpfs"; device = "tmpfs";
-            options = (extraFsConfig.options or [ ]) ++ (optionsToList (cfg.${type}.mountOptions // args.options // { uid = toString uid; gid = toString gid; mode = mode; }));
-        })) ({ "/" = { options = { }; uid = 0; gid = 0; mode = "755"; extraFsConfig = { }; }; } // cfg.${type}.mounts);
+            options = optionsToList (cfg.${type}.mountOptions // args.options // { uid = toString uid; gid = toString gid; mode = mode; });
+        }) ]))) ({ "/" = { options = { }; uid = 0; gid = 0; mode = "755"; }; } // cfg.${type}.mounts);
 
 
     })) (lib.mkIf (cfg.temp.type == "zfs") {
@@ -273,21 +278,21 @@ in {
 
 
     }) (lib.mkIf (cfg.local.type == "bind" && (cfg.local.bind.base != null)) (let # Convenience option to create a local F2FS/EXT4 optimized to host the nix store:
-        type = if cfg.local.bind.base == "f2fs" || cfg.local.bind.base == "f2fs-encrypted" then "f2fs" else "ext4";
+        fsType = if cfg.local.bind.base == "f2fs" || cfg.local.bind.base == "f2fs-encrypted" then "f2fs" else "ext4";
         encrypted = cfg.local.bind.base == "f2fs-encrypted" || cfg.local.bind.base == "ext4-encrypted";
-        useLuks = config.${prefix}.fs.keystore.keys?"luks/local-${hash}/0";
     in {
 
         # TODO: fsck
-        ${prefix} = {
-            fs.keystore.keys."luks/local-${hash}/0" = lib.mkIf encrypted (lib.mkOptionDefault "random");
-            fs.disks.partitions."local-${hash}" = {
+        ${setup} = {
+            disks.partitions."local-${hash}" = {
                 type = "8300"; order = lib.mkDefault 1000; disk = lib.mkDefault "primary"; size = lib.mkDefault (if cfg.remote.type == "none" then null else "50%");
             };
+            keystore.enable = lib.mkIf encrypted true;
+            keystore.keys."luks/local-${hash}/0" = lib.mkIf encrypted (lib.mkOptionDefault "random");
         };
         fileSystems.${cfg.local.bind.source} = {
-            fsType = type; device = "/dev/${if useLuks then "mapper" else "disk/by-partlabel"}/local-${hash}";
-        } // (if type == "f2fs" then {
+            fsType = fsType; device = "/dev/${if encrypted then "mapper" else "disk/by-partlabel"}/local-${hash}";
+        } // (if fsType == "f2fs" then {
             formatOptions = (lib.concatStrings [
                 " -O extra_attr" # required by other options
                 ",inode_checksum" # enable inode checksum
@@ -324,36 +329,37 @@ in {
 
     })) (lib.mkIf (cfg.remote.type == "none") {
 
-        systemd.tmpfiles.rules = [ (lib.wip.mkTmpfile { type = "L+"; path = "/remote"; argument = "/local"; }) ]; # for compatibility (but use a symlink to make clear that this is not actually a separate mount)
+        systemd.tmpfiles.rules = [ (lib.fun.mkTmpfile { type = "L+"; path = "/remote"; argument = "/local"; }) ]; # for compatibility (but use a symlink to make clear that this is not actually a separate mount)
 
 
     }) ] ++ (map (type: (lib.mkIf (cfg.${type}.type == "bind") {
 
-        fileSystems = (lib.mapAttrs (target: args@{ source, uid, gid, mode, extraFsConfig, ... }: extraFsConfig // (rec {
+        fileSystems = lib.mkMerge [ (lib.mapAttrs (target: args@{ source, uid, gid, mode, extraFsConfig, ... }: (lib.mkMerge ((
+            map (def: def.${target}.extraFsConfig or { }) opts.${type}.mounts.definitions
+        ) ++ [ (rec {
             device = "${cfg.${type}.bind.source}/${source}";
-            options = (extraFsConfig.options or [ ]) ++ (optionsToList (cfg.${type}.mountOptions // args.options // { bind = true; }));
-            preMountCommands = ''
-                ${extraFsConfig.preMountCommands or ""}
+            options = optionsToList (cfg.${type}.mountOptions // args.options // { bind = true; });
+            ${preMountCommands} = lib.mkIf (!extraFsConfig.neededForBoot && !(lib.elem target utils.pathsNeededForBoot)) ''
                 mkdir -pm 000 -- ${lib.escapeShellArg target}
                 mkdir -pm 000 -- ${lib.escapeShellArg device}
                 chown ${toString uid}:${toString gid} -- ${lib.escapeShellArg device}
                 chmod ${mode} -- ${lib.escapeShellArg device}
             '';
-        })) cfg.${type}.mounts) // {
+        }) ]))) cfg.${type}.mounts) {
             ${cfg.${type}.bind.source} = { neededForBoot = lib.any utils.fsNeededForBoot (lib.attrValues (builtins.intersectAttrs cfg.${type}.mounts config.fileSystems)); };
-        };
+        } ];
 
 
     })) [ "temp" "local" "remote" ]) ++ (map (type: (lib.mkIf (cfg.${type}.type == "zfs") (let
         dataset = cfg.${type}.zfs.dataset;
     in {
 
-        ${prefix} = {
-            fs.zfs.enable = true;
-            fs.zfs.pools.${lib.head (lib.splitString "/" dataset)} = { }; # ensure the pool exists (all properties can be adjusted)
-            fs.keystore.keys."zfs/${dataset}" = lib.mkIf (type == "remote" && config.${prefix}.fs.keystore.enable) (lib.mkOptionDefault "random"); # the entire point of ZFS remote are backups, and those should be encrypted
+        ${setup} = {
+            zfs.enable = true;
+            zfs.pools.${lib.head (lib.splitString "/" dataset)} = { }; # ensure the pool exists (all properties can be adjusted)
+            keystore.keys."zfs/${dataset}" = lib.mkIf (type == "remote" && config.${setup}.keystore.enable) (lib.mkOptionDefault "random"); # the entire point of ZFS remote are backups, and those should be encrypted
 
-            fs.zfs.datasets = {
+            zfs.datasets = {
                 ${dataset} = {
                     mount = false; props = { canmount = "off"; mountpoint = "/"; } // (if type == "temp" then { refreservation = "1G"; } // zfsNoSyncProps else { });
                 };
@@ -361,21 +367,23 @@ in {
                 "${dataset}/root" = {
                     mount = true; props = { canmount = "noauto"; mountpoint = "/"; }; mode = "755";
                 };
-            }  else { }) // (lib.wip.mapMerge (target: { source, options, zfsProps, uid, gid, mode, ... }: {
+            }  else { }) // (lib.fun.mapMerge (target: { source, options, zfsProps, uid, gid, mode, ... }: {
                 "${dataset}/${source}" = {
                     mount = if (options.noauto or false) == true then "noauto" else true; inherit uid gid mode;
                     props = { canmount = "noauto"; mountpoint = target; } // zfsProps;
                 };
             } // (
-                lib.wip.mapMerge (prefix: if (lib.any (_:_.source == prefix) (lib.attrValues cfg.${type}.mounts)) then { } else {
+                lib.fun.mapMerge (prefix: if (lib.any (_:_.source == prefix) (lib.attrValues cfg.${type}.mounts)) then { } else {
                     "${dataset}/${prefix}" = lib.mkDefault { props.canmount = "off"; };
-                }) (lib.wip.parentPaths source)
+                }) (lib.fun.parentPaths source)
             )) cfg.${type}.mounts);
         };
 
-        fileSystems = lib.mapAttrs (target: args@{ extraFsConfig, ... }: extraFsConfig // {
-            options = (extraFsConfig.options or [ ]) ++ (optionsToList (cfg.${type}.mountOptions // args.options));
-        }) ((if type == "temp" then { "/" = { options = { }; extraFsConfig = { }; }; } else { }) // cfg.${type}.mounts);
+        fileSystems = lib.mapAttrs (target: args: (lib.mkMerge ((
+            map (def: def.${target}.extraFsConfig or { }) opts.${type}.mounts.definitions
+        ) ++ [ (rec {
+            options = optionsToList (cfg.${type}.mountOptions // args.options);
+        }) ]))) ((if type == "temp" then { "/" = { options = { }; }; } else { }) // cfg.${type}.mounts);
 
     }))) [ "temp" "local" "remote" ])));
 

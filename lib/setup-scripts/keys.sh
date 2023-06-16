@@ -12,7 +12,7 @@ function prompt-for-user-passwords { # (void)
 }
 
 
-## Mounts a ramfs as the host's keystore and populates it with keys as requested by »config.wip.fs.keystore.keys«.
+## Mounts a ramfs as the host's keystore and populates it with keys as requested by »config.setup.keystore.keys«.
 #  Depending on the specified key types/sources, this may prompt for user input.
 function populate-keystore { # (void)
     local keystore=/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}
@@ -21,9 +21,9 @@ function populate-keystore { # (void)
     @{native.util-linux}/bin/mount ramfs -t ramfs $keystore && prepend_trap "@{native.util-linux}/bin/umount $keystore" EXIT || return
 
     local -A methods=( ) ; local -A options=( )
-    local usage ; for usage in "@{!config.wip.fs.keystore.keys[@]}" ; do
-        methods[$usage]=@{config.wip.fs.keystore.keys[$usage]%%=*}
-        options[$usage]=@{config.wip.fs.keystore.keys[$usage]:$(( ${#methods[$usage]} + 1 ))}
+    local usage ; for usage in "@{!config.setup.keystore.keys[@]}" ; do
+        methods[$usage]=@{config.setup.keystore.keys[$usage]%%=*}
+        options[$usage]=@{config.setup.keystore.keys[$usage]:$(( ${#methods[$usage]} + 1 ))}
     done
 
     local usage ; for usage in "${!methods[@]}" ; do

@@ -27,24 +27,24 @@ Any number of other devices may thus specify paths in the keystore as keylocatio
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: { config, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
-    prefix = inputs.config.prefix;
-    cfg = config.${prefix}.fs.keystore;
+dirname: inputs: { config, pkgs, lib, ... }: let lib = inputs.self.lib.__internal__; in let
+    inherit (inputs.config.rename) setup installer;
+    cfg = config.${setup}.keystore;
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
     keystore = "/run/keystore-${hash}";
-    keystoreKeys = lib.attrValues (lib.filterAttrs (n: v: lib.wip.startsWith "luks/keystore-${hash}/" n) cfg.keys);
+    keystoreKeys = lib.attrValues (lib.filterAttrs (n: v: lib.fun.startsWith "luks/keystore-${hash}/" n) cfg.keys);
 in let module = {
 
-    options.${prefix} = { fs.keystore = {
+    options = { ${setup}.keystore = {
         enable = lib.mkEnableOption "the use of a keystore partition to unlock various things during early boot";
         enableLuksGeneration = (lib.mkEnableOption "the generation of a LUKS mapper configuration for each »luks/*/0« entry in ».keys«") // { default = true; example = false; };
         keys = lib.mkOption { description = "Keys declared to be generated during installation and then exist in the keystore for unlocking disks and such. See »${dirname}/keystore.nix.md« for much more information."; type = lib.types.attrsOf (lib.types.either (lib.types.nullOr lib.types.str) (lib.types.attrsOf lib.types.str)); default = { }; apply = keys: (
-            lib.wip.mapMergeUnique (usage: methods: if methods == null then { } else if builtins.isString methods then { "${usage}" = methods; } else lib.wip.mapMerge (slot: method: if method == null then { } else { "${usage}/${slot}" = method; }) methods) keys
+            lib.fun.mapMergeUnique (usage: methods: if methods == null then { } else if builtins.isString methods then { "${usage}" = methods; } else lib.fun.mapMerge (slot: method: if method == null then { } else { "${usage}/${slot}" = method; }) methods) keys
         ); };
         unlockMethods = {
             trivialHostname = lib.mkOption { description = "For headless auto boot, use »hostname« (in a file w/o newline) as trivial password/key for the keystore."; type = lib.types.bool; default = lib.elem "hostname" keystoreKeys; };
             usbPartition = lib.mkOption { description = "Use (the random key stored on) a specifically named (tiny) GPT partition (usually on a USB-stick) to automatically unlock the keystore. Use »nix run .#$hostName -- add-bootkey-to-keydev $devPath« (see »${inputs.self}/lib/setup-scripts/maintenance.sh«) to cerate such a partition."; type = lib.types.bool; default = (lib.elem "usb-part" keystoreKeys); };
-            pinThroughYubikey = lib.mkOption { type = lib.types.bool; default = (lib.any (type: lib.wip.matches "^yubikey-pin=.*$" type) keystoreKeys); };
+            pinThroughYubikey = lib.mkOption { type = lib.types.bool; default = (lib.any (type: lib.fun.matches "^yubikey-pin=.*$" type) keystoreKeys); };
         };
     }; };
 
@@ -57,15 +57,15 @@ in let module = {
             message = ''At least one key (»0«) for »luks/keystore-${hash}« must be specified!'';
         } ];
 
-        boot.initrd.luks.devices = lib.mkIf cfg.enableLuksGeneration (lib.wip.mapMerge (key: let
+        boot.initrd.luks.devices = lib.mkIf cfg.enableLuksGeneration (lib.fun.mapMerge (key: let
             label = builtins.substring 5 ((builtins.stringLength key) - 7) key;
         in { ${label} = {
             device = lib.mkDefault "/dev/disk/by-partlabel/${label}";
             keyFile = lib.mkIf (label != "keystore-${hash}") (lib.mkDefault "/run/keystore-${hash}/luks/${label}/0.key");
             allowDiscards = lib.mkDefault true; # If attackers can observe trimmed blocks, then they can probably do much worse ...
-        }; }) (lib.wip.filterMatching ''^luks/.*/0$'' (lib.attrNames cfg.keys)));
+        }; }) (lib.fun.filterMatching ''^luks/.*/0$'' (lib.attrNames cfg.keys)));
 
-        ${prefix}.fs.keystore.keys."luks/keystore-${hash}/0" = lib.mkOptionDefault "hostname"; # (This is the only key that the setup scripts unconditionally require to be declared.)
+        ${setup}.keystore.keys."luks/keystore-${hash}/0" = lib.mkOptionDefault "hostname"; # (This is the only key that the setup scripts unconditionally require to be declared.)
 
     }) ({
 
@@ -88,22 +88,18 @@ in let module = {
         # Create and populate keystore during installation:
         fileSystems.${keystore} = { fsType = "vfat"; device = "/dev/mapper/keystore-${hash}"; options = [ "ro" "nosuid" "nodev" "noexec" "noatime" "umask=0277" "noauto" ]; formatOptions = ""; };
 
-        ${prefix} = {
-            fs.disks.partitions."keystore-${hash}" = { type = lib.mkDefault "8309"; order = lib.mkDefault 1375; disk = lib.mkDefault "primary"; size = lib.mkDefault "32M"; };
-            fs.disks.postFormatCommands = ''
-                ( : 'Copy the live keystore to its primary persistent location:'
-                    tmp=$(mktemp -d) && ${pkgs.util-linux}/bin/mount "/dev/mapper/keystore-${hash}" $tmp && trap "${pkgs.util-linux}/bin/umount $tmp && rmdir $tmp" EXIT &&
-                    ${pkgs.rsync}/bin/rsync -a ${keystore}/ $tmp/
-                )
-            '';
-        };
+        ${setup}.disks.partitions."keystore-${hash}" = { type = lib.mkDefault "8309"; order = lib.mkDefault 1375; disk = lib.mkDefault "primary"; size = lib.mkDefault "32M"; };
+        ${installer}.commands.postFormat = ''( : 'Copy the live keystore to its primary persistent location:'
+            tmp=$(mktemp -d) && ${pkgs.util-linux}/bin/mount "/dev/mapper/keystore-${hash}" $tmp && trap "${pkgs.util-linux}/bin/umount $tmp && rmdir $tmp" EXIT &&
+            ${pkgs.rsync}/bin/rsync -a ${keystore}/ $tmp/
+        )'';
 
     }) (lib.mkIf (config.boot.initrd.luks.devices?"keystore-${hash}") { # (this will be false when overwritten by »nixos/modules/virtualisation/qemu-vm.nix«)
 
         boot.initrd.supportedFilesystems = [ "vfat" ];
 
         boot.initrd.postMountCommands = ''
-            ${if (lib.any (lib.wip.matches "^home/.*$") (lib.attrNames cfg.keys)) then ''
+            ${if (lib.any (lib.fun.matches "^home/.*$") (lib.attrNames cfg.keys)) then ''
                 echo "Transferring home key composites"
                 # needs to be available later to unlock the home on demand
                 mkdir -p /run/keys/home-composite/ ; chmod 551 /run/keys/home-composite/ ; cp -a ${keystore}/home/*.key /run/keys/home-composite/

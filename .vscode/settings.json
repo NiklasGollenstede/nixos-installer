@@ -1,7 +1,6 @@
 {
 	"markdown.validate.ignoredLinks": [
 		"./modules/",
-		"./modules/fs/",
 		"./patches/",
 		"./example/",
 	],
@@ -15,7 +14,6 @@
 		"ashift", // zfs
 		"askpass", // program
 		"attrset", "attrsets", // nix/abbr (attribute set)
-		"autoexpand", // zfs option
 		"autologin", // agetty
 		"autotrim", // zpool property
 		"binfmt", // abbr "binary format"
@@ -25,16 +23,14 @@
 		"bootable", // word (~= able to boot)
 		"bootkey", // partition name
 		"bootloader", // word
+		"bootpart", // abbr (boot partition)
 		"bridgeadapter", // virtual box
 		"bridgedifs", // virtual box
 		"btrfs", // filesystem
 		"builtins", // nix
 		"cachefile", // zfs
 		"canmount", // zfs
-		"cdetect", // abbr
 		"checksumming", // word
-		"cmake", // program
-		"cmds", // abbr (commands)
 		"compress_chksum", // f2fs
 		"concat", // abbr
 		"controlvm", // virtual box
@@ -44,75 +40,46 @@
 		"createrawvmdk", // virtual box
 		"createvm", // virtual box
 		"cryptsetup", // program
-		"ctxify", // abbr (~= add context)
-		"CWD", // abbr
-		"cykerway", // name
 		"dedup", // zfs
-		"deps", // abbr dependencies
 		"devs", // abbr (devices)
 		"diffutils", // package
 		"dir_nlink", // ext4 option
 		"dmask", // mount
 		"dnodesize", // zfs
+		"dontStrip", // nixos
 		"dontUnpack", // nixos
 		"dosfstools", // package
-		"dpkg", // file format
 		"draid", // zfs
-		"dropbear", // program
-		"dtoverlay", // option
-		"dtparam", // option
 		"e2fsprogs", // package
-		"eeprom", // abbr
 		"elif", // abbr (else if)
 		"encryptionroot", // zfs
 		"errexit", // bash
-		"expandsz", // zfs property
-		"extglob", // cli arg
+		"errtrace", // bash
 		"extlinux", // program
 		"extra_isize", // ext4 option
-		"fallocate", // program / function
 		"fdisk", // program
-		"fetchpatch", // nix
 		"fetchurl", // nix function
 		"filesystems", // plural
-		"findutils", // package
-		"firejail", // program
-		"firmwareLinuxNonfree", // nixos
 		"fmask", // mount
 		"foldl", // nix (fold left)
 		"foldr", // nix (fold right)
-		"fstrim", // program
-		"FUNCNAME", // bash var
-		"fuser", // optoin
-		"fw_printenv", // program
-		"fw_setenv", // program
 		"gcroots", // Nix
 		"gdisk", // program
-		"genkeytypes", // concat
 		"getsize64", // cli arg
-		"getty", // serice
-		"gids", // abbr/plural (group IDs)
 		"gnugrep", // package
 		"gnused", // package
 		"gollenstede", // name
-		"gpio", // abbr (general purpose IO)
 		"gptfdisk", // package
-		"hcloud", // program
 		"headlessly", // word
-		"hetzner", // comapny
-		"HISTCONTROL", // bash option
+		"hetzner", // name
 		"hostbus", // cli arg
 		"hostfwd", // cli arg
 		"hostiocache", // virtual box
 		"hostport", // cli arg
-		"hugepages", // linux
-		"ignoredups", // bash option
-		"ignorespace", // bash option
 		"inetutils", // package
 		"inodes", // plural
 		"internalcommands", // virtual box
 		"ints", // plural
-		"journalctl", // program
 		"keydev", // cli arg
 		"keyformat", // zfs
 		"keylocation", // zfs
@@ -120,32 +87,23 @@
 		"kmod", // linux
 		"lazy_itable_init", // ext4 option
 		"lazytime", // f2fs
-		"leds", // plural
 		"libblockdev", // package
-		"libraspberrypi", // program
-		"libubootenv", // package
 		"libutil", // concat
 		"logbias", // zfs
-		"logind", // program
 		"losetup", // program / function
 		"lowerdir", // mount overlay option
 		"lsusb", // program / function
 		"luks", // linux
 		"macaddr", // cli arg
 		"metadata_csum", // ext4 option
-		"mkdir", // program / function
-		"mkenvimage", // program
 		"mktemp", // program / function
 		"mmap", // abbr "memory map"
 		"modifyvm", // virtual box
 		"mountpoint", // program / function
 		"msize", // option
 		"mtab", // linux
-		"namei", // program
 		"namespacing", // word
-		"netbootxyz", // option
 		"netdev", // cli arg
-		"netns", // linux
 		"niklas", // name
 		"nixbld", // nix
 		"nixos", // (duh)
@@ -157,16 +115,13 @@
 		"nodiscard", // cli arg
 		"noexec", // mount option
 		"nofail", // cli arg
-		"nofile", // option (number of files)
 		"nographic", // cli arg
 		"noheadings", // cli arg
 		"nohibernate", // kernel param
-		"noprofile", // option
 		"nosuid", // mount option
 		"notrunc", // dd option
 		"nounset", // bash
 		"ntfs", // filesystem
-		"ondemand", // concat
 		"oneshot", // systemd
 		"optimise", // B/E
 		"ostype", // virtual box
@@ -175,8 +130,6 @@
 		"partlabel", // linux
 		"partprobe", // program / function
 		"partuuid", // linux
-		"passthru", // nix
-		"pbkdf", // cli arg
 		"pflash", // cli arg
 		"pipefail", // bash
 		"pkgs", // nix
@@ -185,51 +138,37 @@
 		"posix", // word
 		"posixacl", // zfs
 		"poweroff", // program / function
-		"poweron", // concat
-		"pwauth", // abbr (password authentication)
+		"preconfigured", // word
 		"qcow", // file type (qemu)
 		"raidz", // zfs
 		"ramdisk", // word
 		"ramfs", // linux
 		"raspberrypi", // abbr
 		"raspberrypifw", // package
-		"raspi3b", // cli arg
 		"rawdisk", // virtual box
 		"readlink", // command
 		"realpath", // program / function
-		"redistributable", // word
 		"reexec", // option
 		"refreservation", // zfs
 		"relatime", // mount option
-		"robotnix", // package
-		"rootfs", // abbr (root filesystem)
-		"rpiboot", // package
-		"rpicm4", // abbr (Raspberry PI Compute Module 4)
 		"rpool", // zfs
-		"rprivate", // linux
+		"sandboxing", // word
 		"sata", // storage protocol
-		"sbabic", // name
 		"screenshotpng", // virtual box
 		"setsid", // program / function
 		"setuid", // cli arg
 		"sgdisk", // program
 		"shopt", // bash option
 		"showvminfo", // virtual box
-		"sigs", // cli arg
 		"socat", // program / function
 		"specialisation", "specialisations", // nixos option
 		"startvm", // virtual box
 		"stdenv", // nix
 		"storageattach", // virtual box
-		"stty", // program / function
-		"sublist", // Nix
 		"swsuspend", // parameter
-		"syncoid", // program
 		"syslinux", // package
-		"sysrq-trigger", // linux
 		"sysrq", // linux
 		"temproot", // abbr (temporary root (FS))
-		"timefmt", // option
 		"timesync", // systemd
 		"TMPDIR", // env var
 		"tmpfiles", // nixos option
@@ -238,28 +177,22 @@
 		"typecode", // cli arg
 		"uart", "uarts", // serial protocol
 		"uartmode", // virtual box
-		"uboot", // program
 		"udev", // program
 		"udevadm", // program
 		"udptunnel", // program
 		"UEFI", // abbr
-		"uids", // abbr/plural (group IDs)
-		"unencrypted", // ~= not encrypted / decrypted
+		"unpartitioned", // word
 		"upperdir", // mount overlay option
 		"upstreamed", // word
 		"urandom", // linux
-		"usbhid", // kmod
 		"vboxusers", // virtual box
-		"vcgencmd", // program
 		"vdev", "vdevs", // zfs
 		"vfat", // linux
 		"virt", // abbr (virtualization)
 		"virtfs", // qemu / filesystem
 		"virtio", // cli arg
 		"virtualisation", // british english
-		"vmdk", // file type (virtual disk format)
 		"wipefs", // program
-		"wiplib", // name / abbr (WIP library)
 		"workdir", // mount overlay option
 		"xattr", // zfs
 		"xchg", // abbr (exchange)
@@ -269,6 +202,5 @@
 		"yubikey", // program
 		"YubiKeys", // plural
 		"zfsutil", // program / function
-		"zstd", "zstdcat", // program / function
 	],
 }

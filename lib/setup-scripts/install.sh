@@ -3,13 +3,41 @@
 # NixOS Installation
 ##
 
-## Entry point to the installation, see »./README.md«.
+declare-command install-system diskPaths << 'EOD'
+This command installs a NixOS system to local disks or image files.
+It gets all the information it needs from the system's NixOS configuration -- except for the path(s) of the target disk(s) / image file(s).
+
+If »diskPaths« points to something in »/dev/«, then it is directly formatted and written to as block device, otherwise »diskPaths« is (re-)created as raw image and then used as loop device.
+For hosts that install to multiple disks, pass a :-separated list of »<disk-name>=<path>« pairs (the name may be omitted only for the "default" disk).
+
+Since the installation needs to format and mount (image files as) disks, it needs some way of elevating permissions. It can:
+* be run as »root«, requiring Nix to be installed system-wide / for root,
+* be run with the »sudo« argument (see »--help« output; this runs »nix« commands as the original user, and the rest as root),
+* or automatically perform the installation in a qemu VM (see »--vm« flag).
+
+Installing inside the VM is safer (will definitely only write wi the supplied »diskPaths«), more secure (executes the VM), and does not require privilege elevation, but does currently only work for the same ISA, is significantly slower (painfully slow without KVM), and may break custom »*Commands« hooks (esp. those passing in secrets).
+Without VM, installations across different ISAs (e.g. from an x64 desktop to a Raspberry Pi microSD) works if the installing host is NixOS and sets »boot.binfmt.emulatedSystems« for the target systems ISA, or on other Linux with a matching »binfmt_misc« registration with the preload (F) flag.
+
+Once done, the disk(s) can be transferred -- or the image(s) be copied -- to the final system, and should boot there.
+If the target host's hardware target allows, a resulting image can also be passed to the »register-vbox« command to create a bootable VirtualBox instance for the current user, or to »run-qemu« to start it in a qemu VM.
+
+What the installation does is defined solely by the target host's NixOS configuration.
+The "Installation" section of each host's documentation should contain host specific details, if any.
+Various »FLAG«s below affect how the installation is performed (in VM, verbosity, debugging, ...).
+EOD
 function install-system {( # 1: diskPaths
     trap - EXIT # start with empty traps for sub-shell
     prepare-installer "$@" || exit
     do-disk-setup "$1" || exit
     install-system-to $mnt || exit
 )}
+
+declare-flag install-system vm "" "Perform the system installation in a qemu VM instead of on the host itself. This is implied when not running as »root« (or with the »sudo« option).
+The VM boots the target system's kernel (or a slight modification of it, if the system kernel is not bootable in qemu) and performs the installation at the end of the first boot stage (instead of mounting the root filesystem and starting systemd).
+The target disks or images are passed into the VM as block devices (and are the only devices available there). The host's »/nix/« folder is passed as a read-only network share. This makes the installation safe and secure, but also slower (network share), and may cause problems with custom install commands.
+The calling user should have access to KVM, or the installation will be very very slow.
+See also the »--no-vm« and »--vm-shared=« flags."
+declare-flag install-system no-vm "" "Never perform the installation in a VM. Fail if not executed as »root«."
 
 ## Does some argument validation, performs some sanity checks, includes a hack to make installation work when nix isn't installed for root, and runs the installation in qemu (if requested).
 function prepare-installer { # 1: diskPaths
@@ -30,7 +58,7 @@ function prepare-installer { # 1: diskPaths
     local luksName ; for luksName in "@{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ; do
         if [[ -e "/dev/mapper/$luksName" ]] ; then echo "LUKS device mapping »$luksName« is already open. Close it before running the installer." 1>&2 ; \return 1 ; fi
     done
-    local poolName ; for poolName in "@{!config.wip.fs.zfs.pools[@]}" ; do
+    local poolName ; for poolName in "@{!config.setup.zfs.pools[@]}" ; do
         if @{native.zfs}/bin/zfs get -o value -H name "$poolName" &>/dev/null ; then echo "ZFS pool »$poolName« is already imported. Export the pool before running the installer." 1>&2 ; \return 1 ; fi
     done
 
@@ -44,6 +72,8 @@ function prepare-installer { # 1: diskPaths
 
 }
 
+declare-flag install-system vm-shared "" "When installing inside the VM, specifies a host path that is read-write mounted at »/tmp/shared« inside the VM."
+
 ## Re-executes the current system's installation in a qemu VM.
 function reexec-in-qemu {
 
@@ -51,7 +81,7 @@ function reexec-in-qemu {
 
     # (not sure whether this works for block devices)
     ensure-disks "$1" 1 || return
-    qemu=( -m 2048 ) ; declare -A qemuDevs=( )
+    qemu=( -m 3072 ) ; declare -A qemuDevs=( )
     local index=2 ; local name ; for name in "${!blockDevs[@]}" ; do
         #if [[ ${blockDevs[$name]} != /dev/* ]] ; then
         qemu+=( # not sure how correct the interpretations of the command are
@@ -69,10 +99,10 @@ function reexec-in-qemu {
     devSpec= ; for name in "${!qemuDevs[@]}" ; do devSpec+="$name"="${qemuDevs[$name]}": ; done
     newArgs+=( ${devSpec%:} ) ; shift ; (( $# == 0 )) || args+=( "$@" ) # (( ${#argv[@]} > 1 )) && args+=( "${argv[@]:1}" )
 
-    #local output=@{inputs.self}'#'nixosConfigurations.@{outputName:?}.config.system.build.vmExec
+    #local output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec
     local output=@{config.system.build.vmExec.drvPath!unsafeDiscardStringContext} # this is more accurate, but also means another system needs to get evaluated every time
     local scripts=$0 ; if [[ @{pkgs.system} != "@{native.system}" ]] ; then
-        scripts=$( build-lazy @{inputs.self}'#'apps.@{pkgs.system}.@{outputName:?}.derivation ) || return
+        scripts=$( build-lazy @{inputs.self}'#'apps.@{pkgs.system}.@{config.installer.outputName:?}.derivation ) || return
     fi
     local command="$scripts install-system $( printf '%q ' "${newArgs[@]}" ) || exit"
 
@@ -93,11 +123,15 @@ function nixos-install-cmd {( # 1: mnt, 2: topLevel
     LC_ALL=C PATH=$PATH:@{native.util-linux}/bin @{native.nixos-install-tools}/bin/nixos-enter --silent --root "$1" -c "${_set_x:-:} ; @{config.system.build.installBootLoader} $2" || exit
 )}
 
+declare-flag install-system toplevel "" "Optional replacement for the actual »config.system.build.toplevel«."
+declare-flag install-system no-inspect "" "Do not inspect the (successfully) installed system before unmounting its filesystems."
+declare-flag install-system inspect-cmd "script" "Instead of opening an interactive shell for the post-installation inspection, »eval« this script."
+
 ## Copies the system's dependencies to the disks mounted at »$mnt« and installs the bootloader. If »$inspect« is set, a root shell will be opened in »$mnt« afterwards.
 #  »$topLevel« may point to an alternative top-level dependency to install.
-function install-system-to {( set -u # 1: mnt
-    mnt=$1 ; topLevel=${2:-}
+function install-system-to {( set -u # 1: mnt, 2?: topLevel
     targetSystem=${args[toplevel]:-@{config.system.build.toplevel}}
+    mnt=$1 ; topLevel=${2:-$targetSystem}
     beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
     beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
     trap - EXIT # start with empty traps for sub-shell
@@ -120,14 +154,14 @@ function install-system-to {( set -u # 1: mnt
     fi
 
     # Support cross architecture installation (not sure if this is actually required)
-    if [[ $(cat /run/current-system/system 2>/dev/null || echo "x86_64-linux") != "@{config.wip.preface.hardware}"-linux ]] ; then
-        mkdir -p $mnt/run/binfmt || exit ; [[ ! -e /run/binfmt/"@{config.wip.preface.hardware}"-linux ]] || cp -a {,$mnt}/run/binfmt/"@{config.wip.preface.hardware}"-linux || exit # On NixOS, this is a symlink or wrapper script, pointing to the store.
+    if [[ $(cat /run/current-system/system 2>/dev/null || echo "x86_64-linux") != "@{pkgs.system}" ]] ; then
+        mkdir -p $mnt/run/binfmt || exit ; [[ ! -e /run/binfmt/"@{pkgs.system}" ]] || cp -a {,$mnt}/run/binfmt/"@{pkgs.system}" || exit # On NixOS, this is a symlink or wrapper script, pointing to the store.
         # Ubuntu (20.04, by default) uses a statically linked, already loaded qemu binary (F-flag), which therefore does not need to be reference-able from within the chroot.
     fi
 
     # Copy system closure to new nix store:
     if [[ ${SUDO_USER:-} ]] ; then chown -R $SUDO_USER: $mnt/nix/store $mnt/nix/var || exit ; fi
-    cmd=( nix --extra-experimental-features nix-command --offline copy --no-check-sigs --to $mnt ${topLevel:-$targetSystem} )
+    cmd=( nix --extra-experimental-features nix-command --offline copy --no-check-sigs --to $mnt "$topLevel" )
     if [[ ${args[quiet]:-} ]] ; then
         "${cmd[@]}" --quiet >/dev/null 2> >( grep -Pe '^error:' || true ) || exit
     elif  [[ ${args[quiet]:-} ]] ; then
@@ -148,9 +182,9 @@ function install-system-to {( set -u # 1: mnt
 
     # Run the main install command (primarily for the bootloader):
     @{native.util-linux}/bin/mount -o bind,ro /nix/store $mnt/nix/store || exit ; prepend_trap '! @{native.util-linux}/bin/mountpoint -q $mnt/nix/store || @{native.util-linux}/bin/umount -l $mnt/nix/store' EXIT || exit # all the things required to _run_ the system are copied, but (may) need some more things to initially install it and/or enter the chroot (like qemu, see above)
-    run-hook-script 'Pre Installation' @{config.wip.fs.disks.preInstallCommands!writeText.preInstallCommands} || exit
-    code=0 ; nixos-install-cmd $mnt "${topLevel:-$targetSystem}" >$beLoud 2>$beSilent || code=$?
-    run-hook-script 'Post Installation' @{config.wip.fs.disks.postInstallCommands!writeText.postInstallCommands} || exit
+    run-hook-script 'Pre Installation' @{config.installer.commands.preInstall!writeText.preInstallCommands} || exit
+    code=0 ; nixos-install-cmd $mnt "$topLevel" >$beLoud 2>$beSilent || code=$?
+    run-hook-script 'Post Installation' @{config.installer.commands.postInstall!writeText.postInstallCommands} || exit
 
     # Done!
     if [[ ${args[no-inspect]:-} ]] ; then

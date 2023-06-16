@@ -10,7 +10,7 @@ GPT-FDisk patched to be able to move not only the primary, but also the backup p
 ```nix
 #*/# end of MarkDown, beginning of NixPkgs overlay:
 dirname: inputs: final: prev: let
-    inherit (final) pkgs; inherit (inputs.self) lib;
+    inherit (final) pkgs; lib = inputs.self.lib.__internal__;
     debug = false;
 in {
 

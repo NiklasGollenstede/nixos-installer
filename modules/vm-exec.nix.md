@@ -29,7 +29,7 @@ nix run .../nixos-config'#'nixosConfigurations.${hostName}.config.system.build.v
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: { config, options, pkgs, lib, modulesPath, extendModules, ... }: let inherit (inputs.self) lib; in let
+dirname: inputs: { config, options, pkgs, lib, modulesPath, extendModules, ... }: let lib = inputs.self.lib.__internal__; in let
     prefix = inputs.config.prefix;
     cfg = config.virtualisation.vmVariantExec;
 in let hostModule = {
@@ -52,7 +52,7 @@ in let hostModule = {
             mkdir -p $out/bin
             ln -s ${cfg.system.build.toplevel} $out/system
             ln -s ${pkgs.writeShellScript name ''
-                ${lib.wip.extractBashFunction (builtins.readFile lib.wip.setup-scripts.utils) "generic-arg-parse"}
+                ${lib.fun.extractBashFunction (builtins.readFile lib.self.setup-scripts.utils) "generic-arg-parse"}
                 generic-arg-parse "$@" ; set -- ; set -o pipefail -u #; set -x
                 script=''${argv[0]:?'The first positional argument must be the script to execute in the VM'} ; argv=( "''${argv[@]:1}" )
 
@@ -85,6 +85,8 @@ in let hostModule = {
     _file = "${dirname}/vm-exec.nix.md#vmModule";
     imports = [ ({
 
+        virtualisation.graphics = false;
+
         # Instead of tearing down the initrd environment, adjust some mounts and run the »command« in the initrd:
         boot.initrd.postMountCommands = ''
 
@@ -97,7 +99,7 @@ in let hostModule = {
             mkdir -p -m 755 /nix/var/nix/db.work /nix/var/nix/db.upper /nix/var/nix/db
             mount -t overlay overlay -o lowerdir=/nix/var/nix/db.lower,workdir=/nix/var/nix/db.work,upperdir=/nix/var/nix/db.upper /nix/var/nix/db
 
-            # Nix insists on setting the ownership of »/nix/store« to »0:30000« (if run as root(?) and it is something else, e.g. when using »nix-user-chroot«):
+            # Nix insists on setting the ownership of »/nix/store« to »0:30000« (if run as root(?) and the current ownership is something else, e.g. when using »nix-user-chroot«):
             mkdir -p -m 755 /nix/store.work /nix/store.upper /nix/store
             mount -t overlay overlay -o lowerdir=/nix/store.lower,workdir=/nix/store.work,upperdir=/nix/store.upper /nix/store
 
@@ -107,7 +109,7 @@ in let hostModule = {
             ln -sfT $toplevel /run/booted-system
             ln -sfT $toplevel/kernel-modules/lib/modules /lib/modules
 
-            # ALso mostly dor debugging shells:
+            # Also mostly dor debugging shells:
             mv /etc /etc.initrd
             mkdir -p -m 755 /etc.work /etc.upper /etc
             mount -t overlay overlay -o lowerdir=$toplevel/etc,workdir=/etc.work,upperdir=/etc.upper /etc
@@ -135,13 +137,14 @@ in let hostModule = {
 
     }) ({
 
+        virtualisation.writableStore = false;
         fileSystems = lib.mkVMOverride {
             "/nix/var/nix/db.lower" = {
                 fsType = "9p"; device = "nix-var-nix-db"; neededForBoot = true;
                 options = [ "trans=virtio" "version=9p2000.L"  "msize=4194304" "ro" ];
             };
             "/nix/store".options = lib.mkAfter [ "ro" "msize=4194304" ];
-            "/nix/store".mountPoint = "/nix/store.lower";
+            "/nix/store".mountPoint = lib.mkForce "/nix/store.lower";
         }; # mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 nix-var-nix-db /nix/var/nix/db
         virtualisation.qemu.options = [ "-virtfs local,path=/nix/var/nix/db,security_model=none,mount_tag=nix-var-nix-db,readonly=on" ]; # (doing this manually to pass »readonly«, to not ever corrupt the host's Nix DBs)
 

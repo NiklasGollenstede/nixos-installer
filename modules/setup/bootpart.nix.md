@@ -9,13 +9,13 @@ This is a simple shortcut to define and mount a boot/firmware/EFI partition and 
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: { config, pkgs, lib, ... }: let inherit (inputs.self) lib; in let
-    prefix = inputs.config.prefix;
-    cfg = config.${prefix}.fs.boot;
+dirname: inputs: { config, pkgs, lib, ... }: let lib = inputs.self.lib.__internal__; in let
+    inherit (inputs.config.rename) setup;
+    cfg = config.${setup}.bootpart;
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
 in {
 
-    options.${prefix} = { fs.boot = {
+    options = { ${setup}.bootpart = {
         enable = lib.mkEnableOption "configuration of a boot partition as GPT partition 1 on the »primary« disk and a FAT32 filesystem on it";
         mountpoint = lib.mkOption { description = "Path at which to mount a vfat boot partition."; type = lib.types.str; default = "/boot"; };
         createMbrPart = lib.mkOption { description = "Whether to create a hybrid MBR with (only) the boot partition listed as partition 1."; type = lib.types.bool; default = true; };
@@ -25,9 +25,9 @@ in {
     config = let
     in lib.mkIf cfg.enable (lib.mkMerge [ ({
 
-        ${prefix} = {
-            fs.disks.partitions."boot-${hash}" = { type = lib.mkDefault "ef00"; size = lib.mkDefault cfg.size; index = lib.mkDefault 1; order = lib.mkDefault 1500; disk = lib.mkOptionDefault "primary"; }; # require it to be part1, and create it early
-            fs.disks.devices = lib.mkIf cfg.createMbrPart { primary = { mbrParts = lib.mkDefault "1"; extraFDiskCommands = ''
+        ${setup} = {
+            disks.partitions."boot-${hash}" = { type = lib.mkDefault "ef00"; size = lib.mkDefault cfg.size; index = lib.mkDefault 1; order = lib.mkDefault 1500; disk = lib.mkOptionDefault "primary"; }; # require it to be part1, and create it early
+            disks.devices = lib.mkIf cfg.createMbrPart { primary = { mbrParts = lib.mkDefault "1"; extraFDiskCommands = ''
                 t;1;c  # type ; part1 ; W95 FAT32 (LBA)
                 a;1    # active/boot ; part1
             ''; }; };

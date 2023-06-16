@@ -1,19 +1,23 @@
 
 ## Creates all of the system's ZFS pools that are »createDuringInstallation«, plus their datasets.
 function create-zpools { # 1: mnt
-    local poolName ; for poolName in "@{!config.wip.fs.zfs.pools[@]}" ; do
-        if [[ ! @{config.wip.fs.zfs.pools!catAttrSets.createDuringInstallation[$poolName]} ]] ; then continue ; fi
+    local poolName ; for poolName in "@{!config.setup.zfs.pools[@]}" ; do
+        if [[ ! @{config.setup.zfs.pools!catAttrSets.createDuringInstallation[$poolName]} ]] ; then continue ; fi
         create-zpool "$1" "$poolName"
     done
 }
 
-## Creates a single of the system's ZFS pools and its datasets.
-function create-zpool { # 1: mnt, 2: poolName
+
+declare-command create-zpool mnt poolName << 'EOD'
+Creates a single of the system's ZFS pools, and its datasets. Can be called manually to create pools that were added to the configuration, or to create those declared with »createDuringInstallation = false«. Expects the backing device(-partition)s to exist as declared for the pool.
+EOD
+declare-flag install-system zpool-force "" "(create-zpool) When creating ZFS storage pools, pass the »-f« (force) option. This may be required when installing to disks that are currently part of a pool, or ZFS refuses do reuse them."
+function create-zpool {
     local mnt=$1 ; local poolName=$2
-    eval 'local -A pool='"@{config.wip.fs.zfs.pools[$poolName]}"
+    eval 'local -A pool='"@{config.setup.zfs.pools[$poolName]}"
     eval 'local -a vdevs='"${pool[vdevArgs]}"
     eval 'local -A poolProps='"${pool[props]}"
-    eval 'local -A dataset='"@{config.wip.fs.zfs.datasets[${pool[name]}]}"
+    eval 'local -A dataset='"@{config.setup.zfs.datasets[${pool[name]}]}"
     eval 'local -A dataProps='"${dataset[props]}"
     local dummy ; get-zfs-crypt-props "${dataset[name]}" dataProps dummy dummy
     local -a zpoolCreate=( ) ; keySrc=/dev/null
@@ -33,18 +37,20 @@ function create-zpool { # 1: mnt, 2: poolName
     done
     @{native.kmod}/bin/modprobe zfs || true
     <$keySrc @{native.xxd}/bin/xxd -l 32 -c 64 -p | ( PATH=@{native.zfs}/bin ; ${_set_x:-:} ; zpool create ${args[zpool-force]:+-f} "${zpoolCreate[@]}" -R "$mnt" "${pool[name]}" "${vdevs[@]}" ) || return
+    prepend_trap "@{native.zfs}/bin/zpool export '$poolName'" EXIT || return
     if [[ $keySrc == /dev/urandom ]] ; then @{native.zfs}/bin/zfs unload-key "$poolName" &>/dev/null ; fi
 
-    prepend_trap "@{native.zfs}/bin/zpool export '$poolName'" EXIT || return
     ensure-datasets $mnt '^'"$poolName"'($|[/])' || return
     if [[ ${args[debug]:-} ]] ; then @{native.zfs}/bin/zfs list -o name,canmount,mounted,mountpoint,keystatus,encryptionroot -r "$poolName" ; fi
 }
 
-## Ensures that the system's datasets exist and have the defined properties (but not that they don't have properties that aren't defined).
-#  The pool(s) must exist, be imported with root prefix »$mnt«, and (if datasets are to be created or encryption roots to be inherited) the system's keystore must be open (see »mount-keystore-luks«) or the keys be loaded.
-#  »keystatus« and »mounted« of existing datasets should remain unchanged, newly crated datasets will not be mounted but have their keys loaded.
-function ensure-datasets { # 1: mnt, 2?: filterExp
-    if (( @{#config.wip.fs.zfs.datasets[@]} == 0 )) ; then \return ; fi
+declare-command ensure-datasets mnt filterExp? << 'EOD'
+Ensures that the system's datasets exist and have the defined properties (but not that they don't have properties that aren't defined).
+The pool(s) must exist, be imported with root prefix »$mnt«, and (if datasets are to be created or encryption roots to be inherited) the system's keystore must be open (see »mount-keystore-luks«) or the keys must be loaded.
+»keystatus« and »mounted« of existing datasets should remain unchanged by this function, newly crated datasets will not be mounted but have their keys loaded.
+EOD
+function ensure-datasets {
+    if (( @{#config.setup.zfs.datasets[@]} == 0 )) ; then \return ; fi
     local mnt=$1 ; while [[ "$mnt" == */ ]] ; do mnt=${mnt:0:(-1)} ; done # (remove any tailing slashes)
     local filterExp=${2:-'^'}
     local tmpMnt=$(mktemp -d) ; trap "rmdir $tmpMnt" EXIT
@@ -53,7 +59,7 @@ function ensure-datasets { # 1: mnt, 2?: filterExp
     local name ; while IFS= read -u3 -r -d $'\0' name ; do
         if  [[ ! $name =~ $filterExp ]] ; then printf 'Skipping dataset »%s« since it does not match »%s«\n' "$name" "$filterExp" >&2 ; continue ; fi
 
-        eval 'local -A dataset='"@{config.wip.fs.zfs.datasets[$name]}"
+        eval 'local -A dataset='"@{config.setup.zfs.datasets[$name]}"
         eval 'local -A props='"${dataset[props]}"
 
         local explicitKeylocation=${props[keylocation]:-} cryptKey cryptRoot
@@ -127,10 +133,10 @@ function ensure-datasets { # 1: mnt, 2?: filterExp
             # »zfs allow $dataset« seems to be the only way to view permissions, and that is not very parsable -.-
             ( PATH=@{native.zfs}/bin ; ${_set_x:-:} ; zfs allow -$who "${allows[$who]}" "${dataset[name]}" >&2 ) || return
         done
-    done 3< <( printf '%s\0' "@{!config.wip.fs.zfs.datasets[@]}" | LC_ALL=C sort -z )
+    done 3< <( printf '%s\0' "@{!config.setup.zfs.datasets[@]}" | LC_ALL=C sort -z )
 }
 
-## Given the name (»datasetPath«) of a ZFS dataset, this deducts crypto-related options from the declared keys (»config.wip.fs.keystore.keys."zfs/..."«).
+## Given the name (»datasetPath«) of a ZFS dataset, this deducts crypto-related options from the declared keys (»config.setup.keystore.keys."zfs/..."«).
 function get-zfs-crypt-props { # 1: datasetPath, 2?: name_cryptProps, 3?: name_cryptKey, 4?: name_cryptRoot
     local hash=@{config.networking.hostName!hashString.sha256:0:8}
     local keystore=/run/keystore-$hash
@@ -141,8 +147,8 @@ function get-zfs-crypt-props { # 1: datasetPath, 2?: name_cryptProps, 3?: name_c
     } ; local key=${pool/-$hash'/'/}$path # strip hash from pool name
 
     __cryptKey='' ; __cryptRoot=''
-    if [[ @{config.wip.fs.keystore.keys[zfs/$name]:-} ]] ; then
-        if [[ @{config.wip.fs.keystore.keys[zfs/$name]} == unencrypted ]] ; then
+    if [[ @{config.setup.keystore.keys[zfs/$name]:-} ]] ; then
+        if [[ @{config.setup.keystore.keys[zfs/$name]} == unencrypted ]] ; then
             __cryptProps[encryption]=off  # empty key to disable encryption
         else
             __cryptProps[encryption]=aes-256-gcm ; __cryptProps[keyformat]=hex ; __cryptProps[keylocation]=file://"$keystore"/zfs/"$name".key
@@ -151,8 +157,8 @@ function get-zfs-crypt-props { # 1: datasetPath, 2?: name_cryptProps, 3?: name_c
     else
         while true ; do
             name=$(dirname $name) ; if [[ $name == . ]] ; then break ; fi
-            if [[ @{config.wip.fs.keystore.keys[zfs/$name]:-} ]] ; then
-                if [[ @{config.wip.fs.keystore.keys[zfs/$name]} != unencrypted ]] ; then
+            if [[ @{config.setup.keystore.keys[zfs/$name]:-} ]] ; then
+                if [[ @{config.setup.keystore.keys[zfs/$name]} != unencrypted ]] ; then
                     __cryptKey=$keystore/zfs/$name.key ; __cryptRoot=$name
                 fi ; break
             fi

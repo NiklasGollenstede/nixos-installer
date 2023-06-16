@@ -2,50 +2,48 @@
   "nodes": {
     "config": {
       "locked": {
-        "dir": "example/defaultConfig",
-        "lastModified": 1652094794,
-        "narHash": "sha256-YKsmTOispYxmmpf7i9BJ0Gt9itLcfyXExteYQoZUfGQ=",
-        "owner": "NiklasGollenstede",
-        "repo": "nix-wiplib",
-        "rev": "5e9cc7ce3440be9ce6aeeaedcc70db9c80489c5f",
-        "type": "github"
+        "lastModified": 1,
+        "narHash": "sha256-elz+1VaAKxE4aTOOm+5MjsAUd+H1yHQyypfvA0PAnzs=",
+        "path": "./example/defaultConfig",
+        "type": "path"
       },
       "original": {
-        "dir": "example/defaultConfig",
-        "owner": "NiklasGollenstede",
-        "repo": "nix-wiplib",
-        "rev": "5e9cc7ce3440be9ce6aeeaedcc70db9c80489c5f",
-        "type": "github"
+        "path": "./example/defaultConfig",
+        "type": "path"
       }
     },
-    "nixos-hardware": {
+    "functions": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
       "locked": {
-        "lastModified": 1672644464,
-        "narHash": "sha256-RYlvRMcQNT7FDoDkViijQBHg9g+blsB+U6AvL/gAsPI=",
-        "owner": "NixOS",
-        "repo": "nixos-hardware",
-        "rev": "ca29e25c39b8e117d4d76a81f1e229824a9b3a26",
+        "lastModified": 1686871797,
+        "narHash": "sha256-HF/gu0zMsSVZTIrSDD4qaNlwqx17dLGxO0te0P4XqCE=",
+        "owner": "NiklasGollenstede",
+        "repo": "nix-functions",
+        "rev": "56b7bc01e15c5ab52de582650fc31bd846a463e3",
         "type": "github"
       },
       "original": {
-        "owner": "NixOS",
-        "ref": "master",
-        "repo": "nixos-hardware",
+        "owner": "NiklasGollenstede",
+        "repo": "nix-functions",
         "type": "github"
       }
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1672844754,
-        "narHash": "sha256-o26WabuHABQsaHxxmIrR3AQRqDFUEdLckLXkVCpIjSU=",
+        "lastModified": 1686736559,
+        "narHash": "sha256-YyUSVoOKIDAscTx7IZhF9x3qgZ9dPNF19fKk+4c5irc=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "e9ade2c8240e00a4784fac282a502efff2786bdc",
+        "rev": "ddf4688dc7aeb14e8a3c549cb6aa6337f187a884",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixos-22.11",
+        "ref": "nixos-23.05",
         "repo": "nixpkgs",
         "type": "github"
       }
@@ -53,7 +51,7 @@
     "root": {
       "inputs": {
         "config": "config",
-        "nixos-hardware": "nixos-hardware",
+        "functions": "functions",
         "nixpkgs": "nixpkgs"
       }
     }

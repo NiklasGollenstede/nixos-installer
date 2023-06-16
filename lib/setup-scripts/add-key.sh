@@ -8,13 +8,13 @@
 
 ## Outputs nothing (/ an empty key), causing that ZFS dataset to be unencrypted, even if it's parent is encrypted.
 function gen-key-unencrypted {( set -eu # 1: usage
-    :
+    : # TODO: write-secret does not allow empty secrets anymore (might want to change that back)
 )}
 
 ## Uses the hostname as a trivial key.
 function gen-key-hostname {( set -eu # 1: usage
     usage=$1
-    if [[ ! "$usage" =~ ^(luks/keystore-@{config.networking.hostName!hashString.sha256:0:8}/.*)$ ]] ; then printf '»trivial« key mode is only available for the keystore itself.\n' 1>&2 ; \exit 1 ; fi
+    if [[ ! "$usage" =~ ^(luks/keystore-@{config.networking.hostName!hashString.sha256:0:8}/.*)$ ]] ; then printf 'The trivial »hostname« key mode is only available for the keystore itself.\n' 1>&2 ; \exit 1 ; fi
     printf %s "@{config.networking.hostName}"
 )}
 

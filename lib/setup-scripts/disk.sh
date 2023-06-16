@@ -14,16 +14,16 @@ function do-disk-setup { # 1: diskPaths
 
     partition-disks || return
     create-luks-layers && open-luks-layers || return # other block layers would go here too (but figuring out their dependencies would be difficult)
-    run-hook-script 'Post Partitioning' @{config.wip.fs.disks.postPartitionCommands!writeText.postPartitionCommands} || return
+    run-hook-script 'Post Partitioning' @{config.installer.commands.postPartition!writeText.postPartitionCommands} || return
 
     format-partitions || return
     if [[ $(LC_ALL=C type -t create-zpools) == function ]] ; then create-zpools $mnt || return ; fi
-    run-hook-script 'Post Formatting' @{config.wip.fs.disks.postFormatCommands!writeText.postFormatCommands} || return
+    run-hook-script 'Post Formatting' @{config.installer.commands.postFormat!writeText.postFormatCommands} || return
 
     fix-grub-install || return
 
     prepend_trap "unmount-system $mnt" EXIT && mount-system $mnt || return
-    run-hook-script 'Post Mounting' @{config.wip.fs.disks.postMountCommands!writeText.postMountCommands} || return
+    run-hook-script 'Post Mounting' @{config.installer.commands.postMount!writeText.postMountCommands} || return
 }
 
 # Notes on segmentation and alignment:
@@ -34,14 +34,15 @@ function do-disk-setup { # 1: diskPaths
 #     * (source: https://lwn.net/Articles/428584/)
 # * So alignment at the default »align=8MiB« actually seems a decent choice.
 
+declare-flag install-system image-owner "" "When using image files, »chown« them to this »owner[:group]« before the installation."
 
-## Parses and expands »diskPaths« to ensure that a disk or image exists for each »config.wip.fs.disks.devices«, creates and loop-mounts images for non-/dev/ paths, and checks whether physical device sizes match.
+## Parses and expands »diskPaths« to ensure that a disk or image exists for each »config.setup.disks.devices«, creates and loop-mounts images for non-/dev/ paths, and checks whether physical device sizes match.
 function ensure-disks { # 1: diskPaths, 2?: skipLosetup
 
     declare -g -A blockDevs=( ) # this ends up in the caller's scope
     if [[ $1 == */ ]] ; then
         mkdir -p "$1"
-        for name in "@{!config.wip.fs.disks.devices[@]}" ; do blockDevs[$name]=${1}${name}.img ; done
+        for name in "@{!config.setup.disks.devices[@]}" ; do blockDevs[$name]=${1}${name}.img ; done
     else
         local path ; for path in ${1//:/ } ; do
             local name=${path/=*/} ; if [[ $name != "$path" ]] ; then path=${path/$name=/} ; else name=primary ; fi
@@ -50,10 +51,10 @@ function ensure-disks { # 1: diskPaths, 2?: skipLosetup
         done
     fi
 
-    local name ; for name in "@{!config.wip.fs.disks.devices[@]}" ; do
-        if [[ ! @{config.wip.fs.disks.devices!catAttrSets.partitionDuringInstallation[$name]} ]] ; then continue ; fi
+    local name ; for name in "@{!config.setup.disks.devices[@]}" ; do
+        if [[ ! @{config.setup.disks.devices!catAttrSets.partitionDuringInstallation[$name]} ]] ; then continue ; fi
         if [[ ! ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name not provided" 1>&2 ; \return 1 ; fi
-        eval 'local -A disk='"@{config.wip.fs.disks.devices[$name]}"
+        eval 'local -A disk='"@{config.setup.disks.devices[$name]}"
         if [[ ${blockDevs[$name]} != /dev/* ]] ; then
             local outFile=${blockDevs[$name]} &&
             install -m 640 -T /dev/null "$outFile" && truncate -s "${disk[size]}" "$outFile" || return
@@ -72,36 +73,36 @@ function ensure-disks { # 1: diskPaths, 2?: skipLosetup
 }
 
 
-## Partitions the »blockDevs« (matching »config.wip.fs.disks.devices«) to ensure that all specified »config.wip.fs.disks.partitions« exist.
+## Partitions the »blockDevs« (matching »config.setup.disks.devices«) to ensure that all specified »config.setup.disks.partitions« exist.
 #  Tries to abort if any partition already exists on the host.
 function partition-disks {
     local beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
     local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
 
-    for partDecl in "@{config.wip.fs.disks.partitionList[@]}" ; do
+    for partDecl in "@{config.setup.disks.partitionList[@]}" ; do
         eval 'local -A part='"$partDecl"
         if [[ -e /dev/disk/by-partlabel/"${part[name]}" ]] && ! is-partition-on-disks /dev/disk/by-partlabel/"${part[name]}" "${blockDevs[@]}" ; then echo "Partition /dev/disk/by-partlabel/${part[name]} already exists on this host and does not reside on one of the target disks ${blockDevs[@]}. Refusing to create another partition with the same partlabel!" 1>&2 ; \return 1 ; fi
     done
 
-    for name in "@{!config.wip.fs.disks.devices[@]}" ; do
-        if [[ ! @{config.wip.fs.disks.devices!catAttrSets.partitionDuringInstallation[$name]} ]] ; then continue ; fi
-        eval 'local -A disk='"@{config.wip.fs.disks.devices[$name]}"
+    for name in "@{!config.setup.disks.devices[@]}" ; do
+        if [[ ! @{config.setup.disks.devices!catAttrSets.partitionDuringInstallation[$name]} ]] ; then continue ; fi
+        eval 'local -A disk='"@{config.setup.disks.devices[$name]}"
         if [[ ${disk[serial]:-} ]] ; then
             actual=$( @{native.systemd}/bin/udevadm info --query=property --name="$blockDev" | grep -oP 'ID_SERIAL_SHORT=\K.*' || echo '<none>' )
             if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev's serial ($actual) does not match the serial (${disk[serial]}) declared for ${disk[name]}" 1>&2 ; \return 1 ; fi
         fi
         # can (and probably should) restore the backup:
-        ( PATH=@{native.gptfdisk}/bin ; ${_set_x:-:} ; sgdisk --zap-all --load-backup=@{config.wip.fs.disks.partitioning}/"${disk[name]}".backup ${disk[allowLarger]:+--move-second-header} "${blockDevs[${disk[name]}]}" >$beLoud 2>$beSilent ) || return
+        ( PATH=@{native.gptfdisk}/bin ; ${_set_x:-:} ; sgdisk --zap-all --load-backup=@{config.setup.disks.partitioning}/"${disk[name]}".backup ${disk[allowLarger]:+--move-second-header} "${blockDevs[${disk[name]}]}" >$beLoud 2>$beSilent ) || return
         #partition-disk "${disk[name]}" "${blockDevs[${disk[name]}]}" || return
     done
     @{native.parted}/bin/partprobe "${blockDevs[@]}" &>$beLoud || return
     @{native.systemd}/bin/udevadm settle -t 15 || true # sometimes partitions aren't quite made available yet
 
     # ensure that filesystem creation does not complain about the devices already being occupied by a previous filesystem
-    local toWipe=( ) ; for part in "@{config.wip.fs.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" ; do [[ ! -e "$part" ]] || toWipe+=( "$part" ) ; done
+    local toWipe=( ) ; for part in "@{config.setup.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" ; do [[ ! -e "$part" ]] || toWipe+=( "$part" ) ; done
     @{native.util-linux}/bin/wipefs --all "${toWipe[@]}" >$beLoud 2>$beSilent || return
-    #</dev/zero head -c 4096 | tee "@{config.wip.fs.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" >/dev/null
-    #for part in "@{config.wip.fs.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" ; do @{native.util-linux}/bin/blkdiscard -f "$part" || return ; done
+    #</dev/zero head -c 4096 | tee "@{config.setup.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" >/dev/null
+    #for part in "@{config.setup.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" ; do @{native.util-linux}/bin/blkdiscard -f "$part" || return ; done
 }
 
 ## Given a declared disk device's »name« and a path to an actual »blockDev« (or image) file, partitions the device as declared in the config.
@@ -109,7 +110,7 @@ function partition-disk { # 1: name, 2: blockDev, 3?: devSize
     local name=$1 ; local blockDev=$2
     local beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
     local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
-    eval 'local -A disk='"@{config.wip.fs.disks.devices[$name]}"
+    eval 'local -A disk='"@{config.setup.disks.devices[$name]}"
     local devSize=${3:-$( @{native.util-linux}/bin/blockdev --getsize64 "$blockDev" )}
 
     local -a sgdisk=( --zap-all ) # delete existing part tables
@@ -119,7 +120,7 @@ function partition-disk { # 1: name, 2: blockDev, 3?: devSize
     fi
     sgdisk+=( --disk-guid="${disk[guid]}" )
 
-    for partDecl in "@{config.wip.fs.disks.partitionList[@]}" ; do
+    for partDecl in "@{config.setup.disks.partitionList[@]}" ; do
         eval 'local -A part='"$partDecl"
         if [[ ${part[disk]} != "${disk[name]}" ]] ; then continue ; fi
         if [[ ${part[size]:-} =~ ^[0-9]+%$ ]] ; then
@@ -206,7 +207,7 @@ function fix-grub-install {
             if [[ ! @{config.fileSystems[$mount]:-} ]] ; then continue ; fi
             device=$( eval 'declare -A fs='"@{config.fileSystems[$mount]}" ; echo "${fs[device]}" )
             label=${device/\/dev\/disk\/by-partlabel\//}
-            if [[ $label == "$device" || $label == *' '* || ' '@{config.wip.fs.disks.partitions!attrNames[@]}' ' != *' '$label' '* ]] ; then echo "" 1>&2 ; \return 1 ; fi
+            if [[ $label == "$device" || $label == *' '* || ' '@{config.setup.disks.partitions!attrNames[@]}' ' != *' '$label' '* ]] ; then echo "" 1>&2 ; \return 1 ; fi
             bootLoop=$( @{native.util-linux}/bin/losetup --show -f /dev/disk/by-partlabel/$label ) || return ; prepend_trap "@{native.util-linux}/bin/losetup -d $bootLoop" EXIT
             ln -sfT ${bootLoop/\/dev/..\/..} /dev/disk/by-partlabel/$label || return
         done

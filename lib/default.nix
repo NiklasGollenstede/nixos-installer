@@ -1,6 +1,4 @@
-dirname: inputs@{ self, nixpkgs, ...}: let
-    #fix = f: let x = f x; in x;
-    #categories = fix (wip: (import "${dirname}/imports.nix" dirname inputs).importAll (inputs // { self = inputs.self // { lib = nixpkgs.lib // { inherit wip; }; }; })) dirname;
-    categories = (import "${dirname}/imports.nix" dirname inputs).importAll inputs dirname;
-    wip = (builtins.foldl' (a: b: a // (if builtins.isAttrs b then b else { })) { } (builtins.attrValues (builtins.removeAttrs categories [ "setup-scripts" ]))) // categories;
-in nixpkgs.lib // { wip = wip // { prefix = inputs.config.prefix; }; }
+dirname: inputs@{ nixpkgs, functions, ...}: let
+    categories = functions.lib.importAll inputs dirname;
+    self = (builtins.foldl' (a: b: a // (if builtins.isAttrs b then b else { })) { } (builtins.attrValues (builtins.removeAttrs categories [ "setup-scripts" ]))) // categories;
+in self // { __internal__ = nixpkgs.lib // { self = self; fun = functions.lib; }; }

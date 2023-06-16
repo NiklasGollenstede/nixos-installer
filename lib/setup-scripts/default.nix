@@ -1,14 +1,13 @@
 dirname: inputs: let
 
-    inherit (inputs.config) prefix;
-    inherit (import "${dirname}/../imports.nix" dirname inputs) getFilesExt;
+    inherit (inputs.config.rename) setup installer;
 
-    replacePrefix = if prefix == "wip" then (x: x) else (builtins.mapAttrs (name: path: (
+    doRenames = if setup == "setup" && installer == "installer" then (x: x) else (builtins.mapAttrs (name: path: (
         builtins.toFile name (builtins.replaceStrings
-            [ "@{config.wip."       "@{#config.wip."       "@{!config.wip." ]
-            [ "@{config.${prefix}." "@{#config.${prefix}." "@{!config.${prefix}." ]
+            [ "@{config.setup."    "@{#config.setup."    "@{!config.setup."    "@{config.installer."    "@{#config.installer."    "@{!config.installer."    ]
+            [ "@{config.${setup}." "@{#config.${setup}." "@{!config.${setup}." "@{config.${installer}." "@{#config.${installer}." "@{!config.${installer}." ]
             (builtins.readFile path)
         )
     )));
 
-in replacePrefix (getFilesExt "sh(.md)?" dirname)
+in doRenames (inputs.functions.lib.getFilesExt "sh(.md)?" dirname)

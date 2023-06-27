@@ -15,8 +15,8 @@ Since the installation needs to format and mount (image files as) disks, it need
 * be run with the »sudo« argument (see »--help« output; this runs »nix« commands as the original user, and the rest as root),
 * or automatically perform the installation in a qemu VM (see »--vm« flag).
 
-Installing inside the VM is safer (will definitely only write wi the supplied »diskPaths«), more secure (executes the VM), and does not require privilege elevation, but does currently only work for the same ISA, is significantly slower (painfully slow without KVM), and may break custom »*Commands« hooks (esp. those passing in secrets).
-Without VM, installations across different ISAs (e.g. from an x64 desktop to a Raspberry Pi microSD) works if the installing host is NixOS and sets »boot.binfmt.emulatedSystems« for the target systems ISA, or on other Linux with a matching »binfmt_misc« registration with the preload (F) flag.
+Installing inside the VM is safer (will definitely only write to the supplied »diskPaths«), more secure (executes everything inside the VM), and does not require privilege elevation, is significantly slower (painfully slow without KVM), and may break custom »*Commands« hooks (esp. those passing in secrets). Across ISAs, the VM installation is even slower, taking many hours for even a simple system.
+Without VM, installations across different ISAs (e.g. from an x64 desktop to a Raspberry Pi microSD) works (even relatively fast) if the installing host is NixOS and sets »boot.binfmt.emulatedSystems« for the target systems ISA, or on other Linux with a matching »binfmt_misc« registration with the preload (F) flag.
 
 Once done, the disk(s) can be transferred -- or the image(s) be copied -- to the final system, and should boot there.
 If the target host's hardware target allows, a resulting image can also be passed to the »register-vbox« command to create a bootable VirtualBox instance for the current user, or to »run-qemu« to start it in a qemu VM.
@@ -77,8 +77,6 @@ declare-flag install-system vm-shared "" "When installing inside the VM, specifi
 ## Re-executes the current system's installation in a qemu VM.
 function reexec-in-qemu {
 
-    if [[ @{pkgs.buildPackages.system} != "@{native.system}" ]] ; then echo "VM installation (implicit when not running as root) of a system built on a different ISA than the current host's is not supported (yet)." 1>&2 ; \return 1 ; fi
-
     # (not sure whether this works for block devices)
     ensure-disks "$1" 1 || return
     qemu=( -m 3072 ) ; declare -A qemuDevs=( )
@@ -101,6 +99,10 @@ function reexec-in-qemu {
 
     #local output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec
     local output=@{config.system.build.vmExec.drvPath!unsafeDiscardStringContext} # this is more accurate, but also means another system needs to get evaluated every time
+    if [[ @{pkgs.buildPackages.system} != "@{native.system}" ]] ; then
+        echo 'Performing the installation in a cross-ISA qemu system VM; this will be very, very slow (many hours) ...'
+        output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec-@{pkgs.buildPackages.system}
+    fi
     local scripts=$0 ; if [[ @{pkgs.system} != "@{native.system}" ]] ; then
         scripts=$( build-lazy @{inputs.self}'#'apps.@{pkgs.system}.@{config.installer.outputName:?}.derivation ) || return
     fi

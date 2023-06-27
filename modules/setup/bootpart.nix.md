@@ -18,7 +18,7 @@ in {
     options = { ${setup}.bootpart = {
         enable = lib.mkEnableOption "configuration of a boot partition as GPT partition 1 on the »primary« disk and a FAT32 filesystem on it";
         mountpoint = lib.mkOption { description = "Path at which to mount a vfat boot partition."; type = lib.types.str; default = "/boot"; };
-        createMbrPart = lib.mkOption { description = "Whether to create a hybrid MBR with (only) the boot partition listed as partition 1."; type = lib.types.bool; default = true; };
+        createMbr = lib.mkOption { description = "Whether to create a hybrid MBR with (only) the boot partition listed as partition 1."; type = lib.types.bool; default = true; };
         size = lib.mkOption { description = "Size of the boot partition, should be *more* than 32M(iB)."; type = lib.types.str; default = "2G"; };
     }; };
 
@@ -27,7 +27,7 @@ in {
 
         ${setup} = {
             disks.partitions."boot-${hash}" = { type = lib.mkDefault "ef00"; size = lib.mkDefault cfg.size; index = lib.mkDefault 1; order = lib.mkDefault 1500; disk = lib.mkOptionDefault "primary"; }; # require it to be part1, and create it early
-            disks.devices = lib.mkIf cfg.createMbrPart { primary = { mbrParts = lib.mkDefault "1"; extraFDiskCommands = ''
+            disks.devices = lib.mkIf cfg.createMbr { primary = { mbrParts = lib.mkDefault "1"; extraFDiskCommands = ''
                 t;1;c  # type ; part1 ; W95 FAT32 (LBA)
                 a;1    # active/boot ; part1
             ''; }; };

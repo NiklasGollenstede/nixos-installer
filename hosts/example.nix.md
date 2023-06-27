@@ -135,6 +135,4 @@ in { preface = { # (any »preface« options have to be defined here)
 
     boot.kernelParams = [ /* "console=tty1" */ "console=ttyS0" "boot.shell_on_fail" ];
 
-    boot.zfs.allowHibernation = lib.mkForce false; # Ugh: https://github.com/NixOS/nixpkgs/commit/c70f0473153c63ad1cf6fbea19f290db6b15291f
-
 }) ]; }

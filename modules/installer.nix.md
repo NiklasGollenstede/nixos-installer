@@ -43,8 +43,8 @@ in {
             postInstall = lib.mkOption { description = desc "just before unmounting the new system" true; type = lib.types.lines; default = ""; };
         };
         outputName = lib.mkOption {
-            description = ''The name this system is exported as by its defining flake (as »nixosConfigurations.''${outputName}« and »apps.*-linux.''${outputName}«).'';
-            type = lib.types.nullOr lib.types.str; # This explicitly does not have a default, so that accessing it when it is not set creates an error.
+            description = ''The name this system is (/ should be) exported as by its defining flake (as »nixosConfigurations.''${outputName}« and »apps.*-linux.''${outputName}«).'';
+            type = lib.types.nullOr lib.types.str; default = null;
         };
         build.scripts = lib.mkOption {
             type = lib.types.functionTo lib.types.str;  internal = true; readOnly = true;

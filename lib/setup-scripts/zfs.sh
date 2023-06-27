@@ -53,7 +53,6 @@ function ensure-datasets {
     if (( @{#config.setup.zfs.datasets[@]} == 0 )) ; then \return ; fi
     local mnt=$1 ; while [[ "$mnt" == */ ]] ; do mnt=${mnt:0:(-1)} ; done # (remove any tailing slashes)
     local filterExp=${2:-'^'}
-    local tmpMnt=$(mktemp -d) ; trap "rmdir $tmpMnt" EXIT
     local zfs=@{native.zfs}/bin/zfs
 
     local name ; while IFS= read -u3 -r -d $'\0' name ; do
@@ -119,7 +118,8 @@ function ensure-datasets {
                 ( PATH=@{native.zfs}/bin ; ${_set_x:-:} ; zfs create "${zfsCreate[@]}" "${dataset[name]}" ) || exit
             fi
             if [[ ${props[canmount]} != off ]] ; then (
-                @{native.util-linux}/bin/mount -t zfs -o zfsutil "${dataset[name]}" $tmpMnt && trap "@{native.util-linux}/bin/umount '${dataset[name]}'" EXIT &&
+                tmpMnt=$(mktemp -d) ; trap "" EXIT && @{native.util-linux}/bin/mount -t zfs -o zfsutil "${dataset[name]}" $tmpMnt &&
+                trap "@{native.util-linux}/bin/umount '${dataset[name]}' ; rmdir $tmpMnt" EXIT &&
                 chmod 000 -- "$tmpMnt" && chown "${dataset[uid]}:${dataset[gid]}" -- "$tmpMnt" && chmod "${dataset[mode]}" -- "$tmpMnt"
             ) || exit ; fi
             if [[ $explicitKeylocation && $explicitKeylocation != "${props[keylocation]:-}" ]] ; then

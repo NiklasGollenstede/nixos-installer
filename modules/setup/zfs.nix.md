@@ -121,7 +121,8 @@ in let module = {
         } ];
 
 
-    }) (lib.mkIf (config.boot.resumeDevice != "") { ## Make resuming after hibernation safe with ZFS:
+    }) (lib.mkIf (false && (config.boot.resumeDevice != "")) { ## Make resuming after hibernation safe with ZFS:
+        # or not: https://github.com/NixOS/nixpkgs/commit/c70f0473153c63ad1cf6fbea19f290db6b15291f
 
         boot.kernelParams = [ "resume=${config.boot.resumeDevice}" ];
         assertions = [ { # Just making sure ...

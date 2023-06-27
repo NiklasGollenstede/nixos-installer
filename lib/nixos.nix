@@ -168,17 +168,17 @@ in rec {
         description = ''
             Call per-host setup and maintenance commands. Most importantly, »install-system«.
         '';
-        ownPath = if exported then "nix run REPO#${system.config.${installer}.outputName} --" else "$0";
+        ownPath = if (system.options.${installer}.outputName != null) then "nix run REPO#${system.config.${installer}.outputName} --" else "$0";
         usageLine = ''
             Usage:
                 %s [sudo] [bash] [--FLAG[=value]]... [--] [COMMAND [ARG]...]
 
-                ${lib.optionalString exported ''
-                    Where »REPO« is the path to a flake repo using »mkSystemsFlake« for it's »apps« output.
+                ${lib.optionalString (system.options.${installer}.outputName != null) ''
+                    Where »REPO« is the path to the flake repo exporting this system (»${system.config.${installer}.outputName}«) using »mkSystemsFlake«.
                 ''}    If the first argument (after the first »--«) is »sudo«, then the program will re-execute itself as root using sudo (minus that »sudo« argument).
                 If the (then) first argument is »bash«, or if there are no (more) arguments, it will execute an interactive shell with the »COMMAND«s (bash functions and exported Nix values used by them) sourced.
                 If a »FLAG« »--command« is supplied, then the first positional argument (»COMMAND«) is »eval«ed as bash instructions, otherwise the first argument should be one of the »COMMAND«s below, which will be called with the positional CLI »ARG«s as arguments.
-                »FLAG«s may be set to customize the behavior of »COMMAND« or any sub-commands it or »SCRIPT« call.
+                »FLAG«s may be set to customize the behavior of »COMMAND« or any sub-commands it calls.
 
             »COMMAND« should be one of:%s
 
@@ -188,17 +188,19 @@ in rec {
 
             Examples:
 
-                Install the host named »$target« to the image file »/tmp/system-$target.img«:
-                $ nix run .#$target -- install-system /tmp/system-$target.img
+                Install the system »$host« to the image file »/tmp/system-$host.img«:
+                    $ nix run .#$host -- install-system /tmp/system-$host.img
+
+                Test a fresh installation of »$host« in a qemu VM:
+                    $ nix run .#$host -- run-qemu --install=always
 
                 Run an interactive bash session with the setup functions in the context of the current host:
-                $ nix run /etc/nixos/#$(hostname)
-                # Now run any of the »COMMAND«s above, or inspect/use the exported Nix variables (»declare -p config_<TAB><TAB>«).
+                    $ nix run /etc/nixos/#$(hostname)
+                Now run any of the »COMMAND«s above, or inspect/use the exported Nix variables (»declare -p config_<TAB><TAB>«).
 
                 Run a root session in the context of a different host (useful if Nix is not installed for root on the current host):
-                $ nix run .#other-host -- sudo
+                    $ nix run .#other-host -- sudo
         '';
-        exported = system.options.${installer}.outputName.isDefined;
         tools = lib.unique (map (p: p.outPath) (lib.filter lib.isDerivation pkgs.stdenv.allowedRequisites));
         esc = lib.escapeShellArg;
     in pkgs.writeShellScript "scripts-${name}" ''

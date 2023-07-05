@@ -157,8 +157,9 @@ in let module = {
         poolNames = filterBy: lib.attrNames (lib.filterAttrs (name: pool: pool.${filterBy}) cfg.pools);
         filter = pool: "^${pool}($|[/])";
         ensure-datasets = zfsPackage: pkgs.writeShellScript "ensure-datasets" ''
+            set -o pipefail -o nounset ; declare-command () { : ; } ; declare-flag () { : ; } ;
             ${lib.fun.substituteImplicit { inherit pkgs; scripts = lib.attrValues { inherit (lib.self.setup-scripts) zfs utils; }; context = { inherit config; native = pkgs // { zfs = zfsPackage; }; }; }}
-            set -eu ; ensure-datasets "$@"
+            ensure-datasets "$@"
         '';
         ensure-datasets-for = filterBy: zfsPackage: ''( if [ ! "''${IN_NIXOS_ENTER:-}" ] && [ -e ${zfsPackage}/bin/zfs ] ; then
             ${lib.concatStrings (map (pool: ''

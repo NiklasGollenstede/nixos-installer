@@ -56,7 +56,7 @@ function ensure-datasets {
     local zfs=@{native.zfs}/bin/zfs
 
     local name ; while IFS= read -u3 -r -d $'\0' name ; do
-        if  [[ ! $name =~ $filterExp ]] ; then printf 'Skipping dataset »%s« since it does not match »%s«\n' "$name" "$filterExp" >&2 ; continue ; fi
+        if  [[ ! $name =~ $filterExp ]] ; then : "Skipping dataset »$name« since it does not match »$filterExp«" ; continue ; fi
 
         eval 'local -A dataset='"@{config.setup.zfs.datasets[$name]}"
         eval 'local -A props='"${dataset[props]}"
@@ -118,9 +118,9 @@ function ensure-datasets {
                 ( PATH=@{native.zfs}/bin ; ${_set_x:-:} ; zfs create "${zfsCreate[@]}" "${dataset[name]}" ) || exit
             fi
             if [[ ${props[canmount]} != off ]] ; then (
-                tmpMnt=$(mktemp -d) ; trap "" EXIT && @{native.util-linux}/bin/mount -t zfs -o zfsutil "${dataset[name]}" $tmpMnt &&
-                trap "@{native.util-linux}/bin/umount '${dataset[name]}' ; rmdir $tmpMnt" EXIT &&
-                chmod 000 -- "$tmpMnt" && chown "${dataset[uid]}:${dataset[gid]}" -- "$tmpMnt" && chmod "${dataset[mode]}" -- "$tmpMnt"
+                tmp=$( mktemp -d ) && mkdir $tmp/mnt && @{native.util-linux}/bin/mount -t zfs -o zfsutil "${dataset[name]}" $tmp/mnt || exit
+                trap "@{native.util-linux}/bin/umount '${dataset[name]}' ; rmdir $tmp{/mnt,}" EXIT || exit
+                chmod 000 -- $tmp/mnt && ( cd $tmp ; chown "${dataset[uid]}:${dataset[gid]}" -- mnt && chmod "${dataset[mode]}" -- mnt ) || exit
             ) || exit ; fi
             if [[ $explicitKeylocation && $explicitKeylocation != "${props[keylocation]:-}" ]] ; then
                 ( PATH=@{native.zfs}/bin ; ${_set_x:-:} ; zfs set keylocation="$explicitKeylocation" "${dataset[name]}" ) || exit

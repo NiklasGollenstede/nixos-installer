@@ -260,7 +260,7 @@ in rec {
             generic-arg-help "${ownPath}" "$functionDoc" ${esc description} ${esc notesAndExamples} ${esc usageLine} || exit
         ) ; \exit 0 ; fi
 
-        # generic-arg-verify || \exit 3
+        generic-arg-verify || \exit 3
 
         # either call »argv[0]« with the remaining parameters as arguments, or if »$1« is »-c« eval »$2«.
         if [[ ''${args[trace]:-} ]] ; then set -x ; fi

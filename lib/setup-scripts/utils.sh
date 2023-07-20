@@ -87,9 +87,27 @@ function write-secret {( set -u # 1: path, 2?: owner[:[group]], 3?: mode
 ## Interactively prompts for a password to be entered and confirmed.
 function prompt-new-password {( set -u # 1: usage
     read -s -p "Please enter the new password $1: "     password1 || exit ; echo 1>&2
+    if (( ${#password1} == 0 )) ; then printf 'Password empty.\n' 1>&2 ; \exit 1 ; fi
     read -s -p "Please enter the same password again: " password2 || exit ; echo 1>&2
-    if (( ${#password1} == 0 )) || [[ "$password1" != "$password2" ]] ; then printf 'Passwords empty or mismatch, aborting.\n' 1>&2 ; \exit 1 ; fi
+    if [[ "$password1" != "$password2" ]] ; then printf 'Passwords mismatch.\n' 1>&2 ; \exit 1 ; fi
     printf %s "$password1" || exit
+)}
+
+## If »secretFile« does not exist, interactively prompts up to three times for the secret to be stored in that file.
+function prompt-secret-as {( set -u # 1: what, 2: secretFile, 3?: owner[:[group]], 4?: mode
+    if [[ -e $2 ]] ; then \return ; fi
+    what=$1 ; shift
+    function prompt {
+        read -s -p "Please enter $what: " value || exit ; echo 1>&2
+        if (( ${#value} == 0 )) ; then printf 'Nothing entered. ' 1>&2 ; \return 1 ; fi
+        read -s -p "Please enter that again, or return empty to skip the check: " check || exit ; echo 1>&2
+        if [[ $check && $value != "$check" ]] ; then printf 'Entered values mismatch. ' 1>&2 ; \return 1 ; fi
+    }
+    for attempt in 2 3 x ; do
+        if prompt && printf %s "$value" | write-secret "$@" ; then break ; fi
+        if [[ $attempt == x ]] ; then echo "Aborting." 1>&2 ; \return 1 ; fi
+        echo "Retrying ($attempt/3):" 1>&2
+    done
 )}
 
 declare-flag install-system inspectScripts "" "When running installation hooks (»...*Commands« composed as Nix strings) print out and pause before each command. This works ... semi-well."

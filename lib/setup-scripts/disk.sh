@@ -215,7 +215,6 @@ function fix-grub-install {
     fi
 }
 
-
 ## Mounts all file systems as it would happen during boot, but at path prefix »$mnt« (instead of »/«).
 function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowFail
     # While not generally required for fstab, nixos uses the dependency-sorted »config.system.build.fileSystems« list (instead of plain »builtins.attrValues config.fileSystems«) to generate »/etc/fstab« (provided »config.fileSystems.*.depends« is set correctly, e.g. for overlay mounts).
@@ -230,19 +229,19 @@ function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowFail
         options=,$options, ; options=${options//,ro,/,}
 
         if ! @{native.util-linux}/bin/mountpoint -q "$mnt"/"$target" ; then (
-            mkdir -p "$mnt"/"$target" || exit
+            mkdir-sticky "$mnt"/"$target" || exit
             [[ $type == tmpfs || $type == auto || $type == */* ]] || @{native.kmod}/bin/modprobe --quiet $type || true # (this does help sometimes)
 
             if [[ $type == overlay ]] ; then
                 options=${options//,workdir=/,workdir=$mnt\/} ; options=${options//,upperdir=/,upperdir=$mnt\/} # Work and upper dirs must be in target.
-                workdir=$(  <<<"$options" grep -o -P ',workdir=\K[^,]+'  || true ) ; if [[ $workdir  ]] ; then mkdir -p "$workdir"  ; fi
-                upperdir=$( <<<"$options" grep -o -P ',upperdir=\K[^,]+' || true ) ; if [[ $upperdir ]] ; then mkdir -p "$upperdir" ; fi
+                workdir=$(  <<<"$options" grep -o -P ',workdir=\K[^,]+'  || true ) ; if [[ $workdir  ]] ; then mkdir-sticky "$workdir"  ; fi
+                upperdir=$( <<<"$options" grep -o -P ',upperdir=\K[^,]+' || true ) ; if [[ $upperdir ]] ; then mkdir-sticky "$upperdir" ; fi
                 lowerdir=$( <<<"$options" grep -o -P ',lowerdir=\K[^,]+' || true )
                 options=${options//,lowerdir=$lowerdir,/,lowerdir=$mnt/${lowerdir//:/:$mnt\/},} ; source=overlay
                 # TODO: test the lowerdir stuff
             elif [[ $options =~ ,r?bind, ]] ; then
                 if [[ $source == /nix/store/* ]] ; then options=,ro$options ; fi
-                source=$mnt/$source ; if [[ ! -e $source ]] ; then mkdir -p "$source" || exit ; fi
+                source=$mnt/$source ; if [[ ! -e $source ]] ; then mkdir-sticky "$source" || exit ; fi
             fi
 
             @{native.util-linux}/bin/mount -t $type -o "${options:1:(-1)}" "$source" "$mnt"/"$target" || exit

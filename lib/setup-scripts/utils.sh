@@ -74,6 +74,24 @@ function copy-function { # 1: existingName, 2: newName
     eval "${original/$1/${2?newName not provided}}" # run the code declaring the function again, replacing only the first occurrence of the name
 }
 
+## Ensures that a directory exists, like »mkdir -p«, but for any new path elements created, copies the user/group/mode of the closest existing parent.
+#  Only uses the fallback user/group/mode when the closest existing parent is already a sticky dir (whose (root-)ownership does not mean much, as it is meant for children owned by any/other user(s), like /tmp).
+function mkdir-sticky { # 1: path, 2?: fallbackOwner, 3?: fallbackGroup, 4?: fallbackMode
+    local path ; path=$1 ; shift
+    if [[ -d $path ]] ; then return ; fi # existing (symlink to existing) dir
+    if [[ -L $path || -e $path ]] ; then echo "Can't create (child of) existing file (or broken symlink) '$path'" 1>&2 ; return 1 ; fi
+    local parent ; parent=$( dirname "$path" ) || return
+    mkdir-sticky "$parent" "$@" || return
+    parent=$( realpath "$parent" ) || return
+    stat=( $( stat --format '%u %g %a' "$parent" ) ) || return
+    if [[ ${stat[2]} =~ ^1...$ ]] ; then # sticky parent
+        #echo "Can't infer correct ownership/permissions for child '$( basename "$path" )' of sticky dir '$parent'" 1>&2 ; return 1
+        install --directory --owner="${1:-0}" --group="${2:-0}" ${3+--mode="$3"} "$path" || return
+    else
+        install --directory --owner=${stat[0]} --group=${stat[1]} --mode=${stat[2]} "$path" || return
+    fi
+}
+
 ## Writes a »$name«d secret from stdin to »$targetDir«, ensuring proper file permissions.
 function write-secret {( set -u # 1: path, 2?: owner[:[group]], 3?: mode
     mkdir -p -- "$(dirname "$1")"/ || exit
@@ -136,7 +154,7 @@ function build-lazy { # 1: drvPath, 2?: output
 }
 
 ## Tests whether (returns 0/success if) the first version argument is greater/less than (or equal) the second version argument.
-function version-gr-eq { printf '%s\n%s' "$1" "$2" | sort -C -V -r; }
+function version-gr-eq { printf '%s\n%s' "$1" "$2" | sort -C -V -r ; }
 function version-lt-eq { printf '%s\n%s' "$1" "$2" | sort -C -V ; }
 function version-gt { ! version-gt-eq "$2" "$1" ; }
 function version-lt { ! version-lt-eq "$2" "$1" ; }

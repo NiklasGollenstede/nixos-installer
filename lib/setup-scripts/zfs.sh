@@ -36,7 +36,7 @@ function create-zpool {
         fi
     done
     @{native.kmod}/bin/modprobe zfs || true
-    <$keySrc @{native.xxd}/bin/xxd -l 32 -c 64 -p | ( PATH=@{native.zfs}/bin ; ${_set_x:-:} ; zpool create ${args[zpool-force]:+-f} "${zpoolCreate[@]}" -R "$mnt" "${pool[name]}" "${vdevs[@]}" ) || return
+    { <$keySrc tr -dc 0-9a-f || true ; } | head -c 64 | ( PATH=@{native.zfs}/bin ; ${_set_x:-:} ; zpool create ${args[zpool-force]:+-f} "${zpoolCreate[@]}" -R "$mnt" "${pool[name]}" "${vdevs[@]}" ) || return
     prepend_trap "@{native.zfs}/bin/zpool export '$poolName'" EXIT || return
     if [[ $keySrc == /dev/urandom ]] ; then @{native.zfs}/bin/zfs unload-key "$poolName" &>/dev/null ; fi
 

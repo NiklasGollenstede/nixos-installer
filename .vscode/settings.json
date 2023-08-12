@@ -123,6 +123,7 @@
 		"nounset", // bash
 		"ntfs", // filesystem
 		"oneshot", // systemd
+		"openssh", // package
 		"optimise", // B/E
 		"ostype", // virtual box
 		"overlayed", // word

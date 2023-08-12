@@ -156,29 +156,34 @@ in let module = {
         anyPool = filterBy: lib.any (pool: pool.${filterBy}) (lib.attrValues cfg.pools);
         poolNames = filterBy: lib.attrNames (lib.filterAttrs (name: pool: pool.${filterBy}) cfg.pools);
         filter = pool: "^${pool}($|[/])";
-        ensure-datasets = zfsPackage: pkgs.writeShellScript "ensure-datasets" ''
+        ensure-datasets = zfsPackage: extraUtils: pkgs.writeScript "ensure-datasets" ''
+            #!${pkgs.pkgsStatic.bash}/bin/bash
             set -o pipefail -o nounset ; declare-command () { : ; } ; declare-flag () { : ; } ;
-            ${lib.fun.substituteImplicit { inherit pkgs; scripts = lib.attrValues { inherit (lib.self.setup-scripts) zfs utils; }; context = { inherit config; native = pkgs // { zfs = zfsPackage; }; }; }}
+            ${lib.fun.substituteImplicit { inherit pkgs; scripts = lib.attrValues { inherit (lib.self.setup-scripts) zfs utils; }; context = { inherit config; native = pkgs // { zfs = zfsPackage; } // (lib.optionalAttrs (extraUtils != null) (lib.genAttrs [
+                "kmod" # modprobe
+                "util-linux" # mount umount
+                "nix" "openssh" "jq" # (unused)
+            ] (_: extraUtils))); }; }}
             ensure-datasets "$@"
         '';
-        ensure-datasets-for = filterBy: zfsPackage: ''( if [ ! "''${IN_NIXOS_ENTER:-}" ] && [ -e ${zfsPackage}/bin/zfs ] ; then
+        ensure-datasets-for = filterBy: zfsPackage: extraUtils: ''( if [ ! "''${IN_NIXOS_ENTER:-}" ] && [ -e ${zfsPackage}/bin/zfs ] ; then
             ${lib.concatStrings (map (pool: ''
                 expected=${lib.escapeShellArg (builtins.toJSON (lib.mapAttrs (n: v: v.props // (if v.permissions != { } then { ":permissions" = v.permissions; } else { })) (lib.filterAttrs (path: _: path == pool || lib.fun.startsWith "${pool}/" path) cfg.datasets)))}
                 if [ "$(${zfsPackage}/bin/zfs get -H -o value nixos-${setup}:applied-datasets ${pool})" != "$expected" ] ; then
-                    ${ensure-datasets zfsPackage} / ${lib.escapeShellArg (filter pool)} && ${zfsPackage}/bin/zfs set nixos-${setup}:applied-datasets="$expected" ${pool}
+                    ${ensure-datasets zfsPackage extraUtils} / ${lib.escapeShellArg (filter pool)} && ${zfsPackage}/bin/zfs set nixos-${setup}:applied-datasets="$expected" ${pool}
                 fi
             '') (poolNames filterBy))}
         fi )'';
     in {
 
         boot.initrd.postDeviceCommands = lib.mkIf (anyPool "autoApplyDuringBoot") (lib.mkOrder 2000 ''
-            ${ensure-datasets-for "autoApplyDuringBoot" extraUtils}
+            ${ensure-datasets-for "autoApplyDuringBoot" extraUtils extraUtils}
         '');
         boot.initrd.supportedFilesystems = lib.mkIf (anyPool "autoApplyDuringBoot") [ "zfs" ];
         ${setup}.zfs.extraInitrdPools = (poolNames "autoApplyDuringBoot");
 
         system.activationScripts.A_ensure-datasets = lib.mkIf (anyPool "autoApplyOnActivation") {
-            text = ensure-datasets-for "autoApplyOnActivation" (pkgs.runCommandLocal "booted-system-link" { } ''ln -sT /run/booted-system/sw $out''); # (want to use the version of ZFS that the kernel module uses, also it's convenient that this does not yet exist during activation at boot)
+            text = ensure-datasets-for "autoApplyOnActivation" (pkgs.runCommandLocal "booted-system-link" { } ''ln -sT /run/booted-system/sw $out'') null; # (want to use the version of ZFS that the kernel module uses, also it's convenient that this does not yet exist during activation at boot)
         }; # these are sorted alphabetically, unless one gets "lifted up" by some other ending on it via its ».deps« field
 
 

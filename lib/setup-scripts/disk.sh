@@ -3,22 +3,36 @@
 # Disk Partitioning and Formatting
 ##
 
+declare-flag install-system skip-formatting "" "Skip partitioning, formatting, and their post-commands. Instead, assume that all required disks/images/zpools are correctly partitioned/formatted, and simply (unlock/import and) mount them. This is useful to skip the destruktive part of the installation, but still do the (largely idempotent) part of copying and linking the current system generation and installing the bootloader -- i.e, repair an installation."
+
 ## Prepares the disks of the target system for the copying of files.
 function do-disk-setup { # 1: diskPaths
 
     ensure-disks "$1" || return
     prompt-for-user-passwords || return
-    populate-keystore || return
 
-    mnt=/tmp/nixos-install-@{config.networking.hostName} && mkdir -p "$mnt" && prepend_trap "rmdir $mnt" EXIT || return # »mnt=/run/user/0/...« would be more appropriate, but »nixos-install« does not like the »700« permissions on »/run/user/0«
+    export mnt=/tmp/nixos-install-@{config.networking.hostName} && mkdir -p "$mnt" && prepend_trap "rmdir $mnt" EXIT || return # »mnt=/run/user/0/...« would be more appropriate, but »nixos-install« does not like the »700« permissions on »/run/user/0«
 
-    partition-disks || return
-    create-luks-layers && open-luks-layers || return # other block layers would go here too (but figuring out their dependencies would be difficult)
-    run-hook-script 'Post Partitioning' @{config.installer.commands.postPartition!writeText.postPartitionCommands} || return
+    if [[ ${args[skip-formatting]:-} ]] ; then
+        if [[ @{config.setup.keystore.enable} ]] ; then
+            mount-keystore-luks-primary || return
+        else
+            populate-keystore || return # (this may be insufficient)
+        fi
+        open-luks-layers || return
+        if [[ $(LC_ALL=C type -t import-zpools) == function ]] ; then import-zpools $mnt || return ; fi
+    else
+        populate-keystore || return
+        partition-disks || return
+        create-luks-layers || return
+        open-luks-layers || return
+        # other block layers would go here too (but figuring out their dependencies would be difficult)
+        run-hook-script 'Post Partitioning' @{config.installer.commands.postPartition!writeText.postPartitionCommands} || return
 
-    format-partitions || return
-    if [[ $(LC_ALL=C type -t create-zpools) == function ]] ; then create-zpools $mnt || return ; fi
-    run-hook-script 'Post Formatting' @{config.installer.commands.postFormat!writeText.postFormatCommands} || return
+        format-partitions || return
+        if [[ $(LC_ALL=C type -t create-zpools) == function ]] ; then create-zpools $mnt || return ; fi
+        run-hook-script 'Post Formatting' @{config.installer.commands.postFormat!writeText.postFormatCommands} || return
+    fi
 
     fix-grub-install || return
 
@@ -52,7 +66,7 @@ function ensure-disks { # 1: diskPaths, 2?: skipLosetup
     fi
 
     local name ; for name in "@{!config.setup.disks.devices[@]}" ; do
-        if [[ ! @{config.setup.disks.devices!catAttrSets.partitionDuringInstallation[$name]} ]] ; then continue ; fi
+        if [[ ! @{config.setup.disks.devices!catAttrSets.partitionDuringInstallation[$name]} ]] ; then unset blockDevs[$name] ; continue ; fi
         if [[ ! ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name not provided" 1>&2 ; \return 1 ; fi
         eval 'local -A disk='"@{config.setup.disks.devices[$name]}"
         if [[ ${blockDevs[$name]} != /dev/* ]] ; then

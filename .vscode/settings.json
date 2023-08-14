@@ -59,6 +59,7 @@
 		"extra_isize", // ext4 option
 		"fdisk", // program
 		"fetchurl", // nix function
+		"fido2", // protocol
 		"filesystems", // plural
 		"fmask", // mount
 		"foldl", // nix (fold left)
@@ -203,5 +204,6 @@
 		"yubikey", // program
 		"YubiKeys", // plural
 		"zfsutil", // program / function
+		"zpool", "zpools", // zfs
 	],
 }

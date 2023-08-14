@@ -71,7 +71,7 @@ in {
 
         system.boot.loader.id = "extlinux";
         system.build.installBootLoader = "${pkgs.writeShellScript "install-extlinux.sh" ''
-            if [[ ! ''${1:-} || $1 != /nix/store/* ]] ; then echo "Usage: $0 TOPLEVEL_PATH" 1>&2 ; exit 1 ; fi
+            if [[ ! ''${1:-} || $1 != /nix/store/* ]] ; then echo "Usage: ${builtins.placeholder "out"} TOPLEVEL_PATH" 1>&2 ; exit 1 ; fi
             export PATH=$PATH:${pkgs.stdenv}/bin
             ${extlinux-conf-builder} "$1" -d ${esc cfg.targetDir}
 

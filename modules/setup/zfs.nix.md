@@ -3,7 +3,7 @@
 # ZFS Pools and Datasets
 
 This module primarily allows the specification of ZFS pools and datasets. The declared pools and datasets are complemented with some default and are then used by [`lib/setup-scripts/zfs.sh`](../../lib/setup-scripts/zfs.sh) to create them during system installation, and can optionally later be kept up to date (with the config) at config activation time or during reboot.
-Additionally, this module sets some defaults for ZFS (but only in a "always better than nothing" style, so `lib.mkForce null` should never be necessary).
+Additionally, this module sets some defaults for ZFS (but only in an "always better than nothing" style, so `lib.mkForce null` should never be necessary).
 
 
 ## Implementation

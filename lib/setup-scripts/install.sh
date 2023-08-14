@@ -103,7 +103,7 @@ function reexec-in-qemu {
         echo 'Performing the installation in a cross-ISA qemu system VM; this will be very, very slow (many hours) ...'
         output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec-@{pkgs.buildPackages.system}
     fi
-    local scripts=$0 ; if [[ @{pkgs.system} != "@{native.system}" ]] ; then
+    local scripts=$self ; if [[ @{pkgs.system} != "@{native.system}" ]] ; then
         scripts=$( build-lazy @{inputs.self}'#'apps.@{pkgs.system}.@{config.installer.outputName:?}.derivation ) || return
     fi
     local command="$scripts install-system $( printf '%q ' "${newArgs[@]}" ) || exit"
@@ -129,7 +129,7 @@ declare-flag install-system toplevel "" "Optional replacement for the actual »c
 declare-flag install-system no-inspect "" "Do not inspect the (successfully) installed system before unmounting its filesystems."
 declare-flag install-system inspect-cmd "script" "Instead of opening an interactive shell for the post-installation inspection, »eval« this script."
 
-## Copies the system's dependencies to the disks mounted at »$mnt« and installs the bootloader. If »$inspect« is set, a root shell will be opened in »$mnt« afterwards.
+## Copies the system's dependencies to the disks mounted at »$mnt« and installs the bootloader. By default, a root shell will be opened in »$mnt« afterwards.
 #  »$topLevel« may point to an alternative top-level dependency to install.
 function install-system-to {( set -u # 1: mnt, 2?: topLevel
     targetSystem=${args[toplevel]:-@{config.system.build.toplevel}}
@@ -200,7 +200,7 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
         else
             ( set +x ; echo "[1;32mInstallation done![0m This shell is in a chroot in the mounted system for inspection. Exiting the shell will unmount the system." 1>&2 )
         fi
-        LC_ALL=C PATH=$PATH:@{native.util-linux}/bin @{native.nixos-install-tools}/bin/nixos-enter --root $mnt -- /nix/var/nix/profiles/system/sw/bin/bash -c 'source /etc/set-environment ; exec bash --login' || exit # +o monitor
+        LC_ALL=C PATH=$PATH:@{native.util-linux}/bin @{native.nixos-install-tools}/bin/nixos-enter --root $mnt -- /nix/var/nix/profiles/system/sw/bin/bash -c 'source /etc/set-environment ; CHROOT_DIR="'"$mnt"'" mnt=/ exec "'"$self"'" bash' || exit # +o monitor
     fi
 
     mkdir -p $mnt/var/lib/systemd/timesync && touch $mnt/var/lib/systemd/timesync/clock || true # save current time

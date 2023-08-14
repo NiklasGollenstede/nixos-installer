@@ -10,7 +10,7 @@ Such state generally falls into one of four categories:
 3) It may or may not be secret and can be re-generated quickly.
 
 Category 1 data can not be included in the nix store and thus can not (directly) be derived from the system configuration.
-It needs to be stored in a way that the host (and only the host) can access it an that it can't be lost.
+It needs to be stored in a way that the host (and only the host) can access it and that it can't be lost.
 It is therefore referred to as `remote` data (even though it would usually also be stored locally).
 
 Category 2 data is required for the system to boot (in reasonable time), and should thus, as `local` data, be stored persistently on the host.
@@ -204,7 +204,15 @@ in {
 
     }) (lib.mkIf cfg.persistenceFixes { # Cope with the consequences of having »/« (including »/{etc,var,root,...}«) cleared on every reboot.
 
-        environment.etc.nixos.source = "/local/etc/nixos";
+        environment.etc = {
+            nixos.source = "/local/etc/nixos";
+
+            # SSHd host keys:
+            "ssh/ssh_host_ed25519_key".source = "/${keep}/etc/ssh/ssh_host_ed25519_key";
+            "ssh/ssh_host_ed25519_key.pub".source = "/${keep}/etc/ssh/ssh_host_ed25519_key.pub";
+            "ssh/ssh_host_rsa_key".source = "/${keep}/etc/ssh/ssh_host_rsa_key";
+            "ssh/ssh_host_rsa_key.pub".source = "/${keep}/etc/ssh/ssh_host_rsa_key.pub";
+        };
 
         systemd.tmpfiles.rules = [ # keep in mind: this does not get applied super early ...
             # »/root/.nix-channels« is already being restored.
@@ -216,12 +224,7 @@ in {
             "f                                                            /${keep}/root/.local/share/nix/repl-history     0600  root  root  -"
             "L+ /root/.local/share/nix/repl-history  - - - -   ../../../../${keep}/root/.local/share/nix/repl-history"
 
-            # SSHd host keys:
             "d /${keep}/etc/ssh/                               0755  root  root   -  -"
-            "L         /etc/ssh/ssh_host_ed25519_key           -     -     -      -  /${keep}/etc/ssh/ssh_host_ed25519_key"
-            "L         /etc/ssh/ssh_host_ed25519_key.pub       -     -     -      -  /${keep}/etc/ssh/ssh_host_ed25519_key.pub"
-            "L         /etc/ssh/ssh_host_rsa_key               -     -     -      -  /${keep}/etc/ssh/ssh_host_rsa_key"
-            "L         /etc/ssh/ssh_host_rsa_key.pub           -     -     -      -  /${keep}/etc/ssh/ssh_host_rsa_key.pub"
         ];
 
         fileSystems = { # this does get applied early

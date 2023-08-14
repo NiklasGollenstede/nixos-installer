@@ -161,7 +161,7 @@ function run-qemu {
     done ; fi
     if [[ ${args[install]:-} == always ]] ; then
         local verbosity=--quiet ; if [[ ${args[trace]:-} ]] ; then verbosity=--trace ; fi ; if [[ ${args[debug]:-} ]] ; then verbosity=--debug ; fi
-        hostPath=${hostPath:-} ${args[dry-run]:+echo} $0 install-system "$diskImages" $verbosity --no-inspect || return
+        hostPath=${hostPath:-} ${args[dry-run]:+echo} "$self" install-system "$diskImages" $verbosity --no-inspect || return
     fi
 
     qemu+=( "${argv[@]}" )
@@ -198,6 +198,18 @@ function mount-keystore-luks {
     @{native.util-linux}/bin/mount -o nodev,umask=0077,fmask=0077,dmask=0077,ro /dev/mapper/$keystore /run/$keystore && prepend_trap "@{native.util-linux}/bin/umount /run/$keystore" EXIT || return
 }
 
+## Opens the keystore with the primary unlock method, which may not  be convenient to use, but should always be defined.
+function mount-keystore-luks-primary {
+    local usage=luks/keystore-@{config.networking.hostName!hashString.sha256:0:8}/0
+    local method=@{config.setup.keystore.keys[$usage]%%=*}
+    local options=@{config.setup.keystore.keys[$usage]:$(( ${#method} + 1 ))}
+
+    local attempt ; for attempt in 2 3 x ; do
+        if mount-keystore-luks --key-file=<( gen-key-"$method" "$usage" "$options" ) ; then break ; fi
+        if [[ $attempt == x ]] ; then \return 1 ; fi ; echo "Retrying ($attempt/3):"
+    done
+}
+
 declare-command open-system diskImages << 'EOD'
 Performs any steps necessary to mount the target system at »/tmp/nixos-install-@{config.networking.hostName}« on the current host.
 For any steps taken, it also adds the steps to undo them on exit from the calling shell (so this is not useful as a standalone »COMMAND«, use the »bash« or »--command« options, and don't call this from a sub-shell that exits too early).
@@ -220,27 +232,19 @@ function open-system {
     @{native.systemd}/bin/udevadm settle -t 15 || true # sometimes partitions aren't quite made available yet
 
     if [[ @{config.setup.keystore.enable} && ! -e /dev/mapper/keystore-@{config.networking.hostName!hashString.sha256:0:8} ]] ; then # Try a bunch of approaches for opening the keystore:
-        mount-keystore-luks --key-file=<( printf %s "@{config.networking.hostName}" ) || return
-        mount-keystore-luks --key-file=/dev/disk/by-partlabel/bootkey-@{config.networking.hostName!hashString.sha256:0:8} || return
-        mount-keystore-luks --key-file=<( read -s -p PIN: pin && echo ' touch!' >&2 && @{native.yubikey-personalization}/bin/ykchalresp -2 "$pin" ) || return
-        # TODO: try static yubikey challenge
-        mount-keystore-luks || return
+        mount-keystore-luks --key-file=<( printf %s "@{config.networking.hostName}" ) || # costs nothing to try
+        mount-keystore-luks --key-file=/dev/disk/by-partlabel/bootkey-@{config.networking.hostName!hashString.sha256:0:8} || # costs nothing to try
+        mount-keystore-luks-primary || # should always be applicable
+        mount-keystore-luks --key-file=<( read -s -p PIN: pin && echo ' touch!' >&2 && @{native.yubikey-personalization}/bin/ykchalresp -2 "$pin" ) ||
+        mount-keystore-luks || # (getting desperate)
+        return # oh well
     fi
 
-    mnt=/tmp/nixos-install-@{config.networking.hostName} # allow this to leak into the calling scope
+    export mnt=/tmp/nixos-install-@{config.networking.hostName} # allow this to leak into the calling scope
     if [[ ! -e $mnt ]] ; then mkdir -p "$mnt" && prepend_trap "rmdir '$mnt'" EXIT || return ; fi
 
     open-luks-layers || return # Load crypt layers and zfs pools:
-    if [[ $( LC_ALL=C type -t ensure-datasets ) == 'function' ]] ; then
-        local poolName ; for poolName in "@{!config.setup.zfs.pools[@]}" ; do
-            if [[ ! @{config.setup.zfs.pools!catAttrSets.createDuringInstallation[$poolName]} ]] ; then continue ; fi
-            if ! @{native.zfs}/bin/zfs get -o value -H name "$poolName" &>/dev/null ; then
-                @{native.zfs}/bin/zpool import -f -N -R "$mnt" "$poolName" && prepend_trap "@{native.zfs}/bin/zpool export '$poolName'" EXIT || return
-            fi
-            : | @{native.zfs}/bin/zfs load-key -r "$poolName" || true
-            ensure-datasets "$mnt" '^'"$poolName"'($|[/])' || return
-        done
-    fi
+    if [[ $( LC_ALL=C type -t import-zpools ) == 'function' ]] ; then import-zpools "$mnt" skipImported ; fi
 
     prepend_trap "unmount-system '$mnt'" EXIT && mount-system "$mnt" '' 1 || return
     df -h | grep $mnt | cat

@@ -36,7 +36,7 @@ in rec {
             { networking.hostName = name; }
         ]; _file = "${dirname}/nixos.nix#modules"; } ];
 
-        extraModules = (nixosArgs.extraModules or [ ]) ++ modules ++ extraModules ++ [ ({ config, ... }: { imports = [ ({
+        extraModules = (nixosArgs.extraModules or [ ]) ++ modules ++ extraModules ++ [ { imports = [ (args: {
             # These are passed as »extraModules« module argument and can thus be reused when defining containers and such (so define as much stuff as possible here).
             # There is, unfortunately, no way to directly pass modules into all containers. Each container will need to be defined with »config.containers."${name}".config.imports = extraModules«.
             # (One could do that automatically by defining »options.security.containers = lib.mkOption { type = lib.types.submodule (cfg: { options.config = lib.mkOption { apply = _:_.extendModules { modules = extraModules; }; }); }«.)
@@ -47,7 +47,7 @@ in rec {
 
             system.nixos.revision = lib.mkIf (inputs?nixpkgs.rev) inputs.nixpkgs.rev; # (evaluating the default value fails under some circumstances)
 
-        }) ]; _file = "${dirname}/nixos.nix#mkNixosConfiguration-extraModule"; }) ];
+        }) ]; _file = "${dirname}/nixos.nix#mkNixosConfiguration-extraModule"; } ];
 
         specialArgs = (nixosArgs.specialArgs or { }) // { inherit inputs; };
         # (This is already set during module import, while »_module.args« only becomes available during module evaluation (before that, using it causes infinite recursion). Since it can't be ensured that this is set in every circumstance where »extraModules« are being used, it should generally not be used to set custom arguments.)
@@ -77,7 +77,7 @@ in rec {
             inherit name mainModule;
             moduleArgs = (moduleArgs // { inherit preface; });
             nixosArgs = (args.nixosArgs or { }) // { specialArgs = (args.nixosArgs.specialArgs or { }) // { inherit preface; }; }; # make this available early, and only for the main evaluation (+specialisations, -containers)
-            extraModules = (args.extraModules or [ ]) ++ [ { imports = [ ({
+            extraModules = (args.extraModules or [ ]) ++ [ { imports = [ (args: {
                 options.${preface'} = {
                     instances = lib.mkOption { description = "List of host names to instantiate this host config for, instead of just for the file name."; type = lib.types.listOf lib.types.str; readOnly = true; } // (lib.optionalAttrs (!preface?instances) { default = instances; });
                     id = lib.mkOption { description = "This system's ID. If set, »mkSystemsFlake« will ensure that the ID is unique among all »moduleArgs.nodes«."; type = lib.types.nullOr (lib.types.either lib.types.int lib.types.str); readOnly = true; apply = id: if id == null then null else toString id; } // (lib.optionalAttrs (!preface?id) { default = null; });
@@ -171,7 +171,7 @@ in rec {
         description = ''
             Call per-host setup and maintenance commands. Most importantly, »install-system«.
         '';
-        ownPath = if (system.config.${installer}.outputName != null) then "nix run REPO#${system.config.${installer}.outputName} --" else "$0";
+        ownPath = if (system.config.${installer}.outputName != null) then "nix run REPO#${system.config.${installer}.outputName} --" else builtins.placeholder "out";
         usageLine = ''
             Usage:
                 %s [sudo] [bash] [--FLAG[=value]]... [--] [COMMAND [ARG]...]
@@ -207,13 +207,14 @@ in rec {
         tools = lib.unique (map (p: p.outPath) (lib.filter lib.isDerivation pkgs.stdenv.allowedRequisites));
         esc = lib.escapeShellArg;
     in pkgs.writeShellScript "scripts-${name}" ''
+        self=${builtins.placeholder "out"}
 
         # if first arg is »sudo«, re-execute this script with sudo (as root)
-        if [[ ''${1:-} == sudo ]] ; then shift ; exec sudo --preserve-env=SSH_AUTH_SOCK -- "$0" "$@" ; fi
+        if [[ ''${1:-} == sudo ]] ; then shift ; exec sudo --preserve-env=SSH_AUTH_SOCK -- "$self" "$@" ; fi
 
         # if the (now) first arg is »bash« or there are no args, re-execute this script as bash »--init-file«, starting an interactive bash in the context of the script
         if [[ ''${1:-} == bash ]] || [[ $# == 0 && $0 != ${pkgs.bashInteractive}/bin/bash ]] ; then
-            shift ; exec ${pkgs.bashInteractive}/bin/bash --init-file <(cat << "EOS"${"\n"+''
+            shift ; exec ${pkgs.bashInteractive}/bin/bash --init-file <(echo '
                 # prefix the script to also include the default init files
                 ! [[ -e /etc/profile ]] || . /etc/profile
                 for file in ~/.bash_profile ~/.bash_login ~/.profile ; do
@@ -222,8 +223,9 @@ in rec {
 
                 # add active »hostName« to shell prompt
                 PS1=''${PS1/\\$/\\[\\e[93m\\](${name})\\[\\e[97m\\]\\$}
-            ''}EOS
-            cat $0) -i -s ':' "$@"
+
+                source "'"$self"'" ; PATH=$hostPath
+            ') -i -s ':' "$@"
         fi
 
         # provide installer tools (not necessarily for system.pkgs.config.hostPlatform)
@@ -238,19 +240,18 @@ in rec {
             shopt -s expand_aliases # enable aliases in non-interactive bash
             for control in return exit ; do alias $control='{
                 status=$? ; if ! (( status )) ; then '$control' 0 ; fi # control flow return
-                if ! ${pkgs.bashInteractive}/bin/bash --init-file ${system.config.environment.etc.bashrc.source} ; then '$control' $status ; fi # »|| '$control'« as an error-catch
+                if ! PATH=$hostPath "$self" bash ; then '$control' $status ; fi # »|| '$control'« as an error-catch
+                #if ! ${pkgs.bashInteractive}/bin/bash --init-file ${system.config.environment.etc.bashrc.source} ; then '$control' $status ; fi # »|| '$control'« as an error-catch
             }' ; done
         fi
 
-        declare -g -A allowedArgs=( ) allowedArgCtx=( ) ; function declare-flag { # 1: context, 2: name, 3?: value, 4: description
-            if [[ ''${allowedArgCtx[$2]:-} && ''${allowedArgCtx[$2]:-} != "$1" ]] ; then echo "Flag $2 was declared in conflicting contexts ''${allowedArgCtx[$2]} and $1" >&2 ; \exit 1 ; fi
-            allowedArgCtx[$2]=$1
+        declare -g -A allowedArgs=( ) ; function declare-flag { # 1: context, 2: name, 3?: value, 4: description
             local name=--$2 ; if [[ $3 ]]; then name+='='$3 ; fi ; allowedArgs[$name]="($1) $4"
         }
-        declare-flag global command "" 'Interpret the first positional argument as bash script (instead of the name of a single command) and »eval« it (with access to all commands and internal functions and variables).'
-        declare-flag global debug "" 'Hook into any »|| exit« / »|| return« statements and open a shell if they are triggered by an error. Implies »--trace«.'
-        declare-flag global trace "" "Turn on bash's »errtrace« option before running »COMMAND«."
-        declare-flag global quiet "" "Try to suppress all non-error output. May also swallow some error related output."
+        declare-flag '*' command "" 'Interpret the first positional argument as bash script (instead of the name of a single command) and »eval« it (with access to all commands and internal functions and variables).'
+        declare-flag '*' debug "" 'Hook into any »|| exit« / »|| return« statements and open a shell if they are triggered by an error. Implies »--trace«.'
+        declare-flag '*' trace "" "Turn on bash's »errtrace« option before running »COMMAND«."
+        declare-flag '*' quiet "" "Try to suppress all non-error output. May also swallow some error related output."
         declare -g -A allowedCommands=( ) ; function declare-command { allowedCommands[$@]=$(< /dev/stdin) ; }
         ${system.config.${installer}.build.scripts { native = pkgs; }}
         if [[ ''${args[help]:-} ]] ; then (

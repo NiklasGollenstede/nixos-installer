@@ -79,7 +79,7 @@ function copy-function { # 1: existingName, 2: newName
 function mkdir-sticky { # 1: path, 2?: fallbackOwner, 3?: fallbackGroup, 4?: fallbackMode
     local path ; path=$1 ; shift
     if [[ -d $path ]] ; then return ; fi # existing (symlink to existing) dir
-    if [[ -L $path || -e $path ]] ; then echo "Can't create (child of) existing file (or broken symlink) '$path'" 1>&2 ; return 1 ; fi
+    if [[ -L $path || -e $path ]] ; then echo "Can't create (child of) existing file (or broken symlink) '$path'" 1>&2 ; \return 1 ; fi
     local parent ; parent=$( dirname "$path" ) || return
     mkdir-sticky "$parent" "$@" || return
     parent=$( realpath "$parent" ) || return

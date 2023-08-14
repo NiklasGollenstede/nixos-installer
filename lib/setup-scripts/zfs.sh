@@ -7,11 +7,23 @@ function create-zpools { # 1: mnt
     done
 }
 
+## Imports all of the system's ZFS pools that are »createDuringInstallation« and not imported yet.
+function import-zpools { # 1: mnt, 2: skipImported
+    local mnt=$1 ; local skipImported=${2:-}
+    local poolName ; for poolName in "@{!config.setup.zfs.pools[@]}" ; do
+        if [[ ! @{config.setup.zfs.pools!catAttrSets.createDuringInstallation[$poolName]} ]] ; then continue ; fi
+        if @{native.zfs}/bin/zfs get -o value -H name "$poolName" &>/dev/null && [[ $skipImported ]] ; then continue ; fi
+        @{native.zfs}/bin/zpool import -f -N -R "$mnt" "$poolName" && prepend_trap "@{native.zfs}/bin/zpool export '$poolName'" EXIT || return
+        : | @{native.zfs}/bin/zfs load-key -r "$poolName" || true
+        ensure-datasets "$mnt" '^'"$poolName"'($|[/])' || return
+    done
+}
+
 
 declare-command create-zpool mnt poolName << 'EOD'
 Creates a single of the system's ZFS pools, and its datasets. Can be called manually to create pools that were added to the configuration, or to create those declared with »createDuringInstallation = false«. Expects the backing device(-partition)s to exist as declared for the pool.
 EOD
-declare-flag install-system zpool-force "" "(create-zpool) When creating ZFS storage pools, pass the »-f« (force) option. This may be required when installing to disks that are currently part of a pool, or ZFS refuses do reuse them."
+declare-flag install-system,create-zpool zpool-force "" "When creating ZFS storage pools, pass the »-f« (force) option. This may be required when installing to disks that are currently part of a pool, or ZFS refuses do reuse them."
 function create-zpool {
     local mnt=$1 ; local poolName=$2
     eval 'local -A pool='"@{config.setup.zfs.pools[$poolName]}"
@@ -67,7 +79,8 @@ function ensure-datasets {
         if $zfs get -o value -H name "${dataset[name]}" &>/dev/null ; then # dataset exists: check its properties
 
             if [[ ${props[mountpoint]:-} ]] ; then # don't set the current mount point again (no-op), cuz that fails if the dataset is mounted
-                local current=$($zfs get -o value -H mountpoint "${dataset[name]}") ; current=${current/$mnt/}
+                # (The behavior inside a (nixos-enter) chroot is quite odd: ZFS ignores the chroot when printing the mountpoint, but heeds it when setting it. So this test fails (if the CHROOT_DIR is not set), but the set operation still sets the correct value.)
+                local current=$($zfs get -o value -H mountpoint "${dataset[name]}") ; current=${current/${CHROOT_DIR:-}$mnt/}
                 if [[ ${props[mountpoint]} == "${current:-/}" ]] ; then unset props[mountpoint] ; fi
             fi
             if [[ ${props[keyformat]:-} == ephemeral ]] ; then

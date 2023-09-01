@@ -21,7 +21,7 @@ in [ # Run »nix flake show --allow-import-from-derivation« to see what this me
     (lib.self.mkSystemsFlake { inherit inputs; buildPlatform = "aarch64-linux"; renameOutputs = name: "arm:${name}"; }) # nixosConfigurations.arm:* apps.*-linux.arm:* devShells.*-linux.arm:* packages.*-linux.arm:all-systems
     # Any packages touched by the ./overlays/:
     (lib.fun.forEachSystem [ "aarch64-linux" "x86_64-linux" ] (localSystem: let # packages.*-linux.*
-        packages = lib.fun.getModifiedPackages (lib.fun.importPkgs inputs { system = localSystem; }) overlays;
+        packages = builtins.removeAttrs (lib.fun.getModifiedPackages (lib.fun.importPkgs inputs { system = localSystem; }) overlays) [ "libblockdev" ];
     in { packages = packages // { default = self.packages.${localSystem}.all-systems; }; }))
 
 ]); }

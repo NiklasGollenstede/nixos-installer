@@ -24,7 +24,7 @@ nix run .'#'hostname -- --help
 ```
 
 [`config.installer.commands.*`](./modules/installer.nix.md) can be used to run host-specific commands at various points of the installation, and additional `config.installer.scripts` can [add or replace](./lib/setup-scripts/README.md) new and existing setup commands or functions.
-<!-- This mechanism has been used to, for example, [automatically restore of ZFS backups](#TODO) during the installation, or to [automatically deploy](#TODO) locally built system images tp Hetzner VPSes. -->
+This mechanism has been used to, for example, <!-- [automatically restore of ZFS backups]() during the installation, or to --> [automatically deploy](https://github.com/NiklasGollenstede/nix-wiplib/blob/master/modules/hardware/hetzner-vps.nix.md#installation--testing) locally built system images tp Hetzner VPSes.
 
 
 ## Repo Layout/Contents

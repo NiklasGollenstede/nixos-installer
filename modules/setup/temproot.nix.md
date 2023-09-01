@@ -229,9 +229,9 @@ in {
 
         fileSystems = { # this does get applied early
             # (on systems without hardware clock, this allows systemd to provide an at least monolithic time after restarts)
-            "/var/lib/systemd/timesync" = { device = "/local/var/lib/systemd/timesync"; options = [ "bind" "nofail" ]; }; # TODO: add »neededForBoot = true«?
+            "/var/lib/systemd/timesync" = { device = "/local/var/lib/systemd/timesync"; options = [ "bind" ]; }; # TODO: add »neededForBoot = true«?
             # save persistent timer states
-            "/var/lib/systemd/timers" = { device = "/local/var/lib/systemd/timers"; options = [ "bind" "nofail" ]; }; # TODO: add »neededForBoot = true«?
+            "/var/lib/systemd/timers" = { device = "/local/var/lib/systemd/timers"; options = [ "bind" ]; }; # TODO: add »neededForBoot = true«?
         };
 
         security.sudo.extraConfig = "Defaults lecture=never"; # default is »once«, but we'd forget that we did that

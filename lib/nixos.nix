@@ -117,6 +117,8 @@ in rec {
         nixosSystem ? inputs.nixpkgs.lib.nixosSystem,
         # If provided, this will be set as »config.nixpkgs.buildPlatform« for all hosts, which in turn enables cross-compilation for all hosts whose »config.nixpkgs.hostPlatform« (the architecture they will run on) does not expand to the same value. Without this, building for other platforms may still work (slowly) if »boot.binfmt.emulatedSystems« on the building system is configured for the respective target(s).
         buildPlatform ? null,
+        ## The platforms for which the setup scripts (installation & maintenance/debugging) will be defined. SHould include the ».buildPlatform« and/or the target system's »config.nixpkgs.hostPlatform«.
+        setupPlatforms ? if inputs?systems then import inputs.systems else [ "aarch64-linux" "x86_64-linux" ],
         ## If provided, then change the name of each output attribute by passing it through this function. Allows exporting of multiple variants of a repo's hosts from a single flake (by then merging the results):
         renameOutputs ? false,
     ... }: let
@@ -130,7 +132,7 @@ in rec {
         nixosConfigurations = if builtins.isList systems then mergeAttrsUnique (map (systems: mkNixosConfigurations (otherArgs // systems)) systems) else mkNixosConfigurations (otherArgs // systems);
     in let outputs = {
         inherit nixosConfigurations;
-    } // (forEachSystem [ "aarch64-linux" "x86_64-linux" ] (buildSystem: let
+    } // (forEachSystem setupPlatforms (buildSystem: let
         pkgs = (import inputs.nixpkgs { inherit overlays; system = buildSystem; });
         tools = lib.unique (map (p: p.outPath) (lib.filter lib.isDerivation pkgs.stdenv.allowedRequisites));
     in rec {
@@ -156,7 +158,7 @@ in rec {
 
     })); in if renameOutputs == false then outputs else {
         nixosConfigurations = mapMergeUnique (k: v: { ${renameOutputs k} = v; }) outputs.nixosConfigurations;
-    } // (forEachSystem [ "aarch64-linux" "x86_64-linux" ] (buildSystem: {
+    } // (forEachSystem setupPlatforms (buildSystem: {
         apps = mapMergeUnique (k: v: { ${renameOutputs k} = v; }) outputs.apps.${buildSystem};
         packages.${renameOutputs "all-systems"} = outputs.packages.${buildSystem}.all-systems;
         checks.${renameOutputs "all-systems"} = outputs.checks.${buildSystem}.all-systems;

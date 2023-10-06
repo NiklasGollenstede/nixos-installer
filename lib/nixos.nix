@@ -117,13 +117,13 @@ in rec {
         nixosSystem ? inputs.nixpkgs.lib.nixosSystem,
         # If provided, this will be set as »config.nixpkgs.buildPlatform« for all hosts, which in turn enables cross-compilation for all hosts whose »config.nixpkgs.hostPlatform« (the architecture they will run on) does not expand to the same value. Without this, building for other platforms may still work (slowly) if »boot.binfmt.emulatedSystems« on the building system is configured for the respective target(s).
         buildPlatform ? null,
-        ## The platforms for which the setup scripts (installation & maintenance/debugging) will be defined. SHould include the ».buildPlatform« and/or the target system's »config.nixpkgs.hostPlatform«.
+        ## The platforms for which the setup scripts (installation & maintenance/debugging) will be defined. Should include the ».buildPlatform« and/or the target system's »config.nixpkgs.hostPlatform«.
         setupPlatforms ? if inputs?systems then import inputs.systems else [ "aarch64-linux" "x86_64-linux" ],
         ## If provided, then change the name of each output attribute by passing it through this function. Allows exporting of multiple variants of a repo's hosts from a single flake (by then merging the results):
         renameOutputs ? false,
     ... }: let
         getName = if renameOutputs == false then (name: name) else renameOutputs;
-        otherArgs = (builtins.removeAttrs args [ "renameOutputs" "systems" ]) // {
+        otherArgs = (builtins.removeAttrs args [ "systems" "moduleInputs" "overlayInputs" "renameOutputs" ]) // {
             inherit inputs modules overlays moduleArgs nixosSystem buildPlatform extraModules;
             nixosArgs = (args.nixosArgs or { }) // { modules = (args.nixosArgs.modules or [ ]) ++ [ { imports = [ (args: {
                 ${installer}.outputName = getName args.config._module.args.name;
@@ -263,7 +263,7 @@ in rec {
             generic-arg-help "${ownPath}" "$functionDoc" ${esc description} ${esc notesAndExamples} ${esc usageLine} || exit
         ) ; \exit 0 ; fi
 
-        generic-arg-verify || \exit 3
+        undeclared=x-.* exitCode=3 generic-arg-verify || \exit
 
         # either call »argv[0]« with the remaining parameters as arguments, or if »$1« is »-c« eval »$2«.
         if [[ ''${args[trace]:-} ]] ; then set -x ; fi

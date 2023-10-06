@@ -63,7 +63,7 @@ function prepare-installer { # 1: diskPaths
     done
 
     if [[ ${SUDO_USER:-} && $( PATH=$hostPath which su 2>/dev/null ) ]] ; then # use Nix as the user who called this script, as Nix may not be set up for root
-        function nix {( set +x ; declare -a args=("$@") ; PATH=$hostPath su - "$SUDO_USER" -c "$(declare -p args)"' ; nix "${args[@]}"' )}
+        function nix {( set +x ; declare -a args=("$@") ; PATH=$hostPath su - "$SUDO_USER" -s "@{native.bashInteractive!getExe}" -c "$(declare -p args)"' ; nix "${args[@]}"' )}
     else # use Nix by absolute path, as it won't be on »$PATH«
         PATH=$PATH:@{native.nix}/bin
     fi
@@ -72,7 +72,7 @@ function prepare-installer { # 1: diskPaths
 
 }
 
-declare-flag install-system vm-shared "" "When installing inside the VM, specifies a host path that is read-write mounted at »/tmp/shared« inside the VM."
+declare-flag install-system vm-shared "dir-path" "When installing inside the VM, specifies a host path that is read-write mounted at »/tmp/shared« inside the VM."
 
 ## Re-executes the current system's installation in a qemu VM.
 function reexec-in-qemu {
@@ -125,7 +125,7 @@ function nixos-install-cmd {( # 1: mnt, 2: topLevel
     LC_ALL=C PATH=$PATH:@{native.util-linux}/bin @{native.nixos-install-tools}/bin/nixos-enter --silent --root "$1" -c "${_set_x:-:} ; @{config.system.build.installBootLoader} $2" || exit
 )}
 
-declare-flag install-system toplevel "" "Optional replacement for the actual »config.system.build.toplevel«."
+declare-flag install-system toplevel "store-path" "Optional replacement for the actual »config.system.build.toplevel«."
 declare-flag install-system no-inspect "" "Do not inspect the (successfully) installed system before unmounting its filesystems."
 declare-flag install-system inspect-cmd "script" "Instead of opening an interactive shell for the post-installation inspection, »eval« this script."
 

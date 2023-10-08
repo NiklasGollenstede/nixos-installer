@@ -58,9 +58,17 @@ declare-flag run-qemu efi-vars      "path" "For »--efi« systems, path to a fil
 declare-flag run-qemu graphic           "" "Open a graphical window even of the target system logs to serial and not (explicitly) TTY1."
 declare-flag run-qemu install "[1|always]" "If any of the guest system's disk images does not exist, perform the its installation before starting the VM. If set to »always«, always install before starting the VM. With this flag set, »diskImages« defaults to paths in »/tmp/."
 declare-flag run-qemu mem            "num" "VM RAM in MiB (»qemu -m«)."
-declare-flag run-qemu nat-fw    "forwards" "Port forwards to the guest's NATed NIC. E.g: »--nat-fw=:8000-:8000,:8001-:8001,127.0.0.1:2022-:22«."
 declare-flag run-qemu no-kvm            "" "Do not rey to use (or complain about the unavailability of) KVM."
+declare-flag run-qemu nat-fw    "forwards" "Port forwards to the guest's NATed NIC. E.g: »--nat-fw=:8000-:8000,:8001-:8001,127.0.0.1:2022-:22«."
 declare-flag run-qemu no-nat            "" "Do not provide a NATed NIC to the guest."
+declare-flag run-qemu nic "type[,options]" "Create an additional network interface using the »-nic« flag. Automatically sets a decent »model« and a »mac« derived from »config.networking.hostId«.
+Example 1 (connect two VMs, unprivileged):
+$ ... --nic=socket,listen=:4321 # once
+$ ... --nic=socket,connect=:4321 # once
+Example 2 (connect many VMs, unprivileged):
+$ nix shell nixpkgs#vde2 --command vde_switch -sock /tmp/vm-net
+$ ... --nic=vde,sock=/tmp/vm-net # multiple times
+"
 declare-flag run-qemu no-serial         "" "Do not connect the calling terminal to a serial adapter the guest can log to and open a terminal on the guests serial, as would be the default if the guests logs to ttyS0."
 declare-flag run-qemu share        "decls" "Host dirs to make available as network shares for the guest, as space separated list of »name:host-path,options. E.g. »--share='foo:/home/user/foo,readonly=on bar:/tmp/bar«. In the VM hte share can be mounted with: »$ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo«."
 declare-flag run-qemu smp            "num" "Number of guest CPU cores."
@@ -94,7 +102,7 @@ function run-qemu {
     qemu+=( -m ${args[mem]:-2048} )
     if [[ ${args[smp]:-} ]] ; then qemu+=( -smp ${args[smp]} ) ; fi
 
-    if [[ @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots SeaBIOS.
+    if [[ @{config.virtualisation.useEFIBoot:-} || @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots SeaBIOS.
         local ovmf ; ovmf=$( build-lazy @{pkgs.OVMF.drvPath!unsafeDiscardStringContext} fd ) || return
         #qemu+=( -bios ${ovmf}/FV/OVMF.fd ) # This works, but is a legacy fallback that stores the EFI vars in /NvVars on the EFI partition (which is really bad).
         local fwName=OVMF ; if [[ @{pkgs.system} == aarch64-* ]] ; then fwName=AAVMF ; fi # fwName=QEMU
@@ -144,12 +152,12 @@ function run-qemu {
     fi
 
     if [[ ! ${args[no-nat]:-} ]] ; then # e.g. --nat-fw=:8000-:8000,:8001-:8001,127.0.0.1:2022-:22
-        qemu+=( -nic user,model=virtio-net-pci${args[nat-fw]:+,hostfwd=tcp:${args[nat-fw]//,/,hostfwd=tcp:}} ) # NATed, IPs: 10.0.2.15+/32, gateway: 10.0.2.2
+        qemu+=( -nic user,model=virtio-net-pci${args[nat-fw]:+,hostfwd=tcp:${args[nat-fw]//,/,hostfwd=tcp:}} ) # NATed, IPs: 10.0.2.15+/24, gateway/host: 10.0.2.2, DNS: 10.0.2.3
     fi
-
-    # TODO: network bridging:
-    #[[ @{config.networking.hostId} =~ ^(.)(.)(.)(.)(.)(.)(.)(.)$ ]] && mac=$( printf "52:54:%s%s:%s%s:%s%s:%s%s" "${BASH_REMATCH[@]:1}" ) || { echo 'Invalid hostId' &>2 ; return; }
-    #qemu+=( -netdev bridge,id=enp0s3,macaddr=$mac -device virtio-net-pci,netdev=hn0,id=nic1 )
+    if [[ ${args[nic]:-} ]] ; then
+        [[ @{config.networking.hostId} =~ ^(.)(.)(.)(.)(.)(.)(.)(.)$ ]] && mac=$( printf "52:54:%s%s:%s%s:%s%s:%s%s" "${BASH_REMATCH[@]:1}" ) || { echo 'Invalid hostId' &>2 ; return; }
+        qemu+=( -nic model=virtio-net-pci,mac=$mac,type="${args[nic]}" )
+    fi
 
     # To pass a USB device (e.g. a YubiKey for unlocking), add pass »--usb-port=${bus}-${port}«, where bus and port refer to the physical USB port »/sys/bus/usb/devices/${bus}-${port}« (see »lsusb -tvv«). E.g.: »--usb-port=3-1.1.1.4«
     if [[ ${args[usb-port]:-} ]] ; then local decl ; for decl in ${args[usb-port]//:/ } ; do

@@ -31,16 +31,16 @@ in {
             }; })));
             apply = lib.filterAttrs (k: v: v != null);
         };
-        commands = let desc = when: mounted: ''
+        commands = let cmdOpt = when: mounted: lib.mkOption { description = ''
             Bash commands that are executed during the system installation, ${when}.
             Note that these commands are executed without any further sandboxing (i.e. when not using the VM installation mode, as root on the host).
             Partitions may be used via `/dev/disk/by-partlabel/`.${lib.optionalString mounted '' The target system is mounted at `$mnt`.''}
-        ''; in {
-            postPartition = lib.mkOption { description = desc "after partitioning the disks" false; type = lib.types.lines; default = ""; };
-            postFormat = lib.mkOption { description = desc "after formatting the partitions with filesystems" false; type = lib.types.lines; default = ""; };
-            postMount = lib.mkOption { description = desc "after mounting all filesystems" true; type = lib.types.lines; default = ""; };
-            preInstall = lib.mkOption { description = desc "before installing the bootloader" true; type = lib.types.lines; default = ""; };
-            postInstall = lib.mkOption { description = desc "just before unmounting the new system" true; type = lib.types.lines; default = ""; };
+        ''; type = lib.types.lines; default = ""; }; in {
+            postPartition = cmdOpt "after partitioning the disks" false;
+            postFormat = cmdOpt "after formatting the partitions with filesystems" false;
+            postMount = cmdOpt "after mounting all filesystems" true;
+            preInstall = cmdOpt "before installing the bootloader" true;
+            postInstall = cmdOpt "just before unmounting the new system" true;
         };
         outputName = lib.mkOption {
             description = ''The name this system is (/ should be) exported as by its defining flake (as »nixosConfigurations.''${outputName}« and »apps.*-linux.''${outputName}«).'';

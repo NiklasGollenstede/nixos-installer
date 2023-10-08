@@ -200,7 +200,7 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
         else
             ( set +x ; echo "[1;32mInstallation done![0m This shell is in a chroot in the mounted system for inspection. Exiting the shell will unmount the system." 1>&2 )
         fi
-        LC_ALL=C PATH=$PATH:@{native.util-linux}/bin @{native.nixos-install-tools}/bin/nixos-enter --root $mnt -- /nix/var/nix/profiles/system/sw/bin/bash -c 'source /etc/set-environment ; CHROOT_DIR="'"$mnt"'" mnt=/ exec "'"$self"'" bash' || exit # +o monitor
+        LC_ALL=C PATH=$PATH:@{native.util-linux}/bin @{native.nixos-install-tools}/bin/nixos-enter --root $mnt -- /nix/var/nix/profiles/system/sw/bin/bash -c 'source /etc/set-environment ; NIXOS_INSTALL_BOOTLOADER=1 CHROOT_DIR="'"$mnt"'" mnt=/ exec "'"$self"'" bash' || exit # +o monitor
     fi
 
     mkdir -p $mnt/var/lib/systemd/timesync && touch $mnt/var/lib/systemd/timesync/clock || true # save current time

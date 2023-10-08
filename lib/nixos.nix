@@ -227,7 +227,7 @@ in rec {
                 PS1=''${PS1/\\$/\\[\\e[93m\\](${name})\\[\\e[97m\\]\\$}
 
                 source "'"$self"'" ; PATH=$hostPath
-            ') -i -s ':' "$@"
+            ') -i -s ':' "$@" # execute : (noop) as command, preserve argv
         fi
 
         # provide installer tools (not necessarily for system.pkgs.config.hostPlatform)

@@ -14,7 +14,5 @@
         installer = "installer"; # config.${installer}
         setup = "setup"; # config.${setup}
         preface = "preface"; # config.${preface}
-        extlinux = "extlinux"; # config.boot.loader.${extlinux}
-        preMountCommands = "preMountCommands"; # config.fileSystems.*.${preMountCommands}
     };
 }; }

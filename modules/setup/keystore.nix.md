@@ -86,7 +86,7 @@ in let module = {
         };
 
         # Create and populate keystore during installation:
-        fileSystems.${keystore} = { fsType = "vfat"; device = "/dev/mapper/keystore-${hash}"; options = [ "ro" "nosuid" "nodev" "noexec" "noatime" "umask=0277" "noauto" ]; formatOptions = ""; };
+        fileSystems.${keystore} = { fsType = "vfat"; device = "/dev/mapper/keystore-${hash}"; options = [ "ro" "nosuid" "nodev" "noexec" "noatime" "umask=0277" "noauto" ]; formatArgs = [ ]; };
 
         ${setup}.disks.partitions."keystore-${hash}" = { type = lib.mkDefault "8309"; order = lib.mkDefault 1375; disk = lib.mkDefault "primary"; size = lib.mkDefault "32M"; };
         ${installer}.commands.postFormat = ''( : 'Copy the live keystore to its primary persistent location:'

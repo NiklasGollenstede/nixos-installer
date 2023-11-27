@@ -16,13 +16,13 @@ This uses the same implementation as `boot.loader.generic-extlinux-compatible` t
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
 dirname: inputs: args@{ config, options, pkgs, lib, ... }: let lib = inputs.self.lib.__internal__; in let
-    inherit (inputs.config.rename) setup extlinux;
-    cfg = config.boot.loader.${extlinux};
+    inherit (inputs.config.rename) setup;
+    cfg = config.boot.loader.extlinux;
     targetMount = let path = lib.findFirst (path: config.fileSystems?${path}) "/" (lib.fun.parentPaths cfg.targetDir); in config.fileSystems.${path};
     supportedFSes = [ "vfat" "ntfs" "ext2" "ext3" "ext4" "btrfs" "xfs" "ufs" ]; fsSupported = fs: builtins.elem fs supportedFSes;
 in {
 
-    options = { boot.loader.${extlinux} = {
+    options = { boot.loader.extlinux = {
         enable = lib.mkEnableOption (lib.mdDoc ''
             `extlinux`, a simple bootloader for legacy-BIOS environments, like (by default) Qemu.
             This uses the same implementation as `boot.loader.generic-extlinux-compatible` to generate the bootloader configuration, but then actually also installs `extlinux` itself, instead of relying on something else (like an externally installed u-boot) to read and execute the configuration.
@@ -57,17 +57,17 @@ in {
         assertions = [ {
             assertion = cfg.allowInstableTargetPart || (builtins.match ''^/dev/disk/by-(id|label|partlabel|partuuid|uuid)/.*[^/]$'' cfg.targetPart) != null;
             message = ''
-                `config.boot.loader.${extlinux}.targetPart` is set to `${cfg.targetPart}`, which is not a stable path in `/dev/disk/by-{id,label,partlabel,partuuid,uuid}/`. Not using a unique identifier (or even using a path that can unexpectedly change) is very risky.
+                `config.boot.loader.extlinux.targetPart` is set to `${cfg.targetPart}`, which is not a stable path in `/dev/disk/by-{id,label,partlabel,partuuid,uuid}/`. Not using a unique identifier (or even using a path that can unexpectedly change) is very risky.
             '';
         } {
             assertion = fsSupported targetMount.fsType;
             message = ''
-                `config.boot.loader.${extlinux}.targetPart`'s closest mount (`${targetMount.mountPoint}`) is of type `${targetMount.fsType}`, which is not one of extlinux's supported types (${lib.concatStringsSep ", " supportedFSes}).
+                `config.boot.loader.extlinux.targetPart`'s closest mount (`${targetMount.mountPoint}`) is of type `${targetMount.fsType}`, which is not one of extlinux's supported types (${lib.concatStringsSep ", " supportedFSes}).
             '';
         } ];
 
         ${setup}.bootpart = { enable = lib.mkDefault true; mountpoint = lib.mkDefault cfg.targetDir; };
-        boot.loader.${extlinux}.allowInstableTargetPart = lib.mkForce false;
+        boot.loader.extlinux.allowInstableTargetPart = lib.mkForce false;
 
         system.boot.loader.id = "extlinux";
         system.build.installBootLoader = "${pkgs.writeShellScript "install-extlinux.sh" ''
@@ -107,7 +107,7 @@ in {
     }) (
 
         (lib.mkIf (options.virtualisation?useDefaultFilesystems) { # (»nixos/modules/virtualisation/qemu-vm.nix« is imported, i.e. we are building a "vmVariant")
-            boot.loader.${extlinux} = {
+            boot.loader.extlinux = {
                 enable = lib.mkIf config.virtualisation.useDefaultFilesystems (lib.mkVMOverride false);
                 allowInstableTargetPart = lib.mkVMOverride true; # (»/dev/sdX« etc in the VM are stable (if the VM is invoked the same way))
             };

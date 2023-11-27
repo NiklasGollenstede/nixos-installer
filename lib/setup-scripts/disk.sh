@@ -197,9 +197,8 @@ function format-partitions {
         elif [[ ${fs[device]} == /dev/mapper/* ]] ; then
             if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${fs[device]/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device ${fs[device]} used by mount ${fs[mountPoint]} does not point at one of the device mappings ${!config.boot.initrd.luks.devices!catAttrSets.device[@]}" 1>&2 ; \return 1 ; fi
         else continue ; fi
-        #if [[ ${fs[fsType]} == ext4 && ' '${fs[formatOptions]}' ' != *' -F '* ]] ; then fs[formatOptions]+=' -F' ; fi
-        #if [[ ${fs[fsType]} == f2fs && ' '${fs[formatOptions]}' ' != *' -f '* ]] ; then fs[formatOptions]+=' -f' ; fi
-        ( PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH ; ${_set_x:-:} ; mkfs.${fs[fsType]} ${fs[formatOptions]} "${fs[device]}" >$beLoud 2>$beSilent ) || return
+        eval 'declare -a formatArgs='"${fs[formatArgs]}"
+        ( PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH ; ${_set_x:-:} ; mkfs."${fs[fsType]}" "${formatArgs[@]}" "${fs[device]}" >$beLoud 2>$beSilent ) || return
         @{native.parted}/bin/partprobe "${fs[device]}" || true
     done
     for swapDev in "@{config.swapDevices!catAttrs.device[@]}" ; do

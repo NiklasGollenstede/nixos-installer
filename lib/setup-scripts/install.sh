@@ -121,8 +121,8 @@ function nixos-install-cmd {( # 1: mnt, 2: topLevel
     #PATH=@{native.nix}/bin:$PATH:@{config.systemd.package}/bin TMPDIR=/tmp LC_ALL=C @{native.nixos-install-tools}/bin/nixos-install --system "$2" --no-root-passwd --no-channel-copy --root "$1" || exit # We did most of this, so just install the bootloader:
 
     export NIXOS_INSTALL_BOOTLOADER=1 # tells some bootloader installers (systemd & grub) to not skip parts of the installation
-    #( export LC_ALL=C ; PATH=$PATH:@{native.util-linux}/bin:@{native.nixos-install-tools}/bin/ ; ${_set_x:-:} ; nixos-enter --silent --root "$1" -- @{config.system.build.installBootLoader} "$2" ) || exit
-    LC_ALL=C PATH=$PATH:@{native.util-linux}/bin @{native.nixos-install-tools}/bin/nixos-enter --silent --root "$1" -c "${_set_x:-:} ; @{config.system.build.installBootLoader} $2" || exit
+    LC_ALL=C PATH=@{native.busybox}/bin:$PATH:@{native.util-linux}/bin @{native.nixos-install-tools}/bin/nixos-enter --silent --root "$1" -c "source /etc/set-environment ; ${_set_x:-:} ; @{config.system.build.installBootLoader} $2" || exit
+    # (newer versions of »mount« seem to be unable to do »--make-private« on »rootfs« (in the initrd), but busybox's mount still works)
 )}
 
 declare-flag install-system toplevel "store-path" "Optional replacement for the actual »config.system.build.toplevel«."
@@ -142,7 +142,7 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
     mkdir -p -m 755 $mnt/nix/var/nix || exit ; mkdir -p -m 1775 $mnt/nix/store || exit
     mkdir -p $mnt/etc $mnt/run || exit ; mkdir -p -m 1777 $mnt/tmp || exit
     @{native.util-linux}/bin/mount tmpfs -t tmpfs $mnt/run || exit ; prepend_trap "@{native.util-linux}/bin/umount -l $mnt/run" EXIT || exit # If there isn't anything mounted here, »activate« will mount a tmpfs (inside »nixos-enter«'s private mount namespace). That would hide the additions below.
-    [[ -e $mnt/etc/NIXOS ]] || touch $mnt/etc/NIXOS || exit # for »switch-to-configuration«
+    [[ -e $mnt/etc/NIXOS ]] || touch $mnt/etc/NIXOS || exit # for »nixos-enter«
     [[ -e $mnt/etc/mtab ]] || ln -sfn /proc/mounts $mnt/etc/mtab || exit
     ln -sT $( realpath $targetSystem ) $mnt/run/current-system || exit
     #mkdir -p /nix/var/nix/db # »nixos-containers« requires this but nothing creates it before nix is used. BUT »nixos-enter« screams: »/nix/var/nix/db exists and is not a regular file.«
@@ -200,7 +200,7 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
         else
             ( set +x ; echo "[1;32mInstallation done![0m This shell is in a chroot in the mounted system for inspection. Exiting the shell will unmount the system." 1>&2 )
         fi
-        LC_ALL=C PATH=$PATH:@{native.util-linux}/bin @{native.nixos-install-tools}/bin/nixos-enter --root $mnt -- /nix/var/nix/profiles/system/sw/bin/bash -c 'source /etc/set-environment ; NIXOS_INSTALL_BOOTLOADER=1 CHROOT_DIR="'"$mnt"'" mnt=/ exec "'"$self"'" bash' || exit # +o monitor
+        LC_ALL=C PATH=@{native.busybox}/bin:$PATH:@{native.util-linux}/bin @{native.nixos-install-tools}/bin/nixos-enter --root $mnt -- /nix/var/nix/profiles/system/sw/bin/bash -c 'source /etc/set-environment ; NIXOS_INSTALL_BOOTLOADER=1 CHROOT_DIR="'"$mnt"'" mnt=/ exec "'"$self"'" bash' || exit # +o monitor
     fi
 
     mkdir -p $mnt/var/lib/systemd/timesync && touch $mnt/var/lib/systemd/timesync/clock || true # save current time

@@ -296,14 +296,14 @@ in {
         fileSystems.${cfg.local.bind.source} = {
             fsType = fsType; device = "/dev/${if encrypted then "mapper" else "disk/by-partlabel"}/local-${hash}";
         } // (if fsType == "f2fs" then {
-            formatOptions = (lib.concatStrings [
-                " -O extra_attr" # required by other options
-                ",inode_checksum" # enable inode checksum
-                ",sb_checksum" # enable superblock checksum
-                ",compression" # allow compression
+            formatArgs = [
+                "-O" "extra_attr" # required by other options
+                "-O" "inode_checksum" # enable inode checksum
+                "-O" "sb_checksum" # enable superblock checksum
+                "-O" "compression" # allow compression
                 #"-w ?" # "sector size in bytes"
                 # sector ? segments < section < zone
-            ]);
+            ];
             options = optionsToList (cfg.local.mountOptions // {
                 # F2FS compresses only for performance and wear. The whole uncompressed space is still reserved (in case the file content needs to get replaced by incompressible data in-place). To free the gained space, »ioctl(fd, F2FS_IOC_RELEASE_COMPRESS_BLOCKS)« needs to be called per file, making the file immutable. Nix could do that when moving stuff into the store.
                 compress_mode = "fs"; # enable compression for all files
@@ -313,16 +313,16 @@ in {
                 discard = true;
             });
         } else {
-            formatOptions = (lib.concatStrings [
-                " -O inline_data" # embed data of small files in the top-level inode
-                ",has_journal,extent,huge_file,flex_bg,metadata_csum,64bit,dir_nlink,extra_isize" # (ext4 default options)
-                #",lazy_journal_init,lazy_itable_init" # speed up creation (but: Invalid filesystem option set)
-                " -I 256" # inode size (ext default, allows for timestamps past 2038)
-                " -i 16384" # create one inode per 16k bytes of disk (ext default)
-                " -b 4096" # block size (ext default)
-                " -E nodiscard" # do not trim the whole blockdev upon formatting
-                " -e panic" # when (critical?) FS errors are detected, reset the system
-            ]); options = optionsToList (cfg.local.mountOptions // {
+            formatArgs = [
+                "-O" "inline_data" # embed data of small files in the top-level inode
+                #"-O" "has_journal,extent,huge_file,flex_bg,metadata_csum,64bit,dir_nlink,extra_isize" # (ext4 defaults, no need to set again)
+                #"-O" "lazy_journal_init,lazy_itable_init" # speed up creation (but: Invalid filesystem option set)
+                "-I" "256" # inode size (ext default, allows for timestamps past 2038)
+                "-i" "16384" # create one inode per 16k bytes of disk (ext default)
+                "-b" "4096" # block size (ext default)
+                "-E" "nodiscard" # do not trim the whole blockdev upon formatting
+                "-e" "panic" # when (critical?) FS errors are detected, reset the system
+            ]; options = optionsToList (cfg.local.mountOptions // {
                 discard = true;
             });
         });
@@ -342,7 +342,7 @@ in {
         ) ++ [ (rec {
             device = "${cfg.${type}.bind.source}/${source}";
             options = optionsToList (cfg.${type}.mountOptions // args.options // { bind = true; });
-            ${preMountCommands} = lib.mkIf (!extraFsConfig.neededForBoot && !(lib.elem target utils.pathsNeededForBoot)) ''
+            preMountCommands = lib.mkIf (!extraFsConfig.neededForBoot && !(lib.elem target utils.pathsNeededForBoot)) ''
                 mkdir -pm 000 -- ${lib.escapeShellArg target}
                 mkdir -pm 000 -- ${lib.escapeShellArg device}
                 chown ${toString uid}:${toString gid} -- ${lib.escapeShellArg device}

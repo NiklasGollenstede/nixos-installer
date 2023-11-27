@@ -153,6 +153,7 @@
 		"reexec", // option
 		"refreservation", // zfs
 		"relatime", // mount option
+		"rootfs", // linux
 		"rpool", // zfs
 		"sandboxing", // word
 		"sata", // storage protocol

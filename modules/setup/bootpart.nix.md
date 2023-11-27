@@ -32,7 +32,7 @@ in {
                 a;1    # active/boot ; part1
             ''; }; };
         };
-        fileSystems.${cfg.mountpoint} = { fsType = "vfat"; device = "/dev/disk/by-partlabel/boot-${hash}"; neededForBoot = true; options = [ "nosuid" "nodev" "noexec" "noatime" "umask=0027" "discard" ]; formatOptions = "-F 32"; };
+        fileSystems.${cfg.mountpoint} = { fsType = "vfat"; device = "/dev/disk/by-partlabel/boot-${hash}"; neededForBoot = true; options = [ "nosuid" "nodev" "noexec" "noatime" "umask=0027" "discard" ]; formatArgs = [ "-F" "32" ]; };
 
     }) ]);
 

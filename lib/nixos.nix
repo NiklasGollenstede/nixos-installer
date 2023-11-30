@@ -121,9 +121,11 @@ in rec {
         setupPlatforms ? if inputs?systems then import inputs.systems else [ "aarch64-linux" "x86_64-linux" ],
         ## If provided, then change the name of each output attribute by passing it through this function. Allows exporting of multiple variants of a repo's hosts from a single flake (by then merging the results):
         renameOutputs ? false,
+        ## Whether to export the »all-systems« package as »packages.*.default« as well.
+        asDefaultPackage ? false,
     ... }: let
         getName = if renameOutputs == false then (name: name) else renameOutputs;
-        otherArgs = (builtins.removeAttrs args [ "systems" "moduleInputs" "overlayInputs" "renameOutputs" ]) // {
+        otherArgs = (builtins.removeAttrs args [ "systems" "moduleInputs" "overlayInputs" "renameOutputs" "asDefaultPackage" ]) // {
             inherit inputs modules overlays moduleArgs nixosSystem buildPlatform extraModules;
             nixosArgs = (args.nixosArgs or { }) // { modules = (args.nixosArgs.modules or [ ]) ++ [ { imports = [ (args: {
                 ${installer}.outputName = getName args.config._module.args.name;
@@ -140,7 +142,7 @@ in rec {
         apps = lib.mapAttrs (name: system: rec { type = "app"; derivation = writeSystemScripts { inherit name pkgs system; }; program = "${derivation}"; }) nixosConfigurations;
 
         # dummy that just pulls in all system builds
-        packages.all-systems = pkgs.runCommandLocal "all-systems" { } ''
+        packages = let all-systems = pkgs.runCommandLocal "all-systems" { } ''
             ${''
                 mkdir -p $out/systems
                 ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${system.config.system.build.toplevel} $out/systems/${getName name}") nixosConfigurations)}
@@ -153,7 +155,7 @@ in rec {
                 mkdir -p $out/inputs
                 ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: { outPath, ... }: "ln -sT ${outPath} $out/inputs/${name}") inputs)}
             ''}
-        '';
+        ''; in { inherit all-systems; } // (lib.optionalAttrs asDefaultPackage { default = all-systems ; });
         checks.all-systems = packages.all-systems;
 
     })); in if renameOutputs == false then outputs else {

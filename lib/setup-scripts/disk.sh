@@ -105,18 +105,13 @@ function partition-disks {
             actual=$( @{native.systemd}/bin/udevadm info --query=property --name="$blockDev" | grep -oP 'ID_SERIAL_SHORT=\K.*' || echo '<none>' )
             if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev's serial ($actual) does not match the serial (${disk[serial]}) declared for ${disk[name]}" 1>&2 ; \return 1 ; fi
         fi
+        @{native.util-linux}/bin/blkdiscard -f "${blockDevs[${disk[name]}]}" &>$beLoud || true
         # can (and probably should) restore the backup:
         ( PATH=@{native.gptfdisk}/bin ; ${_set_x:-:} ; sgdisk --zap-all --load-backup=@{config.setup.disks.partitioning}/"${disk[name]}".backup ${disk[allowLarger]:+--move-second-header} "${blockDevs[${disk[name]}]}" >$beLoud 2>$beSilent ) || return
         #partition-disk "${disk[name]}" "${blockDevs[${disk[name]}]}" || return
     done
     @{native.parted}/bin/partprobe "${blockDevs[@]}" &>$beLoud || return
     @{native.systemd}/bin/udevadm settle -t 15 || true # sometimes partitions aren't quite made available yet
-
-    # ensure that filesystem creation does not complain about the devices already being occupied by a previous filesystem
-    local toWipe=( ) ; for part in "@{config.setup.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" ; do [[ ! -e "$part" ]] || toWipe+=( "$part" ) ; done
-    @{native.util-linux}/bin/wipefs --all "${toWipe[@]}" >$beLoud 2>$beSilent || return
-    #</dev/zero head -c 4096 | tee "@{config.setup.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" >/dev/null
-    #for part in "@{config.setup.disks.partitions!attrNames[@]/#/'/dev/disk/by-partlabel/'}" ; do @{native.util-linux}/bin/blkdiscard -f "$part" || return ; done
 }
 
 ## Given a declared disk device's »name« and a path to an actual »blockDev« (or image) file, partitions the device as declared in the config.
@@ -194,16 +189,18 @@ function format-partitions {
         eval 'declare -A fs='"$fsDecl"
         if [[ ${fs[device]} == /dev/disk/by-partlabel/* ]] ; then
             if ! is-partition-on-disks "${fs[device]}" "${blockDevs[@]}" ; then echo "Partition alias ${fs[device]} used by mount ${fs[mountPoint]} does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
+            @{native.util-linux}/bin/wipefs --all "${fs[device]}" >$beLoud 2>$beSilent || return # else mkfs might refuse to replace any previous filesystems
         elif [[ ${fs[device]} == /dev/mapper/* ]] ; then
             if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${fs[device]/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device ${fs[device]} used by mount ${fs[mountPoint]} does not point at one of the device mappings ${!config.boot.initrd.luks.devices!catAttrSets.device[@]}" 1>&2 ; \return 1 ; fi
         else continue ; fi
         eval 'declare -a formatArgs='"${fs[formatArgs]}"
-        ( PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH ; ${_set_x:-:} ; mkfs."${fs[fsType]}" "${formatArgs[@]}" "${fs[device]}" >$beLoud 2>$beSilent ) || return
+        ( PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH ; ${_set_x:-:} ; mkfs."${fs[fsType]}" "${formatArgs[@]}" "${fs[device]}" >$beLoud 2>$beSilent ) || [[ $options == *,nofail,* ]] || return
         @{native.parted}/bin/partprobe "${fs[device]}" || true
     done
     for swapDev in "@{config.swapDevices!catAttrs.device[@]}" ; do
         if [[ $swapDev == /dev/disk/by-partlabel/* ]] ; then
             if ! is-partition-on-disks "$swapDev" "${blockDevs[@]}" ; then echo "Partition alias $swapDev used for SWAP does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
+            @{native.util-linux}/bin/wipefs --all "${fs[device]}" >$beLoud 2>$beSilent || return # else mkswap might refuse to replace any previous filesystems
         elif [[ $swapDev == /dev/mapper/* ]] ; then
             if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${swapDev/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device $swapDev used for SWAP does not point at one of the device mappings @{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" 1>&2 ; \return 1 ; fi
         else continue ; fi
@@ -233,10 +230,10 @@ function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowFail
     # While not generally required for fstab, nixos uses the dependency-sorted »config.system.build.fileSystems« list (instead of plain »builtins.attrValues config.fileSystems«) to generate »/etc/fstab« (provided »config.fileSystems.*.depends« is set correctly, e.g. for overlay mounts).
     # This function depends on the file at »fstabPath« to be sorted like that.
 
-    # The following is roughly equivalent to: mount --all --fstab @{config.system.build.toplevel}/etc/fstab --target-prefix "$1" -o X-mount.mkdir # (but »--target-prefix« is not supported with older versions on »mount«, e.g. on Ubuntu 20.04 (but can't we use mount from nixpkgs?))
     mnt=$1 ; fstabPath=${2:-"@{config.system.build.toplevel}/etc/fstab"} ; allowFail=${3:-}
     PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH
 
+    # The following is roughly equivalent to: mount --all --fstab "$fstabPath" --target-prefix "$mnt" -o X-mount.mkdir # (but »--target-prefix« does not apply to bind/overlay sources)
     while read -u3 source target type options numbers ; do
         if [[ ! $target || $target == none ]] ; then continue ; fi
         options=,$options, ; options=${options//,ro,/,}

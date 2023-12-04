@@ -235,7 +235,7 @@ in rec {
         # provide installer tools (not necessarily for system.pkgs.config.hostPlatform)
         hostPath=$PATH ; PATH=${lib.makeBinPath tools}
 
-        ${extractBashFunction (builtins.readFile setup-scripts.utils) "generic-arg-parse"}
+        source ${inputs.functions.lib.bash.generic-arg-parse}
         set -o pipefail -o nounset # (do not rely on errexit)
         generic-arg-parse "$@" || exit
 
@@ -257,6 +257,9 @@ in rec {
         declare-flag '*' trace "" "Turn on bash's »errtrace« option before running »COMMAND«."
         declare-flag '*' quiet "" "Try to suppress all non-error output. May also swallow some error related output."
         declare -g -A allowedCommands=( ) ; function declare-command { allowedCommands[$@]=$(< /dev/stdin) ; }
+        source ${inputs.functions.lib.bash.generic-arg-verify}
+        source ${inputs.functions.lib.bash.generic-arg-help}
+        source ${inputs.functions.lib.bash.prepend_trap}
         ${system.config.${installer}.build.scripts { native = pkgs; }}
         if [[ ''${args[help]:-} ]] ; then (
             functionDoc= ; while IFS= read -u3 -r name ; do

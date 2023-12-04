@@ -52,7 +52,7 @@ in let hostModule = {
             mkdir -p $out/bin
             ln -s ${cfg.system.build.toplevel} $out/system
             ln -s ${pkgs.writeShellScript name ''
-                ${lib.fun.extractBashFunction (builtins.readFile lib.self.setup-scripts.utils) "generic-arg-parse"}
+                source ${lib.fun.bash.generic-arg-parse}
                 generic-arg-parse "$@" ; set -- ; set -o pipefail -u #; set -x
                 script=''${argv[0]:?'The first positional argument must be the script to execute in the VM'} ; argv=( "''${argv[@]:1}" )
 

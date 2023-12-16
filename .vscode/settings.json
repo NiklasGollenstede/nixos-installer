@@ -128,7 +128,7 @@
 		"optimise", // B/E
 		"ostype", // virtual box
 		"overlayed", // word
-		"OVMF", // package
+		"ovmf", // package
 		"partlabel", // linux
 		"partprobe", // program / function
 		"partuuid", // linux
@@ -194,7 +194,9 @@
 		"virt", // abbr (virtualization)
 		"virtfs", // qemu / filesystem
 		"virtio", // cli arg
+		"virtualbox", // program
 		"virtualisation", // british english
+		"vmdk", // vbox
 		"wipefs", // program
 		"workdir", // mount overlay option
 		"xattr", // zfs

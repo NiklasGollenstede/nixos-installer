@@ -206,7 +206,7 @@ function mount-keystore-luks {
     @{native.util-linux}/bin/mount -o nodev,umask=0077,fmask=0077,dmask=0077,ro /dev/mapper/$keystore /run/$keystore && prepend_trap "@{native.util-linux}/bin/umount /run/$keystore" EXIT || return
 }
 
-## Opens the keystore with the primary unlock method, which may not  be convenient to use, but should always be defined.
+## Opens the keystore with the primary unlock method, which may not be convenient to use, but should always be defined.
 function mount-keystore-luks-primary {
     local usage=luks/keystore-@{config.networking.hostName!hashString.sha256:0:8}/0
     local method=@{config.setup.keystore.keys[$usage]%%=*}

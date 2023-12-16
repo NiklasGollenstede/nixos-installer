@@ -205,8 +205,6 @@ in {
     }) (lib.mkIf cfg.persistenceFixes { # Cope with the consequences of having »/« (including »/{etc,var,root,...}«) cleared on every reboot.
 
         environment.etc = {
-            nixos.source = "/local/etc/nixos";
-
             # SSHd host keys:
             "ssh/ssh_host_ed25519_key".source = "/${keep}/etc/ssh/ssh_host_ed25519_key";
             "ssh/ssh_host_ed25519_key.pub".source = "/${keep}/etc/ssh/ssh_host_ed25519_key.pub";

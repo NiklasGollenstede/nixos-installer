@@ -11,7 +11,7 @@ dirname: inputs: moduleArgs@{ config, pkgs, lib, utils, ... }: let lib = inputs.
 in {
 
     options = {
-        fileSystems = lib.mkOption { type = lib.types.attrsOf (lib.types.submodule [ ({ config, ...}@_: { options = {
+        fileSystems = lib.mkOption { type = lib.types.attrsOf (lib.types.submodule [ ({ config, ... }@_: { options = {
             formatArgs = lib.mkOption { description = "Arguments passed to mkfs for this filesystem during OS installation."; type = lib.types.listOf lib.types.str; default = if (lib.isString config.formatOptions or null) && config.formatOptions != "" then lib.splitString " " config.formatOptions else [ ]; };
         }; }) ]);
     }; };

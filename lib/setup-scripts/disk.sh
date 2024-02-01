@@ -9,7 +9,6 @@ declare-flag install-system skip-formatting "" "Skip partitioning, formatting, a
 function do-disk-setup { # 1: diskPaths
 
     ensure-disks "$1" || return
-    prompt-for-user-passwords || return
 
     export mnt=/tmp/nixos-install-@{config.networking.hostName} && mkdir -p "$mnt" && prepend_trap "rmdir $mnt" EXIT || return # »mnt=/run/user/0/...« would be more appropriate, but »nixos-install« does not like the »700« permissions on »/run/user/0«
 
@@ -22,6 +21,7 @@ function do-disk-setup { # 1: diskPaths
         open-luks-layers || return
         if [[ $(LC_ALL=C type -t import-zpools) == function ]] ; then import-zpools $mnt || return ; fi
     else
+        prompt-for-user-passwords || return
         populate-keystore || return
         partition-disks || return
         create-luks-layers || return
@@ -34,9 +34,9 @@ function do-disk-setup { # 1: diskPaths
         run-hook-script 'Post Formatting' @{config.installer.commands.postFormat!writeText.postFormatCommands} || return
     fi
 
-    fix-grub-install || return
+    #fix-grub-install || return
 
-    prepend_trap "unmount-system $mnt" EXIT && mount-system $mnt || return
+    prepend_trap "unmount-system $mnt" EXIT && mount-system $mnt '' "${args[skip-formatting]:-}" || return
     run-hook-script 'Post Mounting' @{config.installer.commands.postMount!writeText.postMountCommands} || return
 }
 
@@ -200,7 +200,7 @@ function format-partitions {
     for swapDev in "@{config.swapDevices!catAttrs.device[@]}" ; do
         if [[ $swapDev == /dev/disk/by-partlabel/* ]] ; then
             if ! is-partition-on-disks "$swapDev" "${blockDevs[@]}" ; then echo "Partition alias $swapDev used for SWAP does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
-            @{native.util-linux}/bin/wipefs --all "${fs[device]}" >$beLoud 2>$beSilent || return # else mkswap might refuse to replace any previous filesystems
+            @{native.util-linux}/bin/wipefs --all "$swapDev" >$beLoud 2>$beSilent || return # else mkswap might refuse to replace any previous filesystems
         elif [[ $swapDev == /dev/mapper/* ]] ; then
             if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${swapDev/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device $swapDev used for SWAP does not point at one of the device mappings @{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" 1>&2 ; \return 1 ; fi
         else continue ; fi
@@ -226,11 +226,11 @@ function fix-grub-install {
 }
 
 ## Mounts all file systems as it would happen during boot, but at path prefix »$mnt« (instead of »/«).
-function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowFail
+function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowNoautoFail
     # While not generally required for fstab, nixos uses the dependency-sorted »config.system.build.fileSystems« list (instead of plain »builtins.attrValues config.fileSystems«) to generate »/etc/fstab« (provided »config.fileSystems.*.depends« is set correctly, e.g. for overlay mounts).
     # This function depends on the file at »fstabPath« to be sorted like that.
 
-    mnt=$1 ; fstabPath=${2:-"@{config.system.build.toplevel}/etc/fstab"} ; allowFail=${3:-}
+    mnt=$1 ; fstabPath=${2:-"@{config.system.build.toplevel}/etc/fstab"} ; allowNoautoFail=${3:-}
     PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH
 
     # The following is roughly equivalent to: mount --all --fstab "$fstabPath" --target-prefix "$mnt" -o X-mount.mkdir # (but »--target-prefix« does not apply to bind/overlay sources)
@@ -239,7 +239,13 @@ function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowFail
         options=,$options, ; options=${options//,ro,/,}
 
         if ! @{native.util-linux}/bin/mountpoint -q "$mnt"/"$target" ; then (
-            mkdir-sticky "$mnt"/"$target" || exit
+
+            if [[ $options =~ ,x-bind-file, ]] ; then
+                mkdir-sticky "$(dirname "$mnt"/"$target")" && touch -a "$mnt"/"$target" || \exit
+            else
+                mkdir-sticky "$mnt"/"$target" || \exit
+            fi
+
             [[ $type == tmpfs || $type == auto || $type == */* ]] || @{native.kmod}/bin/modprobe --quiet $type || true # (this does help sometimes)
 
             if [[ $type == overlay ]] ; then
@@ -251,12 +257,18 @@ function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowFail
                 # TODO: test the lowerdir stuff
             elif [[ $options =~ ,r?bind, ]] ; then
                 if [[ $source == /nix/store/* ]] ; then options=,ro$options ; fi
-                source=$mnt/$source ; if [[ ! -e $source ]] ; then mkdir-sticky "$source" || exit ; fi
+                source=$mnt/$source ; if [[ ! -e $source ]] ; then
+                    if [[ $options =~ ,x-bind-file, ]] ; then
+                        mkdir-sticky "$(dirname "$source")" && touch -a "$source" || \exit
+                    else
+                        mkdir-sticky "$source" || \exit
+                    fi
+                fi
             fi
 
-            @{native.util-linux}/bin/mount -t $type -o "${options:1:(-1)}" "$source" "$mnt"/"$target" || exit
+            @{native.util-linux}/bin/mount -t $type -o "${options:1:(-1)}" "$source" "$mnt"/"$target" || \exit
 
-        ) || [[ $options == *,nofail,* || $allowFail ]] || exit ; fi # (actually, nofail already makes mount fail silently)
+        ) || [[ $options == *,nofail,* ]] || [[ $options == *,noauto,* && $allowNoautoFail ]] || exit ; fi # (actually, nofail already makes mount fail silently)
     done 3< <( <$fstabPath grep -v '^#' )
 )}
 

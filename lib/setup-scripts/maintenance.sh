@@ -212,6 +212,7 @@ function mount-keystore-luks-primary {
     local method=@{config.setup.keystore.keys[$usage]%%=*}
     local options=@{config.setup.keystore.keys[$usage]:$(( ${#method} + 1 ))}
 
+    echo 'Opening keystore with primary key (this may cause prompts, but no new keys are written):'
     local attempt ; for attempt in 2 3 x ; do
         if mount-keystore-luks --key-file=<( gen-key-"$method" "$usage" "$options" ) ; then break ; fi
         if [[ $attempt == x ]] ; then \return 1 ; fi ; echo "Retrying ($attempt/3):"

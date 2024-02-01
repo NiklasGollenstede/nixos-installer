@@ -62,7 +62,7 @@ function prepare-installer { # 1: diskPaths
         if @{native.zfs}/bin/zfs get -o value -H name "$poolName" &>/dev/null ; then echo "ZFS pool »$poolName« is already imported. Export the pool before running the installer." 1>&2 ; \return 1 ; fi
     done
 
-    if [[ ${SUDO_USER:-} && $( PATH=$hostPath which su 2>/dev/null ) ]] ; then # use Nix as the user who called this script, as Nix may not be set up for root
+    if [[ ${SUDO_USER:-} && ! $( PATH=$hostPath which nix 2>/dev/null ) && $( PATH=$hostPath which su 2>/dev/null ) ]] ; then # use Nix as the user who called this script, as Nix may not be set up for root
         function nix {( set +x ; declare -a args=("$@") ; PATH=$hostPath su - "$SUDO_USER" -s "@{native.bashInteractive!getExe}" -c "$(declare -p args)"' ; nix "${args[@]}"' )}
     else # use Nix by absolute path, as it won't be on »$PATH«
         PATH=$PATH:@{native.nix}/bin
@@ -73,6 +73,7 @@ function prepare-installer { # 1: diskPaths
 }
 
 declare-flag install-system vm-shared "dir-path" "When installing inside the VM, specifies a host path that is read-write mounted at »/tmp/shared« inside the VM."
+declare-flag install-system vm-args "qemu-args" "When installing inside the VM, extra arguments to pass to qemu."
 
 ## Re-executes the current system's installation in a qemu VM.
 function reexec-in-qemu {
@@ -110,7 +111,7 @@ function reexec-in-qemu {
 
     local runInVm ; runInVm=$( build-lazy $output )/bin/run-@{config.system.name}-vm-exec || return
 
-    $runInVm ${args[vm-shared]:+--shared="${args[vm-shared]}"} ${args[debug]:+--initrd-console} ${args[trace]:+--initrd-console} ${args[quiet]:+--quiet} -- "$command" "${qemu[@]}" || return # --initrd-console
+    $runInVm ${args[vm-shared]:+--shared="${args[vm-shared]}"} ${args[debug]:+--initrd-console} ${args[trace]:+--initrd-console} ${args[quiet]:+--quiet} -- "$command" "${qemu[@]}" ${args[vm-args]:-} || return # --initrd-console
 }
 
 
@@ -162,7 +163,7 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
     fi
 
     # Copy system closure to new nix store:
-    if [[ ${SUDO_USER:-} ]] ; then chown -R $SUDO_USER: $mnt/nix/store $mnt/nix/var || exit ; fi
+    if declare -f nix >&/dev/null ; then chown -R $SUDO_USER: $mnt/nix/store $mnt/nix/var || exit ; fi
     cmd=( nix --extra-experimental-features nix-command --offline copy --no-check-sigs --to $mnt "$topLevel" )
     if [[ ${args[quiet]:-} ]] ; then
         "${cmd[@]}" --quiet >/dev/null 2> >( grep -Pe '^error:' || true ) || exit
@@ -173,7 +174,7 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
     fi
     rm -rf $mnt/nix/var/nix/gcroots || exit
     # TODO: if the target has @{config.nix.settings.auto-optimise-store} and the host doesn't (there is no .links dir?), optimize now
-    if [[ ${SUDO_USER:-} ]] ; then chown -R root:root $mnt/nix $mnt/nix/var || exit ; chown :30000 $mnt/nix/store || exit ; fi
+    if declare -f nix >&/dev/null ; then chown -R root:root $mnt/nix $mnt/nix/var || exit ; chown :30000 $mnt/nix/store || exit ; fi
 
     # Set this as the initial system generation (in case »nixos-install-cmd« won't):
     # (does about the same as »nix-env --profile /nix/var/nix/profiles/system --set $targetSystem«)

@@ -6,7 +6,7 @@ function prompt-for-user-passwords { # (void)
     local user ; for user in "@{!config.users.users!catAttrSets.password[@]}" ; do # Also grab any plaintext passwords for testing setups.
         userPasswords[$user]=@{config.users.users!catAttrSets.password[$user]}
     done
-    local user ; for user in "@{!config.users.users!catAttrSets.passwordFile[@]}" ; do
+    local user ; for user in "@{!config.users.users!catAttrSets.hashedPasswordFile[@]}" "@{!config.users.users!catAttrSets.passwordFile[@]}" ; do
         for attempt in 2 3 x ; do
             if userPasswords[$user]=$(prompt-new-password "for the user account »$user«") ; then break ; fi
             if [[ $attempt == x ]] ; then \return 1 ; fi ; echo "Retrying ($attempt/3):"

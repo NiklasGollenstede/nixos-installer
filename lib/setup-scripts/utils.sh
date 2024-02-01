@@ -89,7 +89,7 @@ function build-lazy { # 1: drvPath, 2?: output
 }
 
 ## Tests whether (returns 0/success if) the first version argument is greater/less than (or equal) the second version argument.
-function version-gr-eq { printf '%s\n%s' "$1" "$2" | sort -C -V -r ; }
-function version-lt-eq { printf '%s\n%s' "$1" "$2" | sort -C -V ; }
+function version-gr-eq { printf '%s\n%s' "$1" "$2" | LC_ALL=C sort -C -V -r ; }
+function version-lt-eq { printf '%s\n%s' "$1" "$2" | LC_ALL=C sort -C -V ; }
 function version-gt { ! version-gt-eq "$2" "$1" ; }
 function version-lt { ! version-lt-eq "$2" "$1" ; }

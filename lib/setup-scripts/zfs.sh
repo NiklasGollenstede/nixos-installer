@@ -25,6 +25,8 @@ Creates a single of the system's ZFS pools, and its datasets. Can be called manu
 EOD
 declare-flag install-system,create-zpool zpool-force "" "When creating ZFS storage pools, pass the »-f« (force) option. This may be required when installing to disks that are currently part of a pool, or ZFS refuses do reuse them."
 function create-zpool {
+    local beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
+    local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
     local mnt=$1 ; local poolName=$2
     eval 'local -A pool='"@{config.setup.zfs.pools[$poolName]}"
     eval 'local -a vdevs='"${pool[vdevArgs]}"
@@ -45,6 +47,7 @@ function create-zpool {
         else
             part=/dev/disk/by-partlabel/$part ; vdevs[$index]=$part
             if ! is-partition-on-disks "$part" "${blockDevs[@]}" ; then echo "Partition alias $part used by zpool ${pool[name]} does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
+            @{native.util-linux}/bin/wipefs --all "$part" >$beLoud 2>$beSilent || return # else mkfs might refuse to replace any previous filesystems
         fi
     done
     @{native.kmod}/bin/modprobe zfs || true
@@ -147,6 +150,7 @@ function ensure-datasets {
             ( PATH=@{native.zfs}/bin ; ${_set_x:-:} ; zfs allow -$who "${allows[$who]}" "${dataset[name]}" >&2 ) || return
         done
     done 3< <( printf '%s\0' "@{!config.setup.zfs.datasets[@]}" | LC_ALL=C sort -z )
+    # zfs list -o name,referenced,encryption,encryptionroot,keylocation,keystatus,mounted,mountpoint
 }
 
 ## Given the name (»datasetPath«) of a ZFS dataset, this deducts crypto-related options from the declared keys (»config.setup.keystore.keys."zfs/..."«).

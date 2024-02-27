@@ -27,7 +27,7 @@ Any number of other devices may thus specify paths in the keystore as keylocatio
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: { config, pkgs, lib, ... }: let lib = inputs.self.lib.__internal__; in let
+dirname: inputs: { config, pkgs, lib, utils, ... }: let lib = inputs.self.lib.__internal__; in let
     inherit (inputs.config.rename) setup installer;
     cfg = config.${setup}.keystore;
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
@@ -50,14 +50,19 @@ in let module = {
 
 
     config = let
-    in lib.mkIf cfg.enable (lib.mkMerge [ ({
+    in lib.mkIf (cfg.enable) (lib.mkMerge [ ({
 
+        ${setup}.keystore.keys."luks/keystore-${hash}/0" = lib.mkOptionDefault "hostname"; # (This is the only key that the setup scripts unconditionally require to be declared.)
         assertions = [ {
             assertion = cfg.keys?"luks/keystore-${hash}/0";
             message = ''At least one key (»0«) for »luks/keystore-${hash}« must be specified!'';
         } ];
 
-        boot.initrd.luks.devices = lib.mkIf cfg.enableLuksGeneration (lib.fun.mapMerge (key: let
+    }) ({ ## Declare LUKS devices for all LUKS keys:
+        ${setup}.keystore.enableLuksGeneration = lib.mkIf (config.virtualisation.useDefaultFilesystems or false) (lib.mkVMOverride false);
+    }) (lib.mkIf (cfg.enableLuksGeneration) {
+
+        boot.initrd.luks.devices = (lib.fun.mapMerge (key: let
             label = builtins.substring 5 ((builtins.stringLength key) - 7) key;
         in { ${label} = {
             device = lib.mkDefault "/dev/disk/by-partlabel/${label}";
@@ -65,27 +70,16 @@ in let module = {
             allowDiscards = lib.mkDefault true; # If attackers can observe trimmed blocks, then they can probably do much worse ...
         }; }) (lib.fun.filterMatching ''^luks/.*/0$'' (lib.attrNames cfg.keys)));
 
-        ${setup}.keystore.keys."luks/keystore-${hash}/0" = lib.mkOptionDefault "hostname"; # (This is the only key that the setup scripts unconditionally require to be declared.)
+        boot.initrd.systemd.services = lib.mkIf (config.boot.initrd.systemd.enable) (lib.fun.mapMerge (key: let
+            label = builtins.substring 5 ((builtins.stringLength key) - 7) key;
+        in if label == "keystore-${hash}" || (!config.boot.initrd.luks.devices?${label}) then { } else { "systemd-cryptsetup@${utils.escapeSystemdPath label}" = rec {
+            overrideStrategy = "asDropin"; # (could this be set via a x-systemd.after= crypttab option?)
+            after = [ "systemd-cryptsetup@keystore\\x2d${hash}.service" ]; wants = after; # (this may be implicit if systemd knew about the /run/keystore-... mount point)
+        }; }) (lib.fun.filterMatching ''^luks/.*/0$'' (lib.attrNames cfg.keys)));
 
-    }) ({
 
-        boot.initrd.luks.devices."keystore-${hash}" = {
-            device = "/dev/disk/by-partlabel/keystore-${hash}";
-            postOpenCommands = ''
-                echo "Mounting ${keystore}"
-                mkdir -p ${keystore}
-                mount -o nodev,umask=0277,ro /dev/mapper/keystore-${hash} ${keystore}
-            '';
-            preLVM = true; # ensure the keystore is opened early (»preLVM« also seems to be pre zpool import, and it is the only option that affects the opening order)
-            keyFile = lib.mkMerge [
-                (lib.mkIf cfg.unlockMethods.trivialHostname "${pkgs.writeText "hostname" config.networking.hostName}")
-                (lib.mkIf cfg.unlockMethods.usbPartition "/dev/disk/by-partlabel/bootkey-${hash}")
-            ];
-            fallbackToPassword = true; # (might as well)
-            preOpenCommands = lib.mkIf cfg.unlockMethods.pinThroughYubikey verbose.doOpenWithYubikey;
-        };
+    }) ({ ## Create and populate keystore during installation:
 
-        # Create and populate keystore during installation:
         fileSystems.${keystore} = { fsType = "vfat"; device = "/dev/mapper/keystore-${hash}"; options = [ "ro" "nosuid" "nodev" "noexec" "noatime" "umask=0277" "noauto" ]; formatArgs = [ ]; };
 
         ${setup}.disks.partitions."keystore-${hash}" = { type = lib.mkDefault "8309"; order = lib.mkDefault 1375; disk = lib.mkDefault "primary"; size = lib.mkDefault "32M"; };
@@ -94,9 +88,31 @@ in let module = {
             ${pkgs.rsync}/bin/rsync -a ${keystore}/ $tmp/
         )'';
 
-    }) (lib.mkIf (config.boot.initrd.luks.devices?"keystore-${hash}") { # (this will be false when overwritten by »nixos/modules/virtualisation/qemu-vm.nix«)
+
+        ## Unlocking and closing during early boot
+    }) (lib.mkIf (!(config.virtualisation.useDefaultFilesystems or false)) (let # (don't bother with any of this if »boot.initrd.luks.devices« is forced to »{ }« in »nixos/modules/virtualisation/qemu-vm.nix«)
+    in lib.mkMerge [ ({
+
+        boot.initrd.luks.devices."keystore-${hash}".keyFile = lib.mkMerge [
+            (lib.mkIf (cfg.unlockMethods.trivialHostname) "${pkgs.writeText "hostname" config.networking.hostName}")
+            (lib.mkIf (cfg.unlockMethods.usbPartition) "/dev/disk/by-partlabel/bootkey-${hash}")
+        ];
+        boot.initrd.systemd.storePaths = lib.mkIf (cfg.unlockMethods.trivialHostname && config.boot.initrd.systemd.enable) [ "${pkgs.writeText "hostname" config.networking.hostName}" ];
 
         boot.initrd.supportedFilesystems = [ "vfat" ];
+
+    }) (lib.mkIf (!config.boot.initrd.systemd.enable) { # Legacy initrd
+
+        boot.initrd.luks.devices."keystore-${hash}" = {
+            preLVM = true; # ensure the keystore is opened early (»preLVM« also seems to be pre zpool import, and it is the only option that affects the opening order)
+            preOpenCommands = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) verbose.doOpenWithYubikey; # TODO: required?
+            fallbackToPassword = true; # (might as well)
+            postOpenCommands = ''
+                echo "Mounting ${keystore}"
+                mkdir -p ${keystore}
+                mount -o nodev,umask=0277,ro /dev/mapper/keystore-${hash} ${keystore}
+            '';
+        };
 
         boot.initrd.postMountCommands = ''
             ${if (lib.any (lib.fun.matches "^home/.*$") (lib.attrNames cfg.keys)) then ''
@@ -111,23 +127,68 @@ in let module = {
             cryptsetup close /dev/mapper/keystore-${hash}
         '';
 
-        boot.initrd.luks.yubikeySupport = lib.mkIf cfg.unlockMethods.pinThroughYubikey true;
-        boot.initrd.extraUtilsCommands = lib.mkIf cfg.unlockMethods.pinThroughYubikey (lib.mkAfter ''
+        boot.initrd.luks.yubikeySupport = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) true;
+        boot.initrd.extraUtilsCommands = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) (lib.mkAfter ''
             copy_bin_and_libs ${verbose.askPassWithYubikey}/bin/cryptsetup-askpass
             sed -i "s|/bin/sh|$out/bin/sh|" "$out/bin/cryptsetup-askpass"
         '');
 
-    }) ]);
+    }) (lib.mkIf (config.boot.initrd.systemd.enable) (let # Systemd initrd
+
+        unlockWithYubikey = pkgs.writeShellScript "unlock-keystore" (let
+            dev = config.boot.initrd.luks.devices."keystore-${hash}";
+        in ''
+            ${verbose.tryYubikey}
+            ${lib.optionalString (dev.keyFile != null) ''
+                if systemd-cryptsetup attach 'keystore-${hash}' '/dev/disk/by-partlabel/keystore-${hash}' ${lib.escapeShellArg dev.keyFile} '${lib.optionalString dev.allowDiscards "discard,"}headless' ; then exit ; fi
+                printf '%s\n\n' 'Unlocking keystore-${hash} with '${lib.escapeShellArg dev.keyFile}' failed.' >/dev/console
+            ''}
+            for attempt in "" 2 3 ; do (
+                passphrase=$( systemd-ask-password 'Please enter passphrase for disk keystore-${hash}'"''${attempt:+ (attempt $attempt/3)}" ) || exit
+                passphrase="$( tryYubikey "$passphrase" 2>/dev/console )" || exit
+                systemd-cryptsetup attach 'keystore-${hash}' '/dev/disk/by-partlabel/keystore-${hash}' <( printf %s "$passphrase" ) '${lib.optionalString dev.allowDiscards "discard,"}headless' || exit
+            ) && break ; done || exit
+        '');
+    in {
+        boot.initrd.systemd.services = {
+            "systemd-cryptsetup@keystore\\x2d${hash}" = {
+                overrideStrategy = "asDropin";
+                serviceConfig.ExecStart = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) [ "" "${unlockWithYubikey}" ];
+                postStart = ''
+                    echo "Mounting ${keystore}"
+                    mkdir -p ${keystore}
+                    mount -o nodev,umask=0277,ro /dev/mapper/keystore-${hash} ${keystore}
+                '';
+            };
+            # lib.mkIf (lib.any (lib.fun.matches "^home/.*$") (lib.attrNames cfg.keys))
+            initrd-nixos-activation.postStart = ''
+                mkdir -pm 551 /sysroot/run/keys/home-composite/
+                if [[ -e ${keystore}/home/ ]] ; then
+                    cp -a ${keystore}/home/*.key /sysroot/run/keys/home-composite/
+                fi
+            '';
+            initrd-cleanup.preStart = ''
+                umount ${keystore} || true
+                rmdir ${keystore} || true
+                ${config.systemd.package}/lib/systemd/systemd-cryptsetup detach keystore-${hash}
+            '';
+        };
+        boot.initrd.luks.devices."keystore-${hash}".keyFileTimeout = 10;
+        boot.initrd.systemd.storePaths = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) [ unlockWithYubikey ];
+        boot.initrd.systemd.initrdBin = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) [ pkgs.yubikey-personalization ];
+
+    })) ])) ]);
+
 
 }; verbose = rec {
 
     tryYubikey = ''tryYubikey () { # 1: key
         local key="$1" ; local slot
-        if   [ "$(ykinfo -q -2 2>/dev/null)" = '1' ] ; then slot=2 ;
-        elif [ "$(ykinfo -q -1 2>/dev/null)" = '1' ] ; then slot=1 ; fi
+        if   [ "$( ykinfo -q -2 2>/dev/null )" = '1' ] ; then slot=2 ;
+        elif [ "$( ykinfo -q -1 2>/dev/null )" = '1' ] ; then slot=1 ; fi
         if [ "$slot" ] ; then
-            echo >&2 ; echo "Using slot $slot of detected Yubikey ..." >&2
-            key="$(ykchalresp -$slot "$key" 2>/dev/null || true)"
+            echo "Using slot $slot of detected Yubikey ..." >&2
+            key="$( ykchalresp -$slot "$key" 2>/dev/null )" || true
             if [ "$key" ] ; then echo "Got response from Yubikey" >&2 ; fi
         fi
         printf '%s' "$key"

@@ -71,7 +71,7 @@ in let module = {
 
         ## Implement »cfg.datasets.*.mount«:
         fileSystems = lib.fun.mapMerge (path: { props, mount, ... }: if mount != false then {
-            "${props.mountpoint}" = { fsType = "zfs"; device = path; options = [ "zfsutil" ] ++ (lib.optionals (mount == "noauto") [ "noauto" ]); };
+            "${props.mountpoint}" = { fsType = "zfs"; device = path; options = [ "zfsutil" "x-systemd.after=zfs-import.target" ] ++ (lib.optionals (mount == "noauto") [ "noauto" ]); };
         } else { }) cfg.datasets;
 
         ## Load keys (only) for (all) datasets that are declared as encryption roots and aren't disabled:
@@ -86,16 +86,13 @@ in let module = {
                 compression = lib.mkOptionDefault "lz4"; # Seems to be the best compromise between compression and CPU load.
                 atime = lib.mkOptionDefault "off"; relatime = lib.mkOptionDefault "on"; # Very much don't need access times at all.
 
-                acltype = lib.mkOptionDefault "posix"; # Enable ACLs (access control lists) on linux; might be useful at some point. (»posix« is the same as »posixacl«, but this is the normalized form)
+                acltype = lib.mkOptionDefault "posix"; # Enable ACLs (access control lists) on Linux; might be useful at some point. (»posix« is the same as »posixacl«, but this is the normalized form)
                 xattr = lib.mkOptionDefault "sa"; # Allow extended attributes and store them as system attributes, recommended with »acltype=posix«.
                 dnodesize = lib.mkOptionDefault "auto"; # Recommenced with »xattr=sa«. (A dnode is roughly equal to inodes, storing file directory or meta data.)
                 #normalization = lib.mkOptionDefault "formD"; # Don't enforce utf-8, and thus don't normalize file names; instead accept any byte stream as file name.
 
                 canmount = lib.mkOptionDefault "off"; mountpoint = lib.mkOptionDefault "none"; # Assume the pool root is a "container", unless overwritten.
             }; }) cfg.pools;
-
-            # All pools that have at least one dataset that (explicitly or implicitly) has a key to be loaded from »/run/keystore-.../zfs/« have to be imported in the initramfs while the keystore is open (but only if the keystore is not disabled):
-            zfs.extraInitrdPools = lib.mkIf (config.boot.initrd.luks.devices?"keystore-${hash}") (lib.mapAttrsToList (name: _: lib.head (lib.splitString "/" name)) (lib.filterAttrs (name: { props, ... }: if props?keylocation then lib.fun.startsWith "file:///run/keystore-${hash}/" props.keylocation else config.${setup}.keystore.keys?"zfs/${name}") cfg.datasets));
 
             # Might as well set some defaults for all partitions required (though for all but one at least some of the values will need to be changed):
             disks.partitions = lib.fun.mapMergeUnique (name: { ${name} = { # (This also implicitly ensures that no partition is used twice for zpools.)
@@ -104,12 +101,27 @@ in let module = {
         };
 
 
-    }) ({ ## Implement »cfg.extraInitrdPools«:
+    }) (let ## Implement »cfg.extraInitrdPools«:
 
-        boot.initrd.postDeviceCommands = (lib.mkAfter ''
+        # All pools that have at least one dataset that (explicitly or implicitly) has a key to be loaded from »/run/keystore-.../zfs/« have to be imported in the initramfs while the keystore is open (but only if the keystore is not disabled):
+        keystorePools = lib.optionals (config.boot.initrd.luks.devices?"keystore-${hash}") (lib.mapAttrsToList (name: _: lib.head (lib.splitString "/" name)) (lib.filterAttrs (name: { props, ... }: if props?keylocation then lib.fun.startsWith "file:///run/keystore-${hash}/" props.keylocation else config.${setup}.keystore.keys?"zfs/${name}") cfg.datasets));
+    in {
+        ${setup}.zfs.extraInitrdPools = keystorePools;
+
+        boot.initrd.postDeviceCommands = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mkAfter ''
             ${lib.concatStringsSep "\n" (map verbose.initrd-import-zpool cfg.extraInitrdPools)}
             ${verbose.initrd-load-keys}
         '');
+
+        boot.initrd.systemd.services = lib.mkIf (config.boot.initrd.systemd.enable) (lib.fun.mapMerge (pool: { "zfs-import-${pool}" = let
+            service = config.systemd.services."zfs-import-${pool}" or null;
+            addPrefix = deps: map (dep: if dep == "zfs-import.target" || dep == "sysusr-usr.mount" then dep else "sysroot-${dep}") deps;
+        in lib.mkMerge [ (lib.mkIf (service != null) (
+            (builtins.removeAttrs service [ "restartTriggers" "reloadTriggers" ])
+            // { requiredBy = addPrefix service.requiredBy; before = addPrefix service.before; }
+        )) (lib.mkIf (builtins.elem pool keystorePools) (
+            rec { after = [ "systemd-cryptsetup@keystore\\x2d${hash}.service" ]; wants = after; } # without this, the keystore's password prompt fails
+        )) ]; }) cfg.extraInitrdPools);
 
 
     }) (lib.mkIf (config.boot.resumeDevice == "") { ## Disallow hibernation without fixed »resumeDevice«:
@@ -156,35 +168,59 @@ in let module = {
         anyPool = filterBy: lib.any (pool: pool.${filterBy}) (lib.attrValues cfg.pools);
         poolNames = filterBy: lib.attrNames (lib.filterAttrs (name: pool: pool.${filterBy}) cfg.pools);
         filter = pool: "^${pool}($|[/])";
-        ensure-datasets = zfsPackage: extraUtils: pkgs.writeScript "ensure-datasets" ''
-            #!${pkgs.pkgsStatic.bash}/bin/bash
-            set -o pipefail -o nounset ; declare-command () { : ; } ; declare-flag () { : ; } ;
-            ${lib.fun.substituteImplicit { inherit pkgs; scripts = lib.attrValues { inherit (lib.self.setup-scripts) zfs utils; }; context = { inherit config; native = pkgs // { zfs = zfsPackage; } // (lib.optionalAttrs (extraUtils != null) (lib.genAttrs [
+        ensure-datasets = zfsPackage: extraUtils: (let
+            inherit (lib.fun.substituteImplicit { inherit pkgs; scripts = lib.attrValues { inherit (lib.self.setup-scripts) zfs utils; }; context = { inherit config; native = pkgs // { zfs = zfsPackage; } // (lib.optionalAttrs (extraUtils != null) (lib.genAttrs [
                 "kmod" # modprobe
                 "util-linux" # mount umount
                 "nix" "openssh" "jq" # (unused)
-            ] (_: extraUtils))); }; }}
+            ] (_: extraUtils))); }; }) script scripts vars;
+        in { script =  pkgs.writeScript "ensure-datasets" ''
+            #!${pkgs.pkgsStatic.bash}/bin/bash
+            set -o pipefail -o nounset ; declare-command () { : ; } ; declare-flag () { : ; } ;
+            ${script}
             ensure-datasets "$@"
-        '';
+        ''; inherit scripts vars; });
         ensure-datasets-for = filterBy: zfsPackage: extraUtils: ''( if [ ! "''${IN_NIXOS_ENTER:-}" ] && [ -e ${zfsPackage}/bin/zfs ] ; then
             ${lib.concatStrings (map (pool: ''
                 expected=${lib.escapeShellArg (builtins.toJSON (lib.mapAttrs (n: v: v.props // (if v.permissions != { } then { ":permissions" = v.permissions; } else { })) (lib.filterAttrs (path: _: path == pool || lib.fun.startsWith "${pool}/" path) cfg.datasets)))}
                 if [ "$(${zfsPackage}/bin/zfs get -H -o value nixos-${setup}:applied-datasets ${pool})" != "$expected" ] ; then
-                    ${ensure-datasets zfsPackage extraUtils} / ${lib.escapeShellArg (filter pool)} && ${zfsPackage}/bin/zfs set nixos-${setup}:applied-datasets="$expected" ${pool}
+                    ${(ensure-datasets zfsPackage extraUtils).script} / ${lib.escapeShellArg (filter pool)} && ${zfsPackage}/bin/zfs set nixos-${setup}:applied-datasets="$expected" ${pool}
                 fi
             '') (poolNames filterBy))}
         fi )'';
+        ensure-datasets-service = pool: initrd: if
+            (if initrd then !pool.autoApplyDuringBoot else !pool.autoApplyOnActivation)
+        then { } else { "zfs-ensure-${pool.name}" = let
+            expected = builtins.toJSON (lib.mapAttrs (n: v: v.props // (if v.permissions != { } then { ":permissions" = v.permissions; } else { })) (lib.filterAttrs (path: _: path == pool.name || lib.fun.startsWith "${pool.name}/" path) cfg.datasets));
+            #zfsPackage = if initrd then pkgs.runCommandLocal "root-link" { } ''ln -sT / $out'' else pkgs.runCommandLocal "booted-system-link" { } ''ln -sT /run/booted-system/sw $out'';
+            zfsPackage = if initrd then "/" else "/run/booted-system/sw";
+            #extraUtils = if initrd then pkgs.runCommandLocal "root-link" { } ''ln -sT / $out'' else null;
+            extraUtils = if initrd then "/" else null;
+        in rec {
+            after = [ "zfs-import-${pool.name}.service" ];
+            before = [ "zfs-import.target" "shutdown.target" ]; wantedBy = [ "zfs-import.target" ]; conflicts = [ "shutdown.target" ];
+            unitConfig.DefaultDependencies = false; # (not after basic.target or sysinit.target)
+            serviceConfig.Type = "oneshot";
+            script = ''
+                expected=${lib.escapeShellArg expected}
+                if [ "$(${zfsPackage}/bin/zfs get -H -o value nixos-${setup}:applied-datasets ${pool.name})" != "$expected" ] ; then
+                    ${(ensure-datasets zfsPackage extraUtils).script} ${if initrd then "/sysroot" else "/"} ${lib.escapeShellArg (filter pool.name)} && ${zfsPackage}/bin/zfs set nixos-${setup}:applied-datasets="$expected" ${pool.name}
+                fi
+            '';
+        } // (lib.optionalAttrs (!initrd) {
+            restartTriggers = [ expected ];
+        }); };
     in {
 
-        boot.initrd.postDeviceCommands = lib.mkIf (anyPool "autoApplyDuringBoot") (lib.mkOrder 2000 ''
+        boot.initrd.postDeviceCommands = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mkIf (anyPool "autoApplyDuringBoot") (lib.mkOrder 2000 ''
             ${ensure-datasets-for "autoApplyDuringBoot" extraUtils extraUtils}
-        '');
+        ''));
+        boot.initrd.systemd.services = lib.mkIf (config.boot.initrd.systemd.enable) (lib.fun.mapMerge (pool: ensure-datasets-service pool true) (lib.attrValues cfg.pools));
+        boot.initrd.systemd.storePaths = lib.mkIf (anyPool "autoApplyDuringBoot") (let deps = ensure-datasets "/" "/"; in [ "${pkgs.pkgsStatic.bash}/bin/bash" deps.script ] ++ deps.scripts ++ (lib.filter (v: lib.isStringLike v && lib.hasPrefix builtins.storeDir v) (lib.attrValues deps.vars))); # TODO: using pkgsStatic.bash may not be necessary here
         boot.initrd.supportedFilesystems = lib.mkIf (anyPool "autoApplyDuringBoot") [ "zfs" ];
         ${setup}.zfs.extraInitrdPools = (poolNames "autoApplyDuringBoot");
 
-        system.activationScripts.A_ensure-datasets = lib.mkIf (anyPool "autoApplyOnActivation") {
-            text = ensure-datasets-for "autoApplyOnActivation" (pkgs.runCommandLocal "booted-system-link" { } ''ln -sT /run/booted-system/sw $out'') null; # (want to use the version of ZFS that the kernel module uses, also it's convenient that this does not yet exist during activation at boot)
-        }; # these are sorted alphabetically, unless one gets "lifted up" by some other ending on it via its ».deps« field
+        systemd.services = lib.fun.mapMerge (pool: ensure-datasets-service pool false) (lib.attrValues cfg.pools);
 
 
     }) ])) (

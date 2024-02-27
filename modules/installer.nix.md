@@ -48,11 +48,11 @@ in {
         };
         build.scripts = lib.mkOption {
             type = lib.types.functionTo lib.types.str;  internal = true; readOnly = true;
-            default = context: lib.fun.substituteImplicit { # This replaces the `@{}` references in the scripts with normal bash variables that hold serializations of the Nix values they refer to.
+            default = context: "${lib.fun.substituteImplicit { # This replaces the `@{}` references in the scripts with normal bash variables that hold serializations of the Nix values they refer to.
                 inherit pkgs; scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues cfg.scripts);
                 context = { inherit config options pkgs; inherit (moduleArgs) inputs; } // context;
                 # inherit (builtins) trace;
-            };
+            }}";
         };
     }; };
 

@@ -26,7 +26,7 @@ dirname: inputs: { config, pkgs, lib, name, ... }: let lib = inputs.self.lib.__i
     #suffix = builtins.head (builtins.match ''example-(.*)'' name); # make differences in config based on this when using »preface.instances«
     hash = builtins.substring 0 8 (builtins.hashString "sha256" name);
 in { preface = { # (any »preface« options have to be defined here)
-    instances = [ "example-explicit" "example" "example-minimal" "example-raidz" ]; # Generate multiple variants of this host, with these »name«s.
+    instances = [ "example-explicit" "example" "example-minimal" "example-crypt" "example-raidz" ]; # Generate multiple variants of this host, with these »name«s.
 }; imports = [ ({ ## Hardware
 
     nixpkgs.hostPlatform = "x86_64-linux"; system.stateVersion = "22.05";
@@ -37,6 +37,8 @@ in { preface = { # (any »preface« options have to be defined here)
 
     # Example of adding and/or overwriting setup/maintenance functions:
     #installer.scripts.install-overwrite = { path = ../example/install.sh.md; order = 1500; };
+
+    boot.initrd.systemd.enable = true;
 
 
 }) (lib.mkIf (name == "example-explicit") { ## Minimal explicit FS setup
@@ -96,6 +98,25 @@ in { preface = { # (any »preface« options have to be defined here)
     setup.temproot.remote.type = "none";
 
 
+}) (lib.mkIf (name == "example-crypt") { ## Minimal automatic FS setup
+
+    setup.keystore.enable = true;
+    setup.keystore.keys."luks/keystore-${hash}/0" = "random"; # (this makes little practical sense)
+    setup.keystore.keys."luks/keystore-${hash}/1" = "constant=insecure"; # static password: "insecure"
+    #setup.keystore.keys."luks/keystore-${hash}/2" = "password"; # password prompted at installation
+    #setup.keystore.keys."luks/rpool-${hash}/0" = "random";
+    setup.temproot = {
+        enable = true;
+        temp.type = "zfs"; local.type = "zfs"; remote.type = "zfs";
+        #temp.type = "zfs"; local.type = "zfs"; remote.type = "none";
+        #local.bind.base = "f2fs"; remote.type = "none";
+        swap = { size = "2G"; asPartition = true; encrypted = true; };
+    };
+    setup.keystore.unlockMethods.pinThroughYubikey = true;
+    #setup.keystore.keys."zfs/rpool-${hash}/remote" = null;
+    #setup.keystore.keys."luks/rpool-${hash}/0" = "random";
+
+
 }) (lib.mkIf (name == "example-raidz") { ## Multi-disk ZFS setup
 
     boot.loader.extlinux.enable = lib.mkForce false; # use UEFI boot this time
@@ -133,6 +154,13 @@ in { preface = { # (any »preface« options have to be defined here)
 
     services.getty.autologinUser = "root"; users.users.root.password = "root";
 
-    boot.kernelParams = [ /* "console=tty1" */ "console=ttyS0" "boot.shell_on_fail" ];
+    boot.kernelParams = [ /* "console=tty1" */ "console=ttyS0" "boot.shell_on_fail" ]; # [ "rd.systemd.unit=emergency.target" ]; # "rd.systemd.debug_shell" "rd.systemd.debug-shell=1"
+    boot.initrd.systemd.emergencyAccess = true;
+
+    systemd.extraConfig = "StatusUnitFormat=name"; # Show unit names instead of descriptions during boot.
+    boot.initrd.systemd.extraConfig = "StatusUnitFormat=name";
+
+    boot.loader.timeout = lib.mkDefault 1; # save 4 seconds on startup
+
 
 }) ]; }

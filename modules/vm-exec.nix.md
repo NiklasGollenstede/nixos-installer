@@ -88,6 +88,7 @@ in let hostModule = {
         virtualisation.graphics = false;
 
         # Instead of tearing down the initrd environment, adjust some mounts and run the »command« in the initrd:
+        boot.initrd.systemd.enable = lib.mkVMOverride false;
         boot.initrd.postMountCommands = ''
 
             for fs in tmp/shared tmp/xchg nix/store.lower nix/var/nix/db.lower ; do

@@ -183,15 +183,14 @@ function run-qemu {
 }
 
 declare-command add-bootkey-to-keydev blockDev << 'EOD'
-Creates a random static key on a new key partition on the GPT partitioned »$blockDev«. The drive can then be used as headless but removable disk unlock method.
+Creates a random static key on a new key partition on the GPT partitioned »$blockDev«. The drive can then be used as headless but removable disk unlock method (»usbPartition«/»usb-part«).
 To create/clear the GPT beforehand, run: $ sgdisk --zap-all "$blockDev"
 EOD
 function add-bootkey-to-keydev {
-    local blockDev=$1 ; local hostHash=${2:-@{config.networking.hostName!hashString.sha256}}
-    local bootkeyPartlabel=bootkey-${hostHash:0:8}
-    @{native.gptfdisk}/bin/sgdisk --new=0:0:+1 --change-name=0:"$bootkeyPartlabel" --typecode=0:0000 "$blockDev" || exit # create new 1 sector (512b) partition
-    @{native.parted}/bin/partprobe "$blockDev" && @{native.systemd}/bin/udevadm settle -t 15 || exit # wait for partitions to update
-    </dev/urandom tr -dc 0-9a-f | head -c 512 >/dev/disk/by-partlabel/"$bootkeyPartlabel" || exit
+    local blockDev=$1 ; local bootkeyPartlabel=bootkey-@{config.networking.hostName!hashString.sha256:0:8}
+    @{native.gptfdisk}/bin/sgdisk --new=0:0:+1 --change-name=0:"$bootkeyPartlabel" --typecode=0:8301 "$blockDev" || return # create new 1 sector (512b) partition
+    @{native.parted}/bin/partprobe "$blockDev" && @{native.systemd}/bin/udevadm settle -t 15 || return # wait for partitions to update
+    { </dev/urandom tr -dc 0-9a-f || true ; } | head -c 512 >/dev/disk/by-partlabel/"$bootkeyPartlabel" || return
 }
 
 declare-command mount-keystore-luks cryptsetupOptions... << 'EOD'

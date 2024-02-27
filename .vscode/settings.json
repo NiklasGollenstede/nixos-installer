@@ -1,4 +1,9 @@
 {
+	"[nix]": {
+		"editor.detectIndentation": true,
+		"editor.insertSpaces": true,
+		"editor.tabSize": 4,
+	},
 	"markdown.validate.ignoredLinks": [
 		"./modules/",
 		"./patches/",
@@ -11,6 +16,7 @@
 		"acltype", // zfs
 		"acpi", // abbr
 		"ahci", // abbr
+		"asDropin", // systemd
 		"ashift", // zfs
 		"askpass", // program
 		"attrset", "attrsets", // nix/abbr (attribute set)
@@ -40,6 +46,7 @@
 		"createrawvmdk", // virtual box
 		"createvm", // virtual box
 		"cryptsetup", // program
+		"crypttab", // linux
 		"dedup", // zfs
 		"devs", // abbr (devices)
 		"diffutils", // package
@@ -61,12 +68,14 @@
 		"fetchurl", // nix function
 		"fido2", // protocol
 		"filesystems", // plural
+		"findutils", // package
 		"fmask", // mount
 		"foldl", // nix (fold left)
 		"foldr", // nix (fold right)
 		"gcroots", // Nix
 		"gdisk", // program
 		"getsize64", // cli arg
+		"getty", // program
 		"gnugrep", // package
 		"gnused", // package
 		"gollenstede", // name
@@ -169,10 +178,14 @@
 		"stdenv", // nix
 		"storageattach", // virtual box
 		"swsuspend", // parameter
+		"sysinit", // systemd
 		"syslinux", // package
+		"sysroot", // systemd
 		"sysrq", // linux
+		"sysusr", // systemd
 		"temproot", // abbr (temporary root (FS))
 		"timesync", // systemd
+		"tmpdir", // abbr
 		"TMPDIR", // env var
 		"tmpfiles", // nixos option
 		"tmpfs", // linux

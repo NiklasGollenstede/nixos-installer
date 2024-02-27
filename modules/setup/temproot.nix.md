@@ -57,14 +57,16 @@ This completely configures the disks, partitions, pool, datasets, and mounts for
   setup.temproot.temp.type = "zfs";
   setup.temproot.local.type = "zfs";
   setup.temproot.remote.type = "zfs";
+  setup.temproot.swap = { size = "2G"; asPartition = true; encrypted = true; };
 
   # Change/set the pools storage layout (see above), then adjust the partitions disks/sizes. Declaring disks requires them to be passed to the system installer.
   setup.zfs.pools."rpool-${hash}".vdevArgs = [ "raidz1" "rpool-rz1-${hash}" "rpool-rz2-${hash}" "rpool-rz3-${hash}" "log" "rpool-zil-${hash}" "cache" "rpool-arc-${hash}" ];
   setup.disks.partitions."rpool-rz1-${hash}" = { disk = "raidz1"; };
   setup.disks.partitions."rpool-rz2-${hash}" = { disk = "raidz2"; };
   setup.disks.partitions."rpool-rz3-${hash}" = { disk = "raidz3"; };
+  setup.disks.partitions."swap-${hash}" = { };  # ... (created & configured implicitly)
   setup.disks.partitions."rpool-zil-${hash}" = { size = "2G"; };
-  setup.disks.partitions."rpool-arc-${hash}" = { }; } # (this is actually already implicitly declared)
+  setup.disks.partitions."rpool-arc-${hash}" = { }; } # (this is also already implicitly declared)
 ```
 
 On a less beefy system, but also with less data to manage, `tmpfs` works fine for `tmp`, and `f2fs` promises to get more performance out of the flash/ram/cpu:
@@ -265,15 +267,31 @@ in {
         }) ]))) ({ "/" = { options = { }; uid = 0; gid = 0; mode = "755"; }; } // cfg.${type}.mounts);
 
 
-    })) (lib.mkIf (cfg.temp.type == "zfs") {
+    })) (lib.mkIf (cfg.temp.type == "zfs") (let
+        description = "ZFS rollback to ${cfg.temp.zfs.dataset}/**@empty";
+        command = ''zfs list -H -o name -t snapshot -r ${lib.escapeShellArg cfg.temp.zfs.dataset} | grep '@empty$' | xargs -n1 -- zfs rollback -r'';
+        pool = builtins.head (builtins.split "/" cfg.temp.zfs.dataset);
+    in {
 
-        boot.initrd.postDeviceCommands = lib.mkAfter ''
-            echo 'Clearing root ZFS'
-            ( zfs list -H -o name -t snapshot -r ${cfg.temp.zfs.dataset} | grep '@empty$' | xargs -n1 --no-run-if-empty zfs rollback -r )
-        '';
+        boot.initrd.postDeviceCommands = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mkAfter ''
+            echo '${description}'
+            ( ${command} )
+        '');
+
+        boot.initrd.systemd.services.zfs-rollback-temp = lib.mkIf (config.boot.initrd.systemd.enable) (rec {
+            after = [ "zfs-import-${pool}.service" ]; before = [ "zfs-import.target" ]; wantedBy = before;
+            serviceConfig.Type = "oneshot";
+            #inherit description; script = "PATH=${lib.makeBinPath [ pkgs.findutils pkgs.gnugrep ]}:$PATH ; ${command}";
+            inherit description; script = command;
+        });
+        #boot.initrd.systemd.initrdBin = lib.mkIf (config.boot.initrd.systemd.enable) [ pkgs.findutils pkgs.gnugrep ];
+        boot.initrd.systemd.extraBin = lib.mkIf (config.boot.initrd.systemd.enable) {
+            grep = lib.getExe pkgs.gnugrep;
+            xargs = "${pkgs.findutils}/bin/xargs";
+        };
 
 
-    }) (lib.mkIf (cfg.temp.type == "bind") { # (TODO: this should completely clear or even recreate the »cfg.temp.bind.source«)
+    })) (lib.mkIf (cfg.temp.type == "bind") { # (TODO: this should completely clear or even recreate the »cfg.temp.bind.source«)
 
         boot.cleanTmpDir = true; # Clear »/tmp« on reboot.
 
@@ -357,7 +375,7 @@ in {
 
         ${setup} = {
             zfs.enable = true;
-            zfs.pools.${lib.head (lib.splitString "/" dataset)} = { }; # ensure the pool exists (all properties can be adjusted)
+            zfs.pools.${lib.head (builtins.split "/" dataset)} = { }; # ensure the pool exists (all properties can be adjusted)
             keystore.keys."zfs/${dataset}" = lib.mkIf (type == "remote" && config.${setup}.keystore.enable) (lib.mkOptionDefault "random"); # the entire point of ZFS remote are backups, and those should be encrypted
 
             zfs.datasets = {

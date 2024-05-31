@@ -61,6 +61,7 @@ in let hostModule = {
                 if [[ ! ''${args[initrd-console]:-} ]] ; then noConsole=1 ; fi
                 if [[ ''${args[initrd-console]:-} ]] ; then touch $tmp/xchg/initrd-console ; fi
                 if [[ ''${args[quiet]:-} ]] ; then touch $tmp/xchg/quiet ; fi
+                </etc/hosts grep -oP '127.0.0.[12] (?!localhost)\K.*' >$tmp/xchg/host
 
                 ${cfg.virtualisation.qemu.package}/bin/qemu-img create -f qcow2 $tmp/dummyImage 4M &>/dev/null # do this silently
 
@@ -69,7 +70,9 @@ in let hostModule = {
                 export QEMU_KERNEL_PARAMS="init=${config.system.build.toplevel}/init ''${noConsole:+console=tty1} edd=off boot.shell_on_fail"
                 export QEMU_NET_OPTS= QEMU_OPTS=
                 if [[ ''${args[quiet]:-} ]] ; then
-                    ${launch} "''${argv[@]}" &> >( ${pkgs.coreutils}/bin/tr -dc '[[:print:]]\r\n\t' | { while IFS= read line ; do if [[ $line == magic:cm4alv0wly79p6i4aq32hy36i* ]] ; then break ; fi ; done ; cat ; } ) || { e=$? ; echo "Execution of VM failed!" 1>&2 ; exit $e ; }
+                    ${launch} "''${argv[@]}" &> >( ${pkgs.coreutils}/bin/tr -dc '[[:print:]]\r\n\t' | {
+                        while IFS= read line ; do if [[ $line == magic:cm4alv0wly79p6i4aq32hy36i* ]] ; then break ; fi ; done ; cat ;
+                    } ) || { e=$? ; echo "Execution of VM failed!" 1>&2 ; exit $e ; }
                 else
                     ${launch} "''${argv[@]}" || exit
                 fi
@@ -90,7 +93,7 @@ in let hostModule = {
         # Instead of tearing down the initrd environment, adjust some mounts and run the »command« in the initrd:
         boot.initrd.systemd.enable = lib.mkVMOverride false;
         boot.initrd.postMountCommands = ''
-
+            set -x
             for fs in tmp/shared tmp/xchg nix/store.lower nix/var/nix/db.lower ; do
                 mkdir -p /$fs && mount --move $targetRoot/$fs /$fs || fail
             done
@@ -108,13 +111,23 @@ in let hostModule = {
             toplevel=$(dirname $stage2Init)
             ln -sfT $toplevel /run/current-system
             ln -sfT $toplevel /run/booted-system
-            ln -sfT $toplevel/kernel-modules/lib/modules /lib/modules
+            rm -rf  /lib/modules ; ln -sfT $toplevel/kernel-modules/lib/modules /lib/modules
 
-            # Also mostly dor debugging shells:
+            # Set up /etc:
             mv /etc /etc.initrd
             mkdir -p -m 755 /etc.work /etc.upper /etc
             mount -t overlay overlay -o lowerdir=$toplevel/etc,workdir=/etc.work,upperdir=/etc.upper /etc
             ( cd /etc.initrd ; cp -a mtab udev /etc/ ) # (keep these)
+
+            # Set up NATed networking:
+            cat /etc/hosts >/etc/hosts.cp ; rm /etc/hosts ; mv /etc/hosts.cp /etc/hosts
+            perl -pe 's/127.0.0.[12](?! localhost)/# /' -i /etc/hosts
+            perl -pe 's/::1(?! localhost)/# /' -i /etc/hosts
+            { printf '10.0.2.2 ' ; cat /tmp/xchg/host ; } >>/etc/hosts
+            ip addr add 10.0.2.15/24 dev eth0
+            ip link set dev eth0 up
+            ip route add default via 10.0.2.2 dev eth0
+            echo nameserver 1.1.1.1 >/etc/resolv.conf # 10.0.2.3 doesn't reply
 
             # »nix copy« complains without »nixbld« group:
             rm -f /etc/passwd /etc/group
@@ -126,7 +139,7 @@ in let hostModule = {
             console=/dev/ttyS0 ; if [[ -e /tmp/xchg/initrd-console ]] ; then console=/dev/console ; fi # (does this even make a difference?)
             if [[ -e /tmp/xchg/quiet ]] ; then printf '\n%s\n' 'magic:cm4alv0wly79p6i4aq32hy36i...' >$console ; fi
 
-            exit=0 ; bash /tmp/xchg/script <$console >$console 2>$console || exit=$?
+            set +x ; exit=0 ; bash /tmp/xchg/script <$console >$console 2>$console || exit=$?
             echo $exit >/tmp/xchg/exit
 
             sync ; sync
@@ -135,6 +148,7 @@ in let hostModule = {
             sleep infinity # the VM will halt very soon
         '';
         boot.initrd.kernelModules = [ "overlay" ]; # for writable »/etc«, chown of »/nix/store« and locks in »/nix/var/nix/db«
+        #boot.initrd.extraUtilsCommands = ''copy_bin_and_libs ${pkgs.perl}/bin/perl'';
 
     }) ({
 
@@ -148,6 +162,7 @@ in let hostModule = {
             "/nix/store".mountPoint = lib.mkForce "/nix/store.lower";
         }; # mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 nix-var-nix-db /nix/var/nix/db
         virtualisation.qemu.options = [ "-virtfs local,path=/nix/var/nix/db,security_model=none,mount_tag=nix-var-nix-db,readonly=on" ]; # (doing this manually to pass »readonly«, to not ever corrupt the host's Nix DBs)
+        boot.resumeDevice = lib.mkVMOverride "";
 
     }) ({
 
@@ -159,9 +174,12 @@ in let hostModule = {
 
     }) ({
 
-        virtualisation = if (builtins.substring 0 5 pkgs.lib.version) > "22.05" then { host.pkgs = lib.mkDefault pkgs.buildPackages; } else { };
-    }) ({
+        virtualisation.host.pkgs = lib.mkDefault pkgs.buildPackages;
         virtualisation.qemu.package = lib.mkIf (pkgs.buildPackages.system != pkgs.system) (cfg.virtualisation.host or { pkgs = pkgs.buildPackages; }).pkgs.qemu_full;
+
+    }) ({
+
+        #virtualisation.qemu.options = [ "-nic user,model=virtio-net-pci" ]; # NAT
 
     }) ({
 

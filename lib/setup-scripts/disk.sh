@@ -8,7 +8,7 @@ declare-flag install-system skip-formatting "" "Skip partitioning, formatting, a
 ## Prepares the disks of the target system for the copying of files.
 function do-disk-setup { # 1: diskPaths
 
-    ensure-disks "$1" || return
+    ensure-disks || return
 
     export mnt=/tmp/nixos-install-@{config.networking.hostName} && mkdir -p "$mnt" && prepend_trap "rmdir $mnt" EXIT || return # »mnt=/run/user/0/...« would be more appropriate, but »nixos-install« does not like the »700« permissions on »/run/user/0«
 
@@ -51,14 +51,14 @@ function do-disk-setup { # 1: diskPaths
 declare-flag install-system image-owner "" "When using image files, »chown« them to this »owner[:group]« before the installation."
 
 ## Parses and expands »diskPaths« to ensure that a disk or image exists for each »config.setup.disks.devices«, creates and loop-mounts images for non-/dev/ paths, and checks whether physical device sizes match.
-function ensure-disks { # 1: diskPaths, 2?: skipLosetup
+function ensure-disks {
 
     declare -g -A blockDevs=( ) # this ends up in the caller's scope
-    if [[ $1 == */ ]] ; then
-        mkdir -p "$1"
-        for name in "@{!config.setup.disks.devices[@]}" ; do blockDevs[$name]=${1}${name}.img ; done
+    if [[ ${args[disks]} == */ ]] ; then
+        mkdir -p "${args[disks]}"
+        for name in "@{!config.setup.disks.devices[@]}" ; do blockDevs[$name]=${args[disks]}${name}.img ; done
     else
-        local path ; for path in ${1//:/ } ; do
+        local path ; for path in ${args[disks]//:/ } ; do
             local name=${path/=*/} ; if [[ $name != "$path" ]] ; then path=${path/$name=/} ; else name=primary ; fi
             if [[ ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name specified more than once. Duplicate definition: $path" 1>&2 ; \return 1 ; fi
             blockDevs[$name]=$path
@@ -73,7 +73,7 @@ function ensure-disks { # 1: diskPaths, 2?: skipLosetup
             local outFile=${blockDevs[$name]} &&
             install -m 640 -T /dev/null "$outFile" && truncate -s "${disk[size]}" "$outFile" || return
             if [[ ${args[image-owner]:-} ]] ; then chown "${args[image-owner]}" "$outFile" || return ; fi
-            if [[ ${2:-} ]] ; then continue ; fi
+            if [[ ${arg_skipLosetup:-} ]] ; then continue ; fi
             blockDevs[$name]=$( @{native.util-linux}/bin/losetup --show -f "$outFile" ) && prepend_trap "@{native.util-linux}/bin/losetup -d '${blockDevs[$name]}'" EXIT || return
         else
             local size=$( @{native.util-linux}/bin/blockdev --getsize64 "${blockDevs[$name]}" || : ) ; local waste=$(( size - ${disk[size]} ))

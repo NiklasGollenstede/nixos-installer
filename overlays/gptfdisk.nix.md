@@ -12,9 +12,10 @@ GPT-FDisk patched to be able to move not only the primary, but also the backup p
 dirname: inputs: final: prev: let
     inherit (final) pkgs; lib = inputs.self.lib.__internal__;
     debug = false;
+    enable = lib.versionOlder prev.gptfdisk.version "1.0.10"; # patch merged in that version
 in {
 
-    gptfdisk = (
+    gptfdisk = if !enable then prev.gptfdisk else (
         if debug then pkgs.enableDebugging else (x: x)
     ) (prev.gptfdisk.overrideAttrs (old: let
         pname = "gptfdisk";
@@ -31,6 +32,6 @@ in {
         dontStrip = true;
     } else { })));
 
-    libblockdev = prev.libblockdev.override { inherit (prev) gptfdisk; };
+    libblockdev = prev.libblockdev.override (lib.optionalAttrs enable { inherit (prev) gptfdisk; });
 
 }

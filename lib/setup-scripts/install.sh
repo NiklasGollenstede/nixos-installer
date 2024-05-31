@@ -3,12 +3,9 @@
 # NixOS Installation
 ##
 
-declare-command install-system diskPaths << 'EOD'
+declare-command install-system '[--disks=]diskPaths' << 'EOD'
 This command installs a NixOS system to local disks or image files.
-It gets all the information it needs from the system's NixOS configuration -- except for the path(s) of the target disk(s) / image file(s).
-
-If »diskPaths« points to something in »/dev/«, then it is directly formatted and written to as block device, otherwise »diskPaths« is (re-)created as raw image and then used as loop device.
-For hosts that install to multiple disks, pass a :-separated list of »<disk-name>=<path>« pairs (the name may be omitted only for the "default" disk).
+It gets all the information it needs from the system's NixOS configuration -- except for the path(s) of the target disk(s) / image file(s); see the »--disks=« flag.
 
 Since the installation needs to format and mount (image files as) disks, it needs some way of elevating permissions. It can:
 * be run as »root«, requiring Nix to be installed system-wide / for root,
@@ -25,10 +22,13 @@ What the installation does is defined solely by the target host's NixOS configur
 The "Installation" section of each host's documentation should contain host specific details, if any.
 Various »FLAG«s below affect how the installation is performed (in VM, verbosity, debugging, ...).
 EOD
+declare-flag install-system disks "diskPaths" "The disk(s) (to be) used by this system installation.
+If »diskPaths« points to something in »/dev/«, then it is directly used as block device, otherwise »diskPaths« is (re-)created as raw image file and then used as loop device.
+For hosts that install to multiple disks, pass a :-separated list of »<disk-name>=<path>« pairs (the name may be omitted only for the "default" disk)."
 function install-system {( # 1: diskPaths
     trap - EXIT # start with empty traps for sub-shell
     prepare-installer "$@" || exit
-    do-disk-setup "$1" || exit
+    do-disk-setup || exit
     install-system-to $mnt || exit
 )}
 
@@ -42,15 +42,15 @@ declare-flag install-system no-vm "" "Never perform the installation in a VM. Fa
 ## Does some argument validation, performs some sanity checks, includes a hack to make installation work when nix isn't installed for root, and runs the installation in qemu (if requested).
 function prepare-installer { # 1: diskPaths
 
-    : ${1:?"The first positional argument must specify the path(s) to the disk(s) and/or image file(s) to install to"}
+    if [[ ! ${args[disks]:-} ]] ; then args[disks]=${1:?"The disks flag or the first positional argument must specify the path(s) to the disk(s) and/or image file(s) to install to"} ; shift ; fi
 
-    umask g-w,o-w # Ensure that files created without explicit permissions are not writable for group and other (0022).
+    umask g-w,o-w # Ensure that files created without explicit permissions are not writable for group and other.
 
     if [[ "$(id -u)" != '0' ]] ; then
-        if [[ ! ${args[no-vm]:-} ]] ; then reexec-in-qemu "$@" || return ; \exit 0 ; fi
+        if [[ ! ${args[no-vm]:-} ]] ; then exec-in-qemu install-system || return ; \exit 0 ; fi
         echo 'Script must be run as root or in qemu (without »--no-vm«).' 1>&2 ; \return 1
     fi
-    if [[ ${args[vm]:-} ]] ; then reexec-in-qemu "$@" || return ; \exit 0 ; fi
+    if [[ ${args[vm]:-} ]] ; then exec-in-qemu install-system || return ; \exit 0 ; fi
 
     if [[ -e "/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}" ]] ; then echo "Keystore »/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}/« is already open. Close it and remove the mountpoint before running the installer." 1>&2 ; \return 1 ; fi
 
@@ -62,7 +62,7 @@ function prepare-installer { # 1: diskPaths
         if @{native.zfs}/bin/zfs get -o value -H name "$poolName" &>/dev/null ; then echo "ZFS pool »$poolName« is already imported. Export the pool before running the installer." 1>&2 ; \return 1 ; fi
     done
 
-    if [[ ${SUDO_USER:-} && ! $( PATH=$hostPath which nix 2>/dev/null ) && $( PATH=$hostPath which su 2>/dev/null ) ]] ; then # use Nix as the user who called this script, as Nix may not be set up for root
+    if [[ ${SUDO_USER:-} && ! $( PATH=$hostPath which nix 2>/dev/null ) && $( PATH=$hostPath which su 2>/dev/null ) ]] ; then # use Nix as the user who called this script, if Nix is not be set up for root
         function nix {( set +x ; declare -a args=("$@") ; PATH=$hostPath su - "$SUDO_USER" -s "@{native.bashInteractive!getExe}" -c "$(declare -p args)"' ; nix "${args[@]}"' )}
     else # use Nix by absolute path, as it won't be on »$PATH«
         PATH=$PATH:@{native.nix}/bin
@@ -75,28 +75,32 @@ function prepare-installer { # 1: diskPaths
 declare-flag install-system vm-shared "dir-path" "When installing inside the VM, specifies a host path that is read-write mounted at »/tmp/shared« inside the VM."
 declare-flag install-system vm-args "qemu-args" "When installing inside the VM, extra arguments to pass to qemu."
 
-## Re-executes the current system's installation in a qemu VM.
-function reexec-in-qemu {
+## (Re-)executes the current system's script in a qemu VM.
+function exec-in-qemu { # 1: entry, ...: argv
 
-    # (not sure whether this works for block devices)
-    ensure-disks "$1" 1 || return
-    qemu=( -m 3072 ) ; declare -A qemuDevs=( )
-    local index=2 ; local name ; for name in "${!blockDevs[@]}" ; do
-        #if [[ ${blockDevs[$name]} != /dev/* ]] ; then
-        qemu+=( # not sure how correct the interpretations of the command are
-            -drive format=raw,file="$( realpath "${blockDevs[$name]}" )",media=disk,if=none,index=${index},id=drive${index} # create the disk drive, without attaching it, name it driveX
-            #-device ahci,acpi-index=${index},id=ahci${index} # create an (ich9-)AHCI bus named »ahciX«
-            #-device ide-hd,drive=drive${index},bus=ahci${index}.${index} # attach IDE?! disk driveX as device X on bus »ahciX«
-            -device virtio-blk-pci,drive=drive${index},disable-modern=on,disable-legacy=off # alternative to the two lines above (implies to be faster, but seems to require guest drivers)
-        )
-        qemuDevs[$name]=/dev/vd$( printf "\x$(printf %x $(( index - 1 + 97 )) )" ) # a is used by the (unused) root disk
-        let index+=1
-    done
-
+    qemu=( ) ; apply-vm-args
     args[vm]='' ; args[no-vm]=1
-    newArgs=( ) ; for arg in "${!args[@]}" ; do newArgs+=( --"$arg"="${args[$arg]}" ) ; done
-    devSpec= ; for name in "${!qemuDevs[@]}" ; do devSpec+="$name"="${qemuDevs[$name]}": ; done
-    newArgs+=( ${devSpec%:} ) ; shift ; (( $# == 0 )) || args+=( "$@" ) # (( ${#argv[@]} > 1 )) && args+=( "${argv[@]:1}" )
+
+    if [[ ${args[disks]:-} ]] ; then
+        # (not sure whether this works for block devices)
+        arg_skipLosetup=1 ensure-disks || return
+        args[disks]=''
+        local index=2 # 1/a is used by the (unused) root disk
+        local name ; for name in "${!blockDevs[@]}" ; do
+            #if [[ ${blockDevs[$name]} != /dev/* ]] ; then
+            qemu+=( # not sure how correct the interpretations of the command are
+                -drive format=raw,file="$( realpath "${blockDevs[$name]}" )",media=disk,if=none,index=${index},id=drive${index} # create the disk drive, without attaching it, name it driveX
+                #-device ahci,acpi-index=${index},id=ahci${index} # create an (ich9-)AHCI bus named »ahciX«
+                #-device ide-hd,drive=drive${index},bus=ahci${index}.${index} # attach IDE?! disk driveX as device X on bus »ahciX«
+                -device virtio-blk-pci,drive=drive${index},disable-modern=on,disable-legacy=off # alternative to the two lines above (implies to be faster, but seems to require guest drivers)
+            )
+            args[disks]+="$name"=/dev/vd"$( printf "\x$(printf %x $(( index - 1 + 97 )) )" )": ; let index+=1
+        done
+        args[disks]=${args[disks]%:}
+    fi
+
+    newArgs=( ) ; (( $# == 0 )) || newArgs+=( "$@" )
+    for arg in "${!args[@]}" ; do newArgs+=( --"$arg"="${args[$arg]}" ) ; done
 
     #local output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec
     local output=@{config.system.build.vmExec.drvPath!unsafeDiscardStringContext} # this is more accurate, but also means another system needs to get evaluated every time
@@ -107,7 +111,7 @@ function reexec-in-qemu {
     local scripts=$self ; if [[ @{pkgs.system} != "@{native.system}" ]] ; then
         scripts=$( build-lazy @{inputs.self}'#'apps.@{pkgs.system}.@{config.installer.outputName:?}.derivation ) || return
     fi
-    local command="$scripts install-system $( printf '%q ' "${newArgs[@]}" ) || exit"
+    local command="$scripts $( printf '%q ' "${newArgs[@]}" ) || exit"
 
     local runInVm ; runInVm=$( build-lazy $output )/bin/run-@{config.system.name}-vm-exec || return
 
@@ -119,10 +123,10 @@ function reexec-in-qemu {
 function nixos-install-cmd {( # 1: mnt, 2: topLevel
     # »nixos-install« by default does some stateful things (see »--no-root-passwd« »--no-channel-copy«), builds and copies the system config, registers the system (»nix-env --profile /nix/var/nix/profiles/system --set $targetSystem«), and then calls »NIXOS_INSTALL_BOOTLOADER=1 nixos-enter -- $topLevel/bin/switch-to-configuration boot«, which is essentially the same as »NIXOS_INSTALL_BOOTLOADER=1 nixos-enter -- @{config.system.build.installBootLoader} $targetSystem«, i.e. the side effects of »nixos-enter« and then calling the bootloader-installer.
 
-    #PATH=@{native.nix}/bin:$PATH:@{config.systemd.package}/bin TMPDIR=/tmp LC_ALL=C @{native.nixos-install-tools}/bin/nixos-install --system "$2" --no-root-passwd --no-channel-copy --root "$1" || exit # We did most of this, so just install the bootloader:
+    #PATH=@{native.nix}/bin:$PATH:@{config.systemd.package}/bin TMPDIR=/tmp LC_ALL=C @{native.nixos-install-tools-no-doc}/bin/nixos-install --system "$2" --no-root-passwd --no-channel-copy --root "$1" || exit # We did most of this, so just install the bootloader:
 
     export NIXOS_INSTALL_BOOTLOADER=1 # tells some bootloader installers (systemd & grub) to not skip parts of the installation
-    LC_ALL=C PATH=@{native.busybox}/bin:$PATH:@{native.util-linux}/bin @{native.nixos-install-tools}/bin/nixos-enter --silent --root "$1" -c "source /etc/set-environment ; ${_set_x:-:} ; @{config.system.build.installBootLoader} $2" || exit
+    LC_ALL=C PATH=@{native.busybox}/bin:$PATH:@{native.util-linux}/bin @{native.nixos-install-tools-no-doc}/bin/nixos-enter --silent --root "$1" -c "source /etc/set-environment ; ${_set_x:-:} ; @{config.system.build.installBootLoader} $2" || exit
     # (newer versions of »mount« seem to be unable to do »--make-private« on »rootfs« (in the initrd), but busybox's mount still works)
 )}
 
@@ -201,7 +205,7 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
         else
             ( set +x ; echo "[1;32mInstallation done![0m This shell is in a chroot in the mounted system for inspection. Exiting the shell will unmount the system." 1>&2 )
         fi
-        LC_ALL=C PATH=@{native.busybox}/bin:$PATH:@{native.util-linux}/bin @{native.nixos-install-tools}/bin/nixos-enter --root $mnt -- /nix/var/nix/profiles/system/sw/bin/bash -c 'source /etc/set-environment ; NIXOS_INSTALL_BOOTLOADER=1 CHROOT_DIR="'"$mnt"'" mnt=/ exec "'"$self"'" bash' || exit # +o monitor
+        LC_ALL=C PATH=@{native.busybox}/bin:$PATH:@{native.util-linux}/bin @{native.nixos-install-tools-no-doc}/bin/nixos-enter --root $mnt -- /nix/var/nix/profiles/system/sw/bin/bash -c 'source /etc/set-environment ; NIXOS_INSTALL_BOOTLOADER=1 CHROOT_DIR="'"$mnt"'" mnt=/ exec "'"$self"'" bash' || exit # +o monitor
     fi
 
     mkdir -p $mnt/var/lib/systemd/timesync && touch $mnt/var/lib/systemd/timesync/clock || true # save current time

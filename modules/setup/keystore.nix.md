@@ -170,7 +170,7 @@ in let module = {
             initrd-cleanup.preStart = ''
                 umount ${keystore} || true
                 rmdir ${keystore} || true
-                ${config.systemd.package}/lib/systemd/systemd-cryptsetup detach keystore-${hash}
+                systemd-cryptsetup detach keystore-${hash}
             '';
         };
         boot.initrd.luks.devices."keystore-${hash}".keyFileTimeout = 10;

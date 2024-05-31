@@ -57,8 +57,7 @@ declare-flag run-qemu efi               "" "Treat the target system as EFI syste
 declare-flag run-qemu efi-vars      "path" "For »--efi« systems, path to a file storing the EFI variables. The default is in »XDG_RUNTIME_DIR«, i.e. it does not persist across host reboots."
 declare-flag run-qemu graphic           "" "Open a graphical window even of the target system logs to serial and not (explicitly) TTY1."
 declare-flag run-qemu install "[1|always]" "If any of the guest system's disk images does not exist, perform the its installation before starting the VM. If set to »always«, always install before starting the VM. With this flag set, »diskImages« defaults to paths in »/tmp/."
-declare-flag run-qemu mem            "num" "VM RAM in MiB (»qemu -m«)."
-declare-flag run-qemu no-kvm            "" "Do not rey to use (or complain about the unavailability of) KVM."
+declare-flag run-qemu no-kvm            "" "Do not try to use (or complain about the unavailability of) KVM."
 declare-flag run-qemu nat-fw    "forwards" "Port forwards to the guest's NATed NIC. E.g: »--nat-fw=:8000-:8000,:8001-:8001,127.0.0.1:2022-:22«."
 declare-flag run-qemu no-nat            "" "Do not provide a NATed NIC to the guest."
 declare-flag run-qemu nic "type[,options]" "Create an additional network interface using the »-nic« flag. Automatically sets a decent »model« and a »mac« derived from »config.networking.hostId«.
@@ -67,12 +66,9 @@ $ ... --nic=socket,listen=:4321 # once
 $ ... --nic=socket,connect=:4321 # once
 Example 2 (connect many VMs, unprivileged):
 $ nix shell nixpkgs#vde2 --command vde_switch -sock /tmp/vm-net
-$ ... --nic=vde,sock=/tmp/vm-net # multiple times
-"
+$ ... --nic=vde,sock=/tmp/vm-net # multiple times"
 declare-flag run-qemu no-serial         "" "Do not connect the calling terminal to a serial adapter the guest can log to and open a terminal on the guests serial, as would be the default if the guests logs to ttyS0."
 declare-flag run-qemu share        "decls" "Host dirs to make available as network shares for the guest, as space separated list of »name:host-path,options. E.g. »--share='foo:/home/user/foo,readonly=on bar:/tmp/bar«. In the VM hte share can be mounted with: »$ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo«."
-declare-flag run-qemu smp            "num" "Number of guest CPU cores."
-declare-flag run-qemu usb-port      "path" "A physical USB port (or hub) to pass to the guest (e.g. a YubiKey for unlocking). Specified as »<bus>-<port>«, where bus and port refer to the physical USB port »/sys/bus/usb/devices/<bus>-<port>« (see »lsusb -tvv«). E.g.: »--usb-port=3-1.1.1.4«."
 declare-flag run-qemu virtio-blk        "" "Pass the system's disks/images as virtio disks, instead of using AHCI+IDE. Default iff »boot.initrd.availableKernelModules« includes »virtio_blk« (because it requires that driver)."
 function run-qemu {
     if [[ ${args[install]:-} && ! ${argv[0]:-} ]] ; then argv[0]=/tmp/nixos-vm/@{config.installer.outputName:-@{config.system.name}}/ ; fi
@@ -98,9 +94,6 @@ function run-qemu {
     if [[ @{pkgs.system} == aarch64-* ]] ; then
         qemu+=( -machine type=virt ) # aarch64 has no default, but this seems good
     fi ; qemu+=( -cpu max )
-
-    qemu+=( -m ${args[mem]:-2048} )
-    if [[ ${args[smp]:-} ]] ; then qemu+=( -smp ${args[smp]} ) ; fi
 
     if [[ @{config.virtualisation.useEFIBoot:-} || @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots SeaBIOS.
         local ovmf ; ovmf=$( build-lazy @{pkgs.OVMF.drvPath!unsafeDiscardStringContext} fd ) || return
@@ -159,18 +152,15 @@ function run-qemu {
         qemu+=( -nic model=virtio-net-pci,mac=$mac,type="${args[nic]}" )
     fi
 
-    # To pass a USB device (e.g. a YubiKey for unlocking), add pass »--usb-port=${bus}-${port}«, where bus and port refer to the physical USB port »/sys/bus/usb/devices/${bus}-${port}« (see »lsusb -tvv«). E.g.: »--usb-port=3-1.1.1.4«
-    if [[ ${args[usb-port]:-} ]] ; then local decl ; for decl in ${args[usb-port]//:/ } ; do
-        qemu+=( -usb -device usb-host,hostbus="${decl/-*/}",hostport="${decl/*-/}" )
-    done ; fi
+    apply-vm-args
 
     if [[ ${args[install]:-} == 1 ]] ; then local disk ; for disk in "${disks[@]}" ; do
         if [[ ! -e $disk ]] ; then args[install]=always ; fi
     done ; fi
-    if [[ ${args[install]:-} == always ]] ; then
-        local verbosity=--quiet ; if [[ ${args[trace]:-} ]] ; then verbosity=--trace ; fi ; if [[ ${args[debug]:-} ]] ; then verbosity=--debug ; fi
-        hostPath=${hostPath:-} ${args[dry-run]:+echo} "$self" install-system "$diskImages" $verbosity --no-inspect || return
-    fi
+    if [[ ${args[install]:-} == always ]] && [[ ! ${args[dry-run]:-} ]] ; then (
+        if [[ ! ${args[trace]:-} ]] && [[! ${args[debug]:-} ]] ; then args[quiet]=1 ; fi
+        args[no-inspect]=1 ; install-system "$diskImages" || exit
+    ) || return ; fi
 
     qemu+=( "${argv[@]}" )
     if [[ ${args[dry-run]:-} ]] ; then
@@ -180,6 +170,18 @@ function run-qemu {
     fi
 
     # https://askubuntu.com/questions/54814/how-can-i-ctrl-alt-f-to-get-to-a-tty-in-a-qemu-session
+}
+
+declare-flag run-qemu,install-system,'*' vm-mem         "num" "VM RAM in MiB (»qemu -m«)."
+declare-flag run-qemu,install-system,'*' vm-smp         "num" "Number of guest CPU cores."
+declare-flag run-qemu,install-system,'*' vm-usb-port   "path" "A physical USB port (or hub) to pass to the guest (e.g. a YubiKey for unlocking). Specified as »<bus>-<port>«, where bus and port refer to the physical USB port »/sys/bus/usb/devices/<bus>-<port>« (see »lsusb -tvv«). E.g.: »--vm-usb-port=3-1.1.1.4«."
+function apply-vm-args {
+    qemu+=( -m ${args[vm-mem]:-2048} )
+    if [[ ${args[vm-smp]:-} ]] ; then qemu+=( -smp ${args[vm-smp]} ) ; fi
+
+    if [[ ${args[vm-usb-port]:-} ]] ; then local decl ; for decl in ${args[vm-usb-port]//:/ } ; do
+        qemu+=( -usb -device usb-host,hostbus="${decl/-*/}",hostport="${decl/*-/}" )
+    done ; fi
 }
 
 declare-command add-bootkey-to-keydev blockDev << 'EOD'

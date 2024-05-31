@@ -1,7 +1,6 @@
 dirname: inputs@{ self, nixpkgs, functions, ...}: let
     inherit (nixpkgs) lib;
-    inherit (functions.lib) extractBashFunction forEachSystem getModulesFromInputs getNixFiles getOverlaysFromInputs importWrapped mapMerge mapMergeUnique mergeAttrsUnique substituteImplicit;
-    setup-scripts = (import "${dirname}/setup-scripts" "${dirname}/setup-scripts" inputs);
+    inherit (functions.lib) forEachSystem getModulesFromInputs getNixFiles getOverlaysFromInputs importWrapped mapMerge mapMergeUnique mergeAttrsUnique; # trace;
     inherit (inputs.config.rename) installer; preface' = inputs.config.rename.preface;
 
     getModuleConfig = module: inputs: args: if builtins.isFunction module then (
@@ -33,8 +32,12 @@ in rec {
         #system = null; # (This actually does nothing more than setting »config.nixpkgs.system« (which is the same as »config.nixpkgs.buildPlatform.system«) and can be null/unset here.)
 
         modules = (nixosArgs.modules or [ ]) ++ [ { imports = [ # Anything specific to only this evaluation of the module tree should go here.
-            (if (builtins.isPath mainModule) || (builtins.isString mainModule) then (importWrapped inputs mainModule).module else mainModule)
-            { _module.args.name = lib.mkOverride 99 name; } # (specialisations can somehow end up with the name »configuration«, which is very incorrect)
+            (let
+                module = if (builtins.isPath mainModule) || (builtins.isString mainModule) then (importWrapped inputs mainModule).module else mainModule;
+                bindName = func: lib.setFunctionArgs (args: func (args // { inherit name; })) (builtins.removeAttrs (lib.functionArgs func) [ "name" ]);
+                bindToModule = module: if lib.isFunction module then bindName module else if module?imports then module // { imports = map bindToModule module.imports; } else module;
+            in bindToModule module) # ensure that in the main module, the "name" parameter is available during the import stage already
+            { _module.args.name = lib.mkOverride 0 name; } # (specialisations can somehow end up with the name »configuration«, which is very incorrect)
             { networking.hostName = name; }
         ]; _file = "${dirname}/nixos.nix#modules"; } ];
 
@@ -101,8 +104,8 @@ in rec {
 
     # Builds a system of NixOS hosts and exports them, plus »apps« and »devShells« to manage them, as flake outputs.
     # All arguments are optional, as long as the default can be derived from the other arguments as passed.
-    mkSystemsFlake = args@{
-        # An attrset of imported Nix flakes, for example the argument(s) passed to the flake »outputs« function. All other arguments are optional (and have reasonable defaults) if this is provided and contains »self« and the standard »nixpkgs«. This is also the second argument passed to the individual host's top level config files.
+    mkSystemsFlake = lib.makeOverridable (args@{
+        # An attrset of imported Nix flakes, for example the argument(s) passed to the flake »outputs« function. All other arguments are optional (and have reasonable defaults) if this is provided and contains »self« and the standard »nixpkgs«. This is also the second argument passed to the individual hosts' top level config files.
         inputs ? { },
         # Arguments »{ files, dir, exclude, }« to »mkNixosConfigurations«, see there for details. May also be a list of those attrsets, in which case those multiple sets of hosts will be built separately by »mkNixosConfigurations«, allowing for separate sets of »peers« passed to »mkNixosConfiguration«. Each call will receive all other arguments, and the resulting sets of hosts will be merged.
         hosts ? ({ dir = "${getFlakeDir inputs.self "Can't determine flake dir from »inputs.self«. Supply »mkSystemsFlake.hosts.dir« explicitly!"}/hosts"; exclude = [ ]; }),
@@ -141,25 +144,18 @@ in rec {
         inherit nixosConfigurations;
     } // (forEachSystem setupPlatforms (buildSystem: let
         pkgs = (import inputs.nixpkgs { inherit overlays; system = buildSystem; });
-        tools = lib.unique (map (p: p.outPath) (lib.filter lib.isDerivation pkgs.stdenv.allowedRequisites));
     in rec {
 
         apps = lib.mapAttrs (name: system: rec { type = "app"; derivation = writeSystemScripts { inherit name pkgs system; }; program = "${derivation}"; }) nixosConfigurations;
 
         # dummy that just pulls in all system builds
         packages = let all-systems = pkgs.runCommandLocal "all-systems" { } ''
-            ${''
-                mkdir -p $out/systems
-                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${system.config.system.build.toplevel} $out/systems/${getName name}") nixosConfigurations)}
-            ''}
-            ${''
-                mkdir -p $out/scripts
-                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${apps.${name}.program} $out/scripts/${getName name}") nixosConfigurations)}
-            ''}
-            ${lib.optionalString (inputs != { }) ''
-                mkdir -p $out/inputs
-                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: { outPath, ... }: "ln -sT ${outPath} $out/inputs/${name}") inputs)}
-            ''}
+            mkdir -p $out/systems
+            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${system.config.system.build.toplevel} $out/systems/${getName name}") nixosConfigurations)}
+            mkdir -p $out/scripts
+            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${apps.${name}.program} $out/scripts/${getName name}") nixosConfigurations)}
+            mkdir -p $out/inputs
+            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: { outPath, ... }: "ln -sT ${outPath} $out/inputs/${name}") inputs)}
         ''; in { inherit all-systems; } // (lib.optionalAttrs asDefaultPackage { default = all-systems ; });
         checks.all-systems = packages.all-systems;
 
@@ -169,7 +165,7 @@ in rec {
         apps = mapMergeUnique (k: v: { ${renameOutputs k} = v; }) outputs.apps.${buildSystem};
         packages.${renameOutputs "all-systems"} = outputs.packages.${buildSystem}.all-systems;
         checks.${renameOutputs "all-systems"} = outputs.checks.${buildSystem}.all-systems;
-    }));
+    })));
 
     # This makes the »./setup-scripts/*« callable from the command line:
     writeSystemScripts = {

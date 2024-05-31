@@ -76,6 +76,7 @@
 		"gdisk", // program
 		"getsize64", // cli arg
 		"getty", // program
+		"github", // name
 		"gnugrep", // package
 		"gnused", // package
 		"gollenstede", // name
@@ -112,6 +113,7 @@
 		"mountpoint", // program / function
 		"msize", // option
 		"mtab", // linux
+		"nameserver", // concat
 		"namespacing", // word
 		"netdev", // cli arg
 		"niklas", // name
@@ -137,6 +139,7 @@
 		"optimise", // B/E
 		"ostype", // virtual box
 		"overlayed", // word
+		"overridable", // word
 		"ovmf", // package
 		"partlabel", // linux
 		"partprobe", // program / function
@@ -162,6 +165,7 @@
 		"reexec", // option
 		"refreservation", // zfs
 		"relatime", // mount option
+		"resolv", // abbr
 		"rootfs", // linux
 		"rpool", // zfs
 		"sandboxing", // word

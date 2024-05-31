@@ -47,8 +47,9 @@ function prompt-new-password {( set -u # 1: usage
 )}
 
 ## If »secretFile« does not exist, interactively prompts up to three times for the secret to be stored in that file.
+declare-flag '*' no-optional-prompts "" "Skip prompting for (and thus saving) secret marked as optional."
 function prompt-secret-as {( set -u # 1: what, 2: secretFile, 3?: owner[:[group]], 4?: mode
-    if [[ -e $2 ]] ; then \return ; fi
+    if [[ ${arg_optional:-} && ${args[no-optional-prompts]:-} ]] ; then \return ; fi ; if [[ -e $2 ]] ; then \return ; fi
     what=$1 ; shift
     function prompt {
         read -s -p "Please enter $what: " value || exit ; echo 1>&2

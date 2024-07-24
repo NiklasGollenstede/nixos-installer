@@ -23,17 +23,17 @@ See `nix run .#$hostname -- --help` for options and more commands.
 ```nix
 #*/# end of MarkDown, beginning of NixOS config flake input:
 dirname: inputs: { config, pkgs, lib, name, ... }: let lib = inputs.self.lib.__internal__; in let
-    #suffix = builtins.head (builtins.match ''example-(.*)'' name); # make differences in config based on this when using »preface.instances«
     hash = builtins.substring 0 8 (builtins.hashString "sha256" name);
 in { preface = { # (any »preface« options have to be defined here)
-    instances = [ "example-explicit" "example" "example-minimal" "example-crypt" "example-raidz" ]; # Generate multiple variants of this host, with these »name«s.
+    instances = [ "explicit-fs" "complex-fs" "minimal-setup" "encrypted" "multi-disk-raidz" "rpi" ]; # Generate multiple variants of this host, with these »name«s.
 }; imports = [ ({ ## Hardware
 
-    nixpkgs.hostPlatform = "x86_64-linux"; system.stateVersion = "22.05";
+    nixpkgs.hostPlatform = if name == "rpi" then "aarch64-linux" else "x86_64-linux"; system.stateVersion = "24.05";
 
     ## What follows is a whole bunch of boilerplate-ish stuff, most of which multiple hosts would have in common and which would thus be moved to one or more modules:
 
-    boot.loader.extlinux.enable = true;
+    boot.loader.extlinux.enable = name != "rpi";
+    boot.loader.grub.enable = false;
 
     # Example of adding and/or overwriting setup/maintenance functions:
     #installer.scripts.install-overwrite = { path = ../example/install.sh.md; order = 1500; };
@@ -41,7 +41,7 @@ in { preface = { # (any »preface« options have to be defined here)
     boot.initrd.systemd.enable = true;
 
 
-}) (lib.mkIf (name == "example-explicit") { ## Minimal explicit FS setup
+}) (lib.mkIf (name == "explicit-fs") { ## Minimal explicit FS setup
 
     # Declare a boot and system partition.
     setup.disks.partitions."boot-${hash}"   = { type = "ef00"; size = "64M"; index = 1; order = 1500; };
@@ -60,7 +60,7 @@ in { preface = { # (any »preface« options have to be defined here)
     fileSystems."/nix/store" = { options = ["bind,ro"]; device = "/system/nix/store"; neededForBoot = true; };
 
 
-}) (lib.mkIf (name == "example") { ## More complex but automatic FS setup
+}) (lib.mkIf (name == "complex-fs") { ## More complex but automatic FS setup
 
     #setup.disks.devices.primary.size = "16G"; # (default)
     setup.bootpart.enable = true; setup.bootpart.size = "512M";
@@ -88,7 +88,7 @@ in { preface = { # (any »preface« options have to be defined here)
     setup.temproot.local.mounts."/var/log" = lib.mkForce null; # example: don't keep logs
 
 
-}) (lib.mkIf (name == "example-minimal") { ## Minimal automatic FS setup
+}) (lib.mkIf (name == "minimal-setup") { ## Minimal automatic FS setup
 
     setup.bootpart.enable = true; # (also set by »boot.loader.extlinux.enable«)
     setup.temproot.enable = true;
@@ -98,7 +98,7 @@ in { preface = { # (any »preface« options have to be defined here)
     setup.temproot.remote.type = "none";
 
 
-}) (lib.mkIf (name == "example-crypt") { ## Minimal automatic FS setup
+}) (lib.mkIf (name == "encrypted") { ## Encrypted FS setup
 
     setup.keystore.enable = true;
     setup.keystore.keys."luks/keystore-${hash}/0" = "random"; # (this makes little practical sense)
@@ -117,10 +117,10 @@ in { preface = { # (any »preface« options have to be defined here)
     #setup.keystore.keys."luks/rpool-${hash}/0" = "random";
 
 
-}) (lib.mkIf (name == "example-raidz") { ## Multi-disk ZFS setup
+}) (lib.mkIf (name == "multi-disk-raidz") { ## Multi-disk ZFS setup
 
     boot.loader.extlinux.enable = lib.mkForce false; # use UEFI boot this time
-    boot.loader.systemd-boot.enable = true; boot.loader.grub.enable = false;
+    boot.loader.systemd-boot.enable = true;
 
     setup.disks.devices = lib.genAttrs ([ "primary" "raidz1" "raidz2" "raidz3" ]) (name: { size = "16G"; });
     setup.bootpart.enable = true; setup.bootpart.size = "512M";
@@ -138,6 +138,39 @@ in { preface = { # (any »preface« options have to be defined here)
     setup.disks.partitions."rpool-rz3-${hash}" = { type = "bf00"; disk = "raidz3"; };
     setup.disks.partitions."rpool-zil-${hash}" = { type = "bf00"; size = "2G"; };
     setup.disks.partitions."rpool-arc-${hash}" = { type = "bf00"; };
+
+
+}) (lib.optionalAttrs (name == "rpi") { ## Booting on Raspberry PIs
+    # This is mostly a demo for the `extra-files` module, but it does produce an image that boots on a rPI4
+
+    setup.temproot = { enable = true; local.bind.base = "ext4"; remote.type = "none"; };
+    setup.bootpart.enable = true;
+
+    boot.loader.generic-extlinux-compatible.enable = true;
+    boot.loader.extra-files.enable = true;
+    boot.loader.extra-files.files = let
+        fw = files: lib.genAttrs files (file: { source = "${pkgs.raspberrypifw}/share/raspberrypi/boot/${file}"; });
+    in {
+        "config.txt".format = lib.generators.toINI { listsAsDuplicateKeys = true; };
+        "config.txt".text = lib.mkOrder 100 ''
+            # Generated file. Do not edit.
+        '';
+        "config.txt".data.all = {
+            arm_64bit = 1; enable_uart = 1; avoid_warnings = 1;
+        };
+        "config.txt".data.pi4 = {
+            enable_gic = 1; disable_overscan = 1; arm_boost = 1;
+            kernel = "u-boot-rpi4.bin";
+            armstub = "armstub8-gic.bin";
+        };
+        "u-boot-rpi4.bin".source = "${pkgs.ubootRaspberryPi4_64bit}/u-boot.bin";
+        "armstub8-gic.bin".source = "${pkgs.raspberrypi-armstubs}/armstub8-gic.bin";
+    } // (fw [
+        "start4.elf" "fixup4.dat" "bcm2711-rpi-cm4s.dtb" "bcm2711-rpi-400.dtb" "bcm2711-rpi-4-b.dtb" "bcm2711-rpi-cm4.dtb" "bcm2711-rpi-cm4-io.dtb"
+    ]);
+
+    #imports = [ "${inputs.nixos-hardware}/raspberry-pi/4" ]; # activating the correct hardware config should help
+    #hardware.deviceTree.filter = "bcm271*.dtb";
 
 
 }) ({ ## Base Config

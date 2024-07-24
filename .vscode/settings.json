@@ -16,6 +16,7 @@
 		"acltype", // zfs
 		"acpi", // abbr
 		"ahci", // abbr
+		"armstub", "armstubs", // cocnat
 		"asDropin", // systemd
 		"ashift", // zfs
 		"askpass", // program
@@ -56,6 +57,7 @@
 		"dontStrip", // nixos
 		"dontUnpack", // nixos
 		"dosfstools", // package
+		"dotglob", // option
 		"draid", // zfs
 		"e2fsprogs", // package
 		"elif", // abbr (else if)
@@ -140,6 +142,7 @@
 		"ostype", // virtual box
 		"overlayed", // word
 		"overridable", // word
+		"overscan", // word
 		"ovmf", // package
 		"partlabel", // linux
 		"partprobe", // program / function
@@ -197,6 +200,7 @@
 		"typecode", // cli arg
 		"uart", "uarts", // serial protocol
 		"uartmode", // virtual box
+		"uboot", // package
 		"udev", // program
 		"udevadm", // program
 		"udptunnel", // program

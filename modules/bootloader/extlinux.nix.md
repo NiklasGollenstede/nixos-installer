@@ -23,26 +23,26 @@ dirname: inputs: args@{ config, options, pkgs, lib, ... }: let lib = inputs.self
 in {
 
     options = { boot.loader.extlinux = {
-        enable = lib.mkEnableOption (lib.mdDoc ''
+        enable = lib.mkEnableOption ''
             `extlinux`, a simple bootloader for legacy-BIOS environments, like (by default) Qemu.
             This uses the same implementation as `boot.loader.generic-extlinux-compatible` to generate the bootloader configuration, but then actually also installs `extlinux` itself, instead of relying on something else (like an externally installed u-boot) to read and execute the configuration.
             Any options affecting the config file generation by `boot.loader.generic-extlinux-compatible` apply, but `boot.loader.generic-extlinux-compatible.enable` should not be set to `true`.
 
             Since the bootloader runs before selecting a generation or specialisation to run, all sub-options, similar to e.g. {option}`boot.loader.timeout`, apply globally to the system, from whichever configuration last applied its bootloader (e.g. by newly `nixos-rebuild switch/boot`ing it or by calling its `.../bin/switch-to-configuration switch/boot`)
-        '');
-        package = lib.mkOption { description = lib.mdDoc ''
+        '';
+        package = lib.mkOption { description = ''
             The `syslinux` package to install `extlinux` from use.
         ''; type = lib.types.package; default = pkgs.syslinux; defaultText = lib.literalExpression "pkgs.syslinux"; };
-        targetDir = lib.mkOption { description = lib.mdDoc ''
+        targetDir = lib.mkOption { description = ''
             The path in whose `./extlinux` sub dir `extlinux` will be installed to. When `nixos-rebuild boot/switch` gets called, this or a parent path needs to be mounted from {option}`.targetPart`.
         ''; type = lib.types.strMatching ''^/.*[^/]$''; default = "/boot"; };
-        targetPart = lib.mkOption { description = lib.mdDoc ''
+        targetPart = lib.mkOption { description = ''
             The `/dev/disk/by-{id,label,partlabel,partuuid,uuid}/*` path of the *disk partition* holding the filesystem that `extlinux` is installed to. This must be formatted with a filesystem that `extlinux` supports and mounted as (a parent of) {option}`.targetDir`. The disk on which the partition lies will have the bootloader section of its MBR replaced by `extlinux`'s.
         ''; type = lib.types.strMatching ''^/.*[^/]$''; default = targetMount.device; };
         allowInstableTargetPart = lib.mkOption { internal = true; type = lib.types.bool; };
-        showUI = (lib.mkEnableOption (lib.mdDoc ''
+        showUI = (lib.mkEnableOption ''
             a simple graphical user interface to select the configuration to start during early boot
-        '')) // { default = true; example = false; };
+        '') // { default = true; example = false; };
     }; };
 
     config = let

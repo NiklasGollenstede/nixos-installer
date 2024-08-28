@@ -68,7 +68,7 @@ Example 2 (connect many VMs, unprivileged):
 $ nix shell nixpkgs#vde2 --command vde_switch -sock /tmp/vm-net
 $ ... --nic=vde,sock=/tmp/vm-net # multiple times"
 declare-flag run-qemu no-serial         "" "Do not connect the calling terminal to a serial adapter the guest can log to and open a terminal on the guests serial, as would be the default if the guests logs to ttyS0."
-declare-flag run-qemu share        "decls" "Host dirs to make available as network shares for the guest, as space separated list of »name:host-path,options. E.g. »--share='foo:/home/user/foo,readonly=on bar:/tmp/bar«. In the VM hte share can be mounted with: »$ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo«."
+declare-flag run-qemu share        "decls" "Host dirs to make available as network shares for the guest, as space separated list of »name:host-path,options«. E.g. »--share='foo:/home/user/foo,readonly=on bar:/tmp/bar«. In the VM the share can be mounted with: »$ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo«."
 declare-flag run-qemu virtio-blk        "" "Pass the system's disks/images as virtio disks, instead of using AHCI+IDE. Default iff »boot.initrd.availableKernelModules« includes »virtio_blk« (because it requires that driver)."
 function run-qemu {
     if [[ ${args[install]:-} && ! ${argv[0]:-} ]] ; then argv[0]=/tmp/nixos-vm/@{config.installer.outputName:-@{config.system.name}}/ ; fi
@@ -158,7 +158,7 @@ function run-qemu {
         if [[ ! -e $disk ]] ; then args[install]=always ; fi
     done ; fi
     if [[ ${args[install]:-} == always ]] && [[ ! ${args[dry-run]:-} ]] ; then (
-        if [[ ! ${args[trace]:-} ]] && [[! ${args[debug]:-} ]] ; then args[quiet]=1 ; fi
+        if [[ ! ${args[trace]:-} ]] && [[ ! ${args[debug]:-} ]] ; then args[quiet]=1 ; fi
         args[no-inspect]=1 ; install-system "$diskImages" || exit
     ) || return ; fi
 
@@ -176,7 +176,7 @@ declare-flag run-qemu,install-system,'*' vm-mem         "num" "VM RAM in MiB (»
 declare-flag run-qemu,install-system,'*' vm-smp         "num" "Number of guest CPU cores."
 declare-flag run-qemu,install-system,'*' vm-usb-port   "path" "A physical USB port (or hub) to pass to the guest (e.g. a YubiKey for unlocking). Specified as »<bus>-<port>«, where bus and port refer to the physical USB port »/sys/bus/usb/devices/<bus>-<port>« (see »lsusb -tvv«). E.g.: »--vm-usb-port=3-1.1.1.4«."
 function apply-vm-args {
-    qemu+=( -m ${args[vm-mem]:-2048} )
+    qemu+=( -m ${args[vm-mem]:-4096} )
     if [[ ${args[vm-smp]:-} ]] ; then qemu+=( -smp ${args[vm-smp]} ) ; fi
 
     if [[ ${args[vm-usb-port]:-} ]] ; then local decl ; for decl in ${args[vm-usb-port]//:/ } ; do

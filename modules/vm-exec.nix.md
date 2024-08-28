@@ -156,7 +156,7 @@ in let hostModule = {
         fileSystems = lib.mkVMOverride {
             "/nix/var/nix/db.lower" = {
                 fsType = "9p"; device = "nix-var-nix-db"; neededForBoot = true;
-                options = [ "trans=virtio" "version=9p2000.L"  "msize=4194304" "ro" ];
+                options = [ "trans=virtio" "version=9p2000.L" "msize=4194304" "ro" ];
             };
             "/nix/store".options = lib.mkAfter [ "ro" "msize=4194304" ];
             "/nix/store".mountPoint = lib.mkForce "/nix/store.lower";

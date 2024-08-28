@@ -52,8 +52,8 @@ function gen-key-home-composite {( set -eu # 1: usage, 2: user
     if [[ ${!userPasswords[@]} && ${userPasswords[$user]:-} ]] ; then
         password=${userPasswords[$user]}
     else
-        password=$(prompt-new-password "for the user account »$user« (as component for key »(@{config.networking.hostName}:)$usage«)")
-        if [[ ! $password ]] ; then \exit 1 ; fi
+        password=$( prompt-new-password "for the user account »$user« (as component for key »(@{config.networking.hostName}:)$usage«)" )
+        if [[ ! $password ]] ; then \exit 1 ; fi ; userPasswords[$user]=$password # TODO: won't propagate
     fi
     { cat "$keystore"/home/"$user".key && cat <<<"$password" ; } | sha256sum | head -c 64
 )}
@@ -66,8 +66,8 @@ function gen-key-home-yubikey {( set -eu # 1: usage, 2: serialAndSlotAndUser(as 
     if [[ ${!userPasswords[@]} && ${userPasswords[$user]:-} ]] ; then
         password=${userPasswords[$user]}
     else
-        password=$(prompt-new-password "for the user account »$user« (as YubiKey challenge for key »:$usage«)")
-        if [[ ! $password ]] ; then \exit 1 ; fi
+        password=$( prompt-new-password "for the user account »$user« (as YubiKey challenge for key »:$usage«)" )
+        if [[ ! $password ]] ; then \exit 1 ; fi ; userPasswords[$user]=$password # TODO: won't propagate
     fi
     gen-key-yubikey-challenge "$usage" "$serial:$slot:home-$user=$password" true "»${user}«'s password (to create key »:${usage}«)"
 )}

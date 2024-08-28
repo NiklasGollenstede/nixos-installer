@@ -45,6 +45,12 @@ function prompt-new-password {( set -u # 1: usage
     if [[ "$password1" != "$password2" ]] ; then printf 'Passwords mismatch.\n' 1>&2 ; \exit 1 ; fi
     printf %s "$password1" || exit
 )}
+function prompt-new-password-thrice {
+    local attempt ; for attempt in 2 3 x ; do
+        if userPasswords[$user]=$( prompt-new-password "$@" ) ; then break ; fi
+        if [[ $attempt == x ]] ; then \return 1 ; fi ; echo "Retrying ($attempt/3):"
+    done
+}
 
 ## If »secretFile« does not exist, interactively prompts up to three times for the secret to be stored in that file.
 declare-flag '*' no-optional-prompts "" "Skip prompting for (and thus saving) secret marked as optional."
@@ -67,16 +73,15 @@ function prompt-secret-as {( set -u # 1: what, 2: secretFile, 3?: owner[:[group]
 declare-flag install-system inspectScripts "" "When running installation hooks (»...*Commands« composed as Nix strings) print out and pause before each command. This works ... semi-well."
 
 ## Runs an installer hook script, optionally stepping through the script.
-function run-hook-script {( # 1: title, 2: scriptPath
-    trap - EXIT # start with empty traps for sub-shell
+function run-hook-script { # 1: title, 2: scriptPath
     if [[ ${args[inspectScripts]:-} && "$(cat "$2")" != $'' ]] ; then
         echo "Running $1 commands. For each command printed, press Enter to continue or Ctrl+C to abort the installation:" 1>&2
         # (this does not help against intentionally malicious scripts, it's quite easy to trick this)
         BASH_PREV_COMMAND= ; set -o functrace ; trap 'if [[ $BASH_COMMAND != "$BASH_PREV_COMMAND" ]] ; then echo -n "> $BASH_COMMAND" >&2 ; read ; fi ; BASH_PREV_COMMAND=$BASH_COMMAND' debug
     fi
-    set -e # The called script snippets should not rely on this, but neither should this function rely on the scripts correctly exiting on errors.
     source "$2"
-)}
+    set +o functrace ; trap - debug
+}
 
 ## Lazily builds a nix derivation at run time, instead of when building the script.
 #  When maybe-using packages that take long to build, instead of »at{some.package.out}«, use: »$( build-lazy at{some.package.drvPath!unsafeDiscardStringContext} out )«

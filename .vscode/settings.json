@@ -147,6 +147,7 @@
 		"partlabel", // linux
 		"partprobe", // program / function
 		"partuuid", // linux
+		"pbkdf", // option
 		"pflash", // cli arg
 		"pipefail", // bash
 		"pkgs", // nix

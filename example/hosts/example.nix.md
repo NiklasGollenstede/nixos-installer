@@ -36,7 +36,7 @@ in { preface = { # (any »preface« options have to be defined here)
     boot.loader.grub.enable = false;
 
     # Example of adding and/or overwriting setup/maintenance functions:
-    #installer.scripts.install-overwrite = { path = ../example/install.sh.md; order = 1500; };
+    #installer.scripts.install-overwrite.path = ../lib/install.sh.md;
 
     boot.initrd.systemd.enable = true;
 

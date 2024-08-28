@@ -36,6 +36,7 @@ in {
             Note that these commands are executed without any further sandboxing (i.e. when not using the VM installation mode, as root on the host).
             Partitions may be used via `/dev/disk/by-partlabel/`.${lib.optionalString mounted '' The target system is mounted at `$mnt`.''}
         ''; type = lib.types.lines; default = ""; }; in {
+            prepareInstaller = cmdOpt "early during preparation of the installer (right after CLI parsing)" false;
             postPartition = cmdOpt "after partitioning the disks" false;
             postFormat = cmdOpt "after formatting the partitions with filesystems" false;
             postMount = cmdOpt "after mounting all filesystems" true;
@@ -47,7 +48,7 @@ in {
             type = lib.types.nullOr lib.types.str; default = null;
         };
         build.scripts = lib.mkOption {
-            type = lib.types.functionTo lib.types.str;  internal = true; readOnly = true;
+            type = lib.types.functionTo lib.types.str; internal = true; readOnly = true;
             default = context: "${lib.fun.substituteImplicit { # This replaces the `@{}` references in the scripts with normal bash variables that hold serializations of the Nix values they refer to.
                 inherit pkgs; scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues cfg.scripts);
                 context = { inherit config options pkgs; inherit (moduleArgs) inputs; } // context;
@@ -58,7 +59,7 @@ in {
 
     config = {
         ${installer} = {
-            scripts = lib.mapAttrs (name: path: lib.mkOptionDefault { inherit path; }) (lib.self.setup-scripts);
+            scripts = lib.mapAttrs (name: path: lib.mkOptionDefault { inherit path; order = 750; }) (lib.self.setup-scripts);
         };
     };
 

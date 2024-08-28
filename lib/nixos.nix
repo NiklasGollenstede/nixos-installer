@@ -28,20 +28,26 @@ in rec {
         extraModules ? [ ], moduleArgs ? { }, nixosArgs ? { },
         nixosSystem ? inputs.nixpkgs.lib.nixosSystem,
         buildPlatform ? null,
-    }: nixosSystem (nixosArgs // {
+    }: nixosSystem (nixosArgs // (let args = {
         #system = null; # (This actually does nothing more than setting »config.nixpkgs.system« (which is the same as »config.nixpkgs.buildPlatform.system«) and can be null/unset here.)
 
         modules = (nixosArgs.modules or [ ]) ++ [ { imports = [ # Anything specific to only this evaluation of the module tree should go here.
-            (let
+            (let # mainModule
                 module = if (builtins.isPath mainModule) || (builtins.isString mainModule) then (importWrapped inputs mainModule).module else mainModule;
-                bindName = func: lib.setFunctionArgs (args: func (args // { inherit name; })) (builtins.removeAttrs (lib.functionArgs func) [ "name" ]);
-                bindToModule = module: if lib.isFunction module then bindName module else if module?imports then module // { imports = map bindToModule module.imports; } else module;
-            in bindToModule module) # ensure that in the main module, the "name" parameter is available during the import stage already
+                # ensure that in the main module, the "name" parameter is available during the import stage already:
+                bindName2function = func: lib.setFunctionArgs (args: func (args // { inherit name; })) (builtins.removeAttrs (lib.functionArgs func) [ "name" ]);
+                bindName2module = module: if lib.isFunction module then bindName2function module else if module?imports then module // { imports = map bindName2module module.imports; } else module;
+            in bindName2module module)
             { _module.args.name = lib.mkOverride 0 name; } # (specialisations can somehow end up with the name »configuration«, which is very incorrect)
             { networking.hostName = name; }
+            # containers may or may not want to inherit extraModules (but it is easy to add), but there is no reason not to inherit specialArgs:
+            { options.containers = lib.mkOption { type = lib.types.attrsOf (lib.types.submodule (_: { config = {
+                specialArgs = builtins.mapAttrs (_: lib.mkDefault) args.specialArgs; # imports = args.extraModules;
+            }; })); }; }
+            # `specializations` use `noUserModules`, which inherit specialArgs and extraModules, or `extendModules` inherits all modules and arguments. VM-variants also use `extendModules`.
         ]; _file = "${dirname}/nixos.nix#modules"; } ];
 
-        extraModules = (nixosArgs.extraModules or [ ]) ++ modules ++ extraModules ++ [ { imports = [ (args: {
+        extraModules = (nixosArgs.extraModules or [ ]) ++ modules ++ extraModules ++ [ { imports = [ (_: {
             # These are passed as »extraModules« module argument and can thus be reused when defining containers and such (so define as much stuff as possible here).
             # There is, unfortunately, no way to directly pass modules into all containers. Each container will need to be defined with »config.containers."${name}".config.imports = extraModules«.
             # (One could do that automatically by defining »options.security.containers = lib.mkOption { type = lib.types.submodule (cfg: { options.config = lib.mkOption { apply = _:_.extendModules { modules = extraModules; }; }); }«.)
@@ -57,7 +63,7 @@ in rec {
         specialArgs = (nixosArgs.specialArgs or { }) // { inherit inputs; };
         # (This is already set during module import, while »_module.args« only becomes available during module evaluation (before that, using it causes infinite recursion). Since it can't be ensured that this is set in every circumstance where »extraModules« are being used, it should generally not be used to set custom arguments.)
 
-    });
+    }; in args));
 
     # Given either a list (or attr set) of »files« (paths to ».nix« or ».nix.md« files for dirs with »default.nix« files in them) or a »dir« path (and optionally a list of base names to »exclude« from it), this builds the NixOS configuration for each host (per file) in the context of all configs provided.
     # If »files« is an attr set, exactly one host with the attribute's name as hostname is built for each attribute. Otherwise the default is to build for one host per configuration file, named as the file name without extension or the sub-directory name. Setting »${preface'}.instances« can override this to build the same configuration for those multiple names instead (the specific »name« is passed as additional »moduleArgs« to the modules and can thus be used to adjust the config per instance).
@@ -77,11 +83,14 @@ in rec {
         in (mapMergeUnique (name: { "${name}" = let
             preface = getPreface inputs (moduleArgs // { inherit preface; }) mainModule name; # (call again, with name)
         in { inherit preface; } // (mkNixosConfiguration (let systemArgs = (
-            builtins.removeAttrs args [ "files" "dir" "exclude" ]
+            builtins.removeAttrs args [ "files" "dir" "exclude" "prefix" ]
         ) // {
             inherit name mainModule;
             moduleArgs = (moduleArgs // { inherit preface; });
-            nixosArgs = (args.nixosArgs or { }) // { specialArgs = (args.nixosArgs.specialArgs or { }) // { inherit preface; }; }; # make this available early, and only for the main evaluation (+specialisations, -containers)
+            nixosArgs = (args.nixosArgs or { }) // {
+                specialArgs = (args.nixosArgs.specialArgs or { }) // { inherit preface; }; # make this available early, and only for the main evaluation (+specialisations +containers)
+                prefix = (args.nixosArgs.prefix or [ ]) ++ ((args.prefix or (_: [ ])) name);
+            };
             extraModules = (args.extraModules or [ ]) ++ [ { imports = [ (args: {
                 options.${preface'} = {
                     instances = lib.mkOption { description = "List of host names to instantiate this host config for, instead of just for the file name."; type = lib.types.listOf lib.types.str; readOnly = true; } // (lib.optionalAttrs (!preface?instances) { default = instances; });
@@ -123,6 +132,8 @@ in rec {
         moduleArgs ? { },
         # The »nixosSystem« function defined in »<nixpkgs>/flake.nix«, or equivalent.
         nixosSystem ? inputs.nixpkgs.lib.nixosSystem,
+        # Attribute path labels to prepend to option names/paths. Useful for debugging when building multiple systems at once.
+        prefix ? (name: [ "[${if renameOutputs == false then name else renameOutputs name}]" ]),
         # If provided, this will be set as »config.nixpkgs.buildPlatform« for all hosts, which in turn enables cross-compilation for all hosts whose »config.nixpkgs.hostPlatform« (the architecture they will run on) does not expand to the same value. Without this, building for other platforms may still work (slowly) if »boot.binfmt.emulatedSystems« on the building system is configured for the respective target(s).
         buildPlatform ? null,
         ## The platforms for which the setup scripts (installation & maintenance/debugging) will be defined. Should include the ».buildPlatform« and/or the target system's »config.nixpkgs.hostPlatform«.
@@ -134,7 +145,7 @@ in rec {
     ... }: let
         getName = if renameOutputs == false then (name: name) else renameOutputs;
         otherArgs = (builtins.removeAttrs args [ "hosts" "moduleInputs" "overlayInputs" "renameOutputs" "asDefaultPackage" ]) // {
-            inherit inputs modules overlays moduleArgs nixosSystem buildPlatform extraModules;
+            inherit inputs modules overlays moduleArgs nixosSystem buildPlatform extraModules prefix;
             nixosArgs = (args.nixosArgs or { }) // { modules = (args.nixosArgs.modules or [ ]) ++ [ { imports = [ (args: {
                 ${installer}.outputName = getName args.config._module.args.name;
             }) ]; _file = "${dirname}/nixos.nix#mkSystemsFlake-extraModule"; } ]; };

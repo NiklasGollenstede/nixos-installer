@@ -4,7 +4,7 @@
 # Installer Script Overrides (Example)
 
 This is an example on how to customize the default installation process.
-The [`config.installer.commands.*`](../modules/installer.nix.md) can be used for some per-host customization, but for further reaching changes that are supposed to affect all hosts in a  configuration, it may be necessary or more appropriate to extend/override the [default installer functions](../lib/setup-scripts/).
+The [`config.installer.commands.*`](../../modules/installer.nix.md) can be used for some per-host customization, but for further reaching changes that are supposed to affect all hosts in a  configuration, it may be necessary or more appropriate to extend/override the [default installer functions](../../lib/setup-scripts/).
 
 This file would need to be included in the configuration like this:
 ```nix
@@ -32,7 +32,7 @@ declare-command my-thing withThese coolArguments << 'EOD'
 This does my thing with these cool arguments -- duh!
 EOD
 declare-flag my-thing laser-color COLOR "Color of the laser used for my thing."
-function run-qemu { # 1: withThese, 2: coolArguments
+function my-thing { # 1: withThese, 2: coolArguments
     local withThese=$1
     local coolThings=$2
     echo "I am playing $withThese to shoot $coolArguments with ${args[laser-color]:-red} lasers!"

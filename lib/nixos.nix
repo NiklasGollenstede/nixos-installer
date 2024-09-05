@@ -272,7 +272,7 @@ in rec {
         source ${inputs.functions.lib.bash.generic-arg-verify}
         source ${inputs.functions.lib.bash.generic-arg-help}
         source ${inputs.functions.lib.bash.prepend_trap}
-        ${system.config.${installer}.build.scripts { native = pkgs; }}
+        ${system.config.${installer}.build.scripts.override (old: { context = old.context // { native = pkgs; }; })}
         if [[ ''${args[help]:-} ]] ; then (
             functionDoc= ; while IFS= read -u3 -r name ; do
                 functionDoc+=$'\n\n    '"$name"$'\n        '"''${allowedCommands[$name]//$'\n'/$'\n        '}" #$'\n\n'

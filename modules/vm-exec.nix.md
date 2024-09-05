@@ -121,8 +121,7 @@ in let hostModule = {
 
             # Set up NATed networking:
             cat /etc/hosts >/etc/hosts.cp ; rm /etc/hosts ; mv /etc/hosts.cp /etc/hosts
-            perl -pe 's/127.0.0.[12](?! localhost)/# /' -i /etc/hosts
-            perl -pe 's/::1(?! localhost)/# /' -i /etc/hosts
+            $toplevel/sw/bin/perl -pe 's/(127.0.0.[12]|::1)(?! localhost)/# /' -i /etc/hosts
             { printf '10.0.2.2 ' ; cat /tmp/xchg/host ; } >>/etc/hosts
             ip addr add 10.0.2.15/24 dev eth0
             ip link set dev eth0 up
@@ -134,7 +133,10 @@ in let hostModule = {
             printf '%s\n' 'root:x:0:0:root:/root:/bin/bash' >/etc/passwd
             printf '%s\n' 'root:x:0:' 'nixbld:x:30000:' >/etc/group
             export HOME=/root USER=root ; mkdir -p -m 700 $HOME
+
             PATH=/run/current-system/sw/bin ; rm -f /bin /sbin ; unset LD_LIBRARY_PATH
+            mkdir -p /bin ; ln -sfT /run/current-system/sw/bin/sh /bin/sh
+            mkdir -p /usr/bin ; ln -sfT /run/current-system/sw/bin/env /usr/bin/env
 
             console=/dev/ttyS0 ; if [[ -e /tmp/xchg/initrd-console ]] ; then console=/dev/console ; fi # (does this even make a difference?)
             if [[ -e /tmp/xchg/quiet ]] ; then printf '\n%s\n' 'magic:cm4alv0wly79p6i4aq32hy36i...' >$console ; fi

@@ -44,7 +44,7 @@ function prepare-installer { # 1: diskPaths
 
     run-hook-script 'Prepare Installer' @{config.installer.commands.prepareInstaller!writeText.prepareInstallerCommands} || exit
 
-    if [[ ! ${args[disks]:-} ]] ; then args[disks]=${1:?"The disks flag or the first positional argument must specify the path(s) to the disk(s) and/or image file(s) to install to"} ; shift ; fi
+    if [[ ! ${args[disks]:-} ]] ; then args[disks]=${1:?"The --disks= flag or the first positional argument must specify the path(s) to the disk(s) and/or image file(s) to install to"} ; shift ; fi
 
     umask g-w,o-w # Ensure that files created without explicit permissions are not writable for group and other.
 

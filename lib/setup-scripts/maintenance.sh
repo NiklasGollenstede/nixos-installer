@@ -47,16 +47,16 @@ function register-vbox {(
     echo " ssh $(@{native.inetutils}/bin/hostname) VBoxManage controlvm $vmName screenshotpng /dev/stdout | display"
 )}
 
-declare-command run-qemu diskImages qemuArgs... << 'EOD'
+declare-command run-qemu '[--disks=]disks' qemuArgs... << 'EOD'
 Runs a host in a QEMU VM, directly from its bootable disks, without requiring any change in it's configuration.
 This function infers many qemu options from the target system's configuration and the current host system.
-»diskImages« may be passed in the same format as to the installer. Any image files passed are ensured to be loop-mounted. »root« may also pass device paths.
+»disks« may be passed in the same format as to the installer. Any image files passed are ensured to be loop-mounted. »root« may also pass device paths.
 EOD
 declare-flag run-qemu dry-run           "" "Instead of running the (main) qemu (and install) command, only print it."
 declare-flag run-qemu efi               "" "Treat the target system as EFI system, even if not recognized as such automatically."
 declare-flag run-qemu efi-vars      "path" "For »--efi« systems, path to a file storing the EFI variables. The default is in »XDG_RUNTIME_DIR«, i.e. it does not persist across host reboots."
 declare-flag run-qemu graphic           "" "Open a graphical window even of the target system logs to serial and not (explicitly) TTY1."
-declare-flag run-qemu install "[1|always]" "If any of the guest system's disk images does not exist, perform the its installation before starting the VM. If set to »always«, always install before starting the VM. With this flag set, »diskImages« defaults to paths in »/tmp/."
+declare-flag run-qemu install "[1|always]" "If any of the guest system's disk images does not exist, perform the its installation before starting the VM. If set to »always«, always install before starting the VM. With this flag set, »disks« defaults to paths in »/tmp/."
 declare-flag run-qemu no-kvm            "" "Do not try to use (or complain about the unavailability of) KVM."
 declare-flag run-qemu nat-fw    "forwards" "Port forwards to the guest's NATed NIC. E.g: »--nat-fw=:8000-:8000,:8001-:8001,127.0.0.1:2022-:22«."
 declare-flag run-qemu no-nat            "" "Do not provide a NATed NIC to the guest."
@@ -70,9 +70,9 @@ $ ... --nic=vde,sock=/tmp/vm-net # multiple times"
 declare-flag run-qemu no-serial         "" "Do not connect the calling terminal to a serial adapter the guest can log to and open a terminal on the guests serial, as would be the default if the guests logs to ttyS0."
 declare-flag run-qemu share        "decls" "Host dirs to make available as network shares for the guest, as space separated list of »name:host-path,options«. E.g. »--share='foo:/home/user/foo,readonly=on bar:/tmp/bar«. In the VM the share can be mounted with: »$ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo«."
 declare-flag run-qemu virtio-blk        "" "Pass the system's disks/images as virtio disks, instead of using AHCI+IDE. Default iff »boot.initrd.availableKernelModules« includes »virtio_blk« (because it requires that driver)."
-function run-qemu {
-    if [[ ${args[install]:-} && ! ${argv[0]:-} ]] ; then argv[0]=/tmp/nixos-vm/@{config.installer.outputName:-@{config.system.name}}/ ; fi
-    diskImages=${argv[0]:?} ; argv=( "${argv[@]:1}" )
+function run-qemu { # 1?: disks, ...: qemuArgs
+    if [[ ${args[install]:-} && ! ${1:-} && ! ${args[disks]:-} ]] ; then args[disks]=/tmp/nixos-vm/@{config.installer.outputName:-@{config.system.name}}/ ; fi
+    if [[ ! ${args[disks]:-} ]] ; then args[disks]=${1:?"The --disks= flag or the first positional argument must specify the path(s) to the disk(s) and/or image file(s) to install to, or the --install flag must be set to enable an automatic fallback"} ; shift ; fi
 
     local qemu=( )
 
@@ -81,12 +81,12 @@ function run-qemu {
         if [[ ! ${args[no-kvm]:-} && -r /dev/kvm && -w /dev/kvm ]] ; then
             # For KVM to work, vBox must not be running anything at the same time (and vBox hangs on start if qemu runs). Pass »--no-kvm« and accept ~10x slowdown, or stop vBox.
             qemu+=( -enable-kvm -cpu host )
-            if [[ ! ${args[smp]:-} ]] ; then qemu+=( -smp 4 ) ; fi # else the emulation is single-threaded anyway
         else
             if [[ ! ${args[no-kvm]:-} && ! ${args[quiet]:-} ]] ; then
                 echo "KVM is not available (for the current user). Running without hardware acceleration." 1>&2
             fi
             qemu+=( -machine accel=tcg ) # this may suppress warnings that qemu is using tcg (slow) instead of kvm
+            args[vm-smp]=1 # the emulation is single-threaded anyway
         fi
     else
         qemu=( $( build-lazy @{native.qemu_full.drvPath!unsafeDiscardStringContext} )/bin/qemu-system-@{pkgs.system%%-linux} ) || return
@@ -109,9 +109,9 @@ function run-qemu {
 #       qemu+=( -kernel @{config.system.build.kernel}/Image -initrd @{config.system.build.initialRamdisk}/initrd -append "$(echo -n "@{config.boot.kernelParams[@]}")" )
 #   fi
 
-    if [[ $diskImages == */ ]] ; then
-        disks=( ${diskImages}primary.img ) ; for name in "@{!config.setup.disks.devices[@]}" ; do if [[ $name != primary ]] ; then disks+=( ${diskImages}${name}.img ) ; fi ; done
-    else disks=( ${diskImages//:/ } ) ; fi
+    if [[ ${args[disks]} == */ ]] ; then
+        disks=( ${args[disks]}primary.img ) ; for name in "@{!config.setup.disks.devices[@]}" ; do if [[ $name != primary ]] ; then disks+=( ${args[disks]}${name}.img ) ; fi ; done
+    else disks=( ${args[disks]//:/ } ) ; fi
 
     [[ ' '"@{boot.initrd.availableKernelModules[@]}"' ' != *' 'virtio_blk' '* ]] || args[virtio-blk]=1
     local index ; for index in ${!disks[@]} ; do
@@ -159,10 +159,10 @@ function run-qemu {
     done ; fi
     if [[ ${args[install]:-} == always ]] && [[ ! ${args[dry-run]:-} ]] ; then (
         if [[ ! ${args[trace]:-} ]] && [[ ! ${args[debug]:-} ]] ; then args[quiet]=1 ; fi
-        args[no-inspect]=1 ; install-system "$diskImages" || exit
+        args[no-inspect]=1 ; install-system || exit
     ) || return ; fi
 
-    qemu+=( "${argv[@]}" )
+    qemu+=( "$@" )
     if [[ ${args[dry-run]:-} ]] ; then
         echo "${qemu[@]}"
     else
@@ -172,12 +172,11 @@ function run-qemu {
     # https://askubuntu.com/questions/54814/how-can-i-ctrl-alt-f-to-get-to-a-tty-in-a-qemu-session
 }
 
-declare-flag run-qemu,install-system,'*' vm-mem         "num" "VM RAM in MiB (»qemu -m«)."
-declare-flag run-qemu,install-system,'*' vm-smp         "num" "Number of guest CPU cores."
+declare-flag run-qemu,install-system,'*' vm-mem         "num" "VM RAM in MiB (»qemu -m«, default: 4096)."
+declare-flag run-qemu,install-system,'*' vm-smp         "num" "Number of guest CPU cores (default: 4)."
 declare-flag run-qemu,install-system,'*' vm-usb-port   "path" "A physical USB port (or hub) to pass to the guest (e.g. a YubiKey for unlocking). Specified as »<bus>-<port>«, where bus and port refer to the physical USB port »/sys/bus/usb/devices/<bus>-<port>« (see »lsusb -tvv«). E.g.: »--vm-usb-port=3-1.1.1.4«."
 function apply-vm-args {
-    qemu+=( -m ${args[vm-mem]:-4096} )
-    if [[ ${args[vm-smp]:-} ]] ; then qemu+=( -smp ${args[vm-smp]} ) ; fi
+    qemu+=( -m ${args[vm-mem]:-4096} -smp ${args[vm-smp]:-4} )
 
     if [[ ${args[vm-usb-port]:-} ]] ; then local decl ; for decl in ${args[vm-usb-port]//:/ } ; do
         qemu+=( -usb -device usb-host,hostbus="${decl/-*/}",hostport="${decl/*-/}" )

@@ -39,6 +39,12 @@ in {
         targetPart = lib.mkOption { description = ''
             The `/dev/disk/by-{id,label,partlabel,partuuid,uuid}/*` path of the *disk partition* holding the filesystem that `extlinux` is installed to. This must be formatted with a filesystem that `extlinux` supports and mounted as (a parent of) {option}`.targetDir`. The disk on which the partition lies will have the bootloader section of its MBR replaced by `extlinux`'s.
         ''; type = lib.types.strMatching ''^/.*[^/]$''; default = targetMount.device; };
+        extraSettings = lib.mkOption { description = ''
+            Additional KEYWORD-value pairs to include at the beginning of `.extraConfig`.
+        ''; type = lib.types.attrsOf lib.types.str; default = { }; };
+        extraConfig = lib.mkOption { description = ''
+            Additional lines to insert at the very beginning of `extlinux.conf`.
+        ''; type = lib.types.lines; default = ""; };
         allowInstableTargetPart = lib.mkOption { internal = true; type = lib.types.bool; };
         showUI = (lib.mkEnableOption ''
             a simple graphical user interface to select the configuration to start during early boot
@@ -68,6 +74,7 @@ in {
 
         ${setup}.bootpart = { enable = lib.mkDefault true; mountpoint = lib.mkDefault cfg.targetDir; };
         boot.loader.extlinux.allowInstableTargetPart = lib.mkForce false;
+        boot.loader.extlinux.extraConfig = lib.mkBefore (lib.concatStringsSep "\n" (lib.mapAttrsToList (key: value: "${key} ${value}") cfg.extraSettings));
 
         system.boot.loader.id = "extlinux";
         system.build.installBootLoader = "${pkgs.writeShellScript "install-extlinux.sh" ''
@@ -100,6 +107,12 @@ in {
             else
                 : # delete library files?
             fi
+
+            ( extraConfig=${esc cfg.extraConfig} ; if [[ $extraConfig ]] ; then
+                cfg=$( cat ${esc cfg.targetDir}/extlinux/extlinux.conf )
+                # Insert it after the first (comment) (new)line:
+                <<<''${cfg/$'\n'/$'\n'$extraConfig$'\n'} cat > ${esc cfg.targetDir}/extlinux/extlinux.conf
+            fi )
         ''}";
 
         boot.loader.grub.enable = false;

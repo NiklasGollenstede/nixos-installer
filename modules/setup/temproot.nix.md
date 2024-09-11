@@ -184,7 +184,7 @@ in {
                 "/tmp" = { mode = "1777"; };
             };
             temproot.local.mounts = {
-                "/local" = { source = "system"; mode = "755"; };
+                "/local" = { source = "system"; mode = "755"; extraFsConfig = { neededForBoot = lib.mkIf (config.${setup}.temproot.remote.type == "none") (lib.mkDefault true); }; }; # (see "/remote")
                 "/nix" = { zfsProps = zfsNoSyncProps; mode = "755"; }; # this (or /nix/store) is required
                 "/var/log" = { source = "logs"; mode = "755"; };
                 # »/swap« is used by »cfg.swap.asPartition = false«

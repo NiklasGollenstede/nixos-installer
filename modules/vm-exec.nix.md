@@ -94,18 +94,15 @@ in let hostModule = {
         boot.initrd.systemd.enable = lib.mkVMOverride false;
         boot.initrd.postMountCommands = ''
             set -x
-            for fs in tmp/shared tmp/xchg nix/store.lower nix/var/nix/db.lower ; do
+
+            for fs in tmp/shared tmp/xchg nix/store nix/var/nix/.ro-db ; do
                 mkdir -p /$fs && mount --move $targetRoot/$fs /$fs || fail
             done
             chmod 1777 /tmp
 
-            # Nix want's to create lock files, even on read-only operations:
-            mkdir -p -m 755 /nix/var/nix/db.work /nix/var/nix/db.upper /nix/var/nix/db
-            mount -t overlay overlay -o lowerdir=/nix/var/nix/db.lower,workdir=/nix/var/nix/db.work,upperdir=/nix/var/nix/db.upper /nix/var/nix/db
-
-            # Nix insists on setting the ownership of »/nix/store« to »0:30000« (if run as root(?) and the current ownership is something else, e.g. when using »nix-user-chroot«):
-            mkdir -p -m 755 /nix/store.work /nix/store.upper /nix/store
-            mount -t overlay overlay -o lowerdir=/nix/store.lower,workdir=/nix/store.work,upperdir=/nix/store.upper /nix/store
+            # We want all store paths to be registered, and Nix want's to create lock files, even on read-only operations:
+            mkdir -p -m 755 /nix/var/nix/.rw-db/work /nix/var/nix/.wr-db/upper /nix/var/nix/db
+            mount -t overlay overlay -o lowerdir=/nix/var/nix/.ro-db,workdir=/nix/var/nix/.rw-db/work,upperdir=/nix/var/nix/.wr-db/upper /nix/var/nix/db
 
             # »/run/{booted,current}-system« is more for debugging than anything else, but changing »/lib/modules« makes modprobe use the full system's modules, instead of only the initrd ones:
             toplevel=$(dirname $stage2Init)
@@ -130,7 +127,7 @@ in let hostModule = {
 
             # »nix copy« complains without »nixbld« group:
             rm -f /etc/passwd /etc/group
-            printf '%s\n' 'root:x:0:0:root:/root:/bin/bash' >/etc/passwd
+            printf '%s\n' 'root:x:0:0:root:/root:/bin/sh' >/etc/passwd
             printf '%s\n' 'root:x:0:' 'nixbld:x:30000:' >/etc/group
             export HOME=/root USER=root ; mkdir -p -m 700 $HOME
 
@@ -154,20 +151,20 @@ in let hostModule = {
 
     }) ({
 
-        virtualisation.writableStore = false;
+        virtualisation.writableStore = true;
+        virtualisation.additionalPaths = lib.mkForce [ ];
         fileSystems = lib.mkVMOverride {
-            "/nix/var/nix/db.lower" = {
+            "/nix/var/nix/.ro-db" = {
                 fsType = "9p"; device = "nix-var-nix-db"; neededForBoot = true;
-                options = [ "trans=virtio" "version=9p2000.L" "msize=4194304" "ro" ];
+                options = [ "trans=virtio" "version=9p2000.L" "msize=2097152" "ro" ];
             };
-            "/nix/store".options = lib.mkAfter [ "ro" "msize=4194304" ];
-            "/nix/store".mountPoint = lib.mkForce "/nix/store.lower";
-        }; # mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 nix-var-nix-db /nix/var/nix/db
+            "/nix/store".overlay = { lowerdir = [ "/nix/.ro-store" ]; upperdir = "/nix/.rw-store/upper"; workdir = "/nix/.rw-store/work"; }; # (default from 24.11 onwards)
+        };
         virtualisation.qemu.options = [ "-virtfs local,path=/nix/var/nix/db,security_model=none,mount_tag=nix-var-nix-db,readonly=on" ]; # (doing this manually to pass »readonly«, to not ever corrupt the host's Nix DBs)
-        boot.resumeDevice = lib.mkVMOverride "";
 
     }) ({
 
+        boot.resumeDevice = lib.mkVMOverride "";
         fileSystems = lib.mkVMOverride { "/" = lib.mkForce {
             fsType = "tmpfs"; device = "tmpfs"; neededForBoot = true;
             options = [ "mode=1777" "noatime" "nosuid" "nodev" "size=50%" ];

@@ -92,7 +92,7 @@ in let hostModule = {
 
         # Instead of tearing down the initrd environment, adjust some mounts and run the »command« in the initrd:
         boot.initrd.systemd.enable = lib.mkVMOverride false;
-        boot.initrd.postMountCommands = ''
+        boot.initrd.postMountCommands = lib.mkAfter ''
             set -x
 
             for fs in tmp/shared tmp/xchg nix/store nix/var/nix/.ro-db ; do
@@ -158,7 +158,7 @@ in let hostModule = {
                 fsType = "9p"; device = "nix-var-nix-db"; neededForBoot = true;
                 options = [ "trans=virtio" "version=9p2000.L" "msize=2097152" "ro" ];
             };
-            "/nix/store".overlay = { lowerdir = [ "/nix/.ro-store" ]; upperdir = "/nix/.rw-store/upper"; workdir = "/nix/.rw-store/work"; }; # (default from 24.11 onwards)
+            "/nix/store" = lib.mkIf ((builtins.substring 0 5 inputs.nixpkgs.lib.version) < "24.11") { overlay = { lowerdir = [ "/nix/.ro-store" ]; upperdir = "/nix/.rw-store/upper"; workdir = "/nix/.rw-store/work"; }; }; # (default from 24.11 onwards)
         };
         virtualisation.qemu.options = [ "-virtfs local,path=/nix/var/nix/db,security_model=none,mount_tag=nix-var-nix-db,readonly=on" ]; # (doing this manually to pass »readonly«, to not ever corrupt the host's Nix DBs)
 

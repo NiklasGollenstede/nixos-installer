@@ -16,7 +16,7 @@ A set of composable [`setup-scripts`](./lib/setup-scripts/) can then [automatica
 The only thing that the scripts will interactively prompt for are external secrets (e.g., passwords), iff required by the new host.
 When using [`mkSystemsFlake`](./lib/nixos.nix#mkSystemsFlake), the installation can be started with:
 ```bash
-nix run .'#'hostname -- install-system /path/to/disk
+nix run .'#'hostname -- install-system --disks=/path/to/disk
 ```
 Help output with information on available commands and flags is [available here](https://github.com/NiklasGollenstede/nixos-installer/wiki/−−help-Output) or via:
 ```bash

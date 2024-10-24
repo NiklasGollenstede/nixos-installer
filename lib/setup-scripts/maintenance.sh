@@ -47,16 +47,15 @@ function register-vbox {(
     echo " ssh $(@{native.inetutils}/bin/hostname) VBoxManage controlvm $vmName screenshotpng /dev/stdout | display"
 )}
 
-declare-command run-qemu '[--disks=]disks' qemuArgs... << 'EOD'
+declare-command run-qemu '[--disks=diskPaths]' qemuArgs... << 'EOD'
 Runs a host in a QEMU VM, directly from its bootable disks, without requiring any change in it's configuration.
 This function infers many qemu options from the target system's configuration and the current host system.
-»disks« may be passed in the same format as to the installer. Any image files passed are ensured to be loop-mounted. »root« may also pass device paths.
 EOD
 declare-flag run-qemu dry-run           "" "Instead of running the (main) qemu (and install) command, only print it."
 declare-flag run-qemu efi               "" "Treat the target system as EFI system, even if not recognized as such automatically."
 declare-flag run-qemu efi-vars      "path" "For »--efi« systems, path to a file storing the EFI variables. The default is in »XDG_RUNTIME_DIR«, i.e. it does not persist across host reboots."
 declare-flag run-qemu graphic           "" "Open a graphical window even of the target system logs to serial and not (explicitly) TTY1."
-declare-flag run-qemu install "[1|always]" "If any of the guest system's disk images does not exist, perform the its installation before starting the VM. If set to »always«, always install before starting the VM. With this flag set, »disks« defaults to paths in »/tmp/."
+declare-flag run-qemu install "[1|always]" "If any of the guest system's disk images does not exist, perform the its installation before starting the VM. If set to »always«, always install before starting the VM."
 declare-flag run-qemu no-kvm            "" "Do not try to use (or complain about the unavailability of) KVM."
 declare-flag run-qemu nat-fw    "forwards" "Port forwards to the guest's NATed NIC. E.g: »--nat-fw=:8000-:8000,:8001-:8001,127.0.0.1:2022-:22«."
 declare-flag run-qemu no-nat            "" "Do not provide a NATed NIC to the guest."
@@ -70,9 +69,7 @@ $ ... --nic=vde,sock=/tmp/vm-net # multiple times"
 declare-flag run-qemu no-serial         "" "Do not connect the calling terminal to a serial adapter the guest can log to and open a terminal on the guests serial, as would be the default if the guests logs to ttyS0."
 declare-flag run-qemu share        "decls" "Host dirs to make available as network shares for the guest, as space separated list of »name:host-path,options«. E.g. »--share='foo:/home/user/foo,readonly=on bar:/tmp/bar«. In the VM the share can be mounted with: »$ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo«."
 declare-flag run-qemu virtio-blk        "" "Pass the system's disks/images as virtio disks, instead of using AHCI+IDE. Default iff »boot.initrd.availableKernelModules« includes »virtio_blk« (because it requires that driver)."
-function run-qemu { # 1?: disks, ...: qemuArgs
-    if [[ ${args[install]:-} && ! ${1:-} && ! ${args[disks]:-} ]] ; then args[disks]=/tmp/nixos-vm/@{config.installer.outputName:-@{config.system.name}}/ ; fi
-    if [[ ! ${args[disks]:-} ]] ; then args[disks]=${1:?"The --disks= flag or the first positional argument must specify the path(s) to the disk(s) and/or image file(s) to install to, or the --install flag must be set to enable an automatic fallback"} ; shift ; fi
+function run-qemu { # ...: qemuArgs
 
     local qemu=( )
 

@@ -245,7 +245,7 @@ in {
             keystore.keys."luks/swap-${hash}/0" = lib.mkIf cfg.swap.encrypted (lib.mkOptionDefault "random");
         };
         swapDevices = [ { inherit device; } ];
-        boot.resumeDevice = device;
+        boot.resumeDevice = lib.mkDefault device;
 
 
     })) (lib.mkIf (cfg.swap.size != null && !cfg.swap.asPartition) {
@@ -346,7 +346,7 @@ in {
 
     })) (lib.mkIf (cfg.remote.type == "none") {
 
-        systemd.tmpfiles.rules = [ (lib.fun.mkTmpfile { type = "L+"; path = "/remote"; argument = "/local"; }) ]; # for compatibility (but use a symlink to make clear that this is not actually a separate mount)
+        systemd.tmpfiles.rules = [ (lib.fun.mkTmpfile { type = "L+"; path = "/remote"; argument = "local"; }) ]; # for compatibility (but use a symlink to make clear that this is not actually a separate mount)
 
 
     }) ] ++ (map (type: (lib.mkIf (cfg.${type}.type == "bind") {

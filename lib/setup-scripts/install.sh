@@ -3,7 +3,7 @@
 # NixOS Installation
 ##
 
-declare-command install-system '[--disks=]diskPaths' << 'EOD'
+declare-command install-system '[--disks=diskPaths]' << 'EOD'
 This command installs a NixOS system to local disks or image files.
 It gets all the information it needs from the system's NixOS configuration -- except for the path(s) of the target disk(s) / image file(s); see the »--disks=« flag.
 
@@ -22,12 +22,16 @@ What the installation does is defined solely by the target host's NixOS configur
 The "Installation" section of each host's documentation should contain host specific details, if any.
 Various »FLAG«s below affect how the installation is performed (in VM, verbosity, debugging, ...).
 EOD
-declare-flag install-system disks "diskPaths" "The disk(s) (to be) used by this system installation.
+declare-flag install-system,'*' disks "diskPaths" "The disk(s) (to be) used by this system installation.
 If »diskPaths« points to something in »/dev/«, then it is directly used as block device, otherwise »diskPaths« is (re-)created as raw image file and then used as loop device.
-For hosts that install to multiple disks, pass a :-separated list of »<disk-name>=<path>« pairs (the name may be omitted only for the "default" disk)."
-function install-system {( # 1: diskPaths
+For hosts that install to multiple disks, pass a colon-separated list of »<disk-name>=<path>« pairs (the name may be omitted only for the "default" disk).
+If a directory path ending in a forward slash is passed, it is expanded to ».img« files in that directory, one per (and named after) declared disk.
+Defaults to »/tmp/nixos-img-@{config.installer.outputName:-@{config.system.name}}/«."
+if [[ ! ${args[disks]:-} ]] ; then args[disks]=/tmp/nixos-img-@{config.installer.outputName:-@{config.system.name}}/ ; fi
+
+function install-system {(
     trap - EXIT # start with empty traps for sub-shell
-    prepare-installer "$@" || exit
+    prepare-installer || exit
     do-disk-setup || exit
     install-system-to $mnt || exit
 )}
@@ -40,11 +44,9 @@ See also the »--no-vm« and »--vm-shared=« flags."
 declare-flag install-system no-vm "" "Never perform the installation in a VM. Fail if not executed as »root«."
 
 ## Does some argument validation, performs some sanity checks, includes a hack to make installation work when nix isn't installed for root, and runs the installation in qemu (if requested).
-function prepare-installer { # 1: diskPaths
+function prepare-installer {
 
     run-hook-script 'Prepare Installer' @{config.installer.commands.prepareInstaller!writeText.prepareInstallerCommands} || exit
-
-    if [[ ! ${args[disks]:-} ]] ; then args[disks]=${1:?"The --disks= flag or the first positional argument must specify the path(s) to the disk(s) and/or image file(s) to install to"} ; shift ; fi
 
     umask g-w,o-w # Ensure that files created without explicit permissions are not writable for group and other.
 

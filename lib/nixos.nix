@@ -208,7 +208,7 @@ in rec {
             Examples:
 
                 Install the system »$host« to the image file »/tmp/system-$host.img«:
-                    $ nix run .#$host -- install-system /tmp/system-$host.img
+                    $ nix run .#$host -- install-system --disks=/tmp/system-$host.img
 
                 Test a fresh installation of »$host« in a qemu VM:
                     $ nix run .#$host -- run-qemu --install=always

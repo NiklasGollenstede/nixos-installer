@@ -9,11 +9,11 @@ Just to provide an example of what a host configuration using this set of librar
 
 To install the system to a (set of) virtual machine disk images, with `$hostname` as any of the `instances` below, run in `..`:
 ```bash
- nix run .'#'$hostname -- install-system /tmp/$hostname/
+ nix run .'#'$hostname -- install-system --disks=/tmp/$hostname/
 ```
 Then to boot the system in a qemu VM with KVM:
 ```bash
- nix run .'#'$hostname -- run-qemu /tmp/$hostname/
+ nix run .'#'$hostname -- run-qemu --disks=/tmp/$hostname/
 ```
 See `nix run .#$hostname -- --help` for options and more commands.
 

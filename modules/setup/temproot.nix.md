@@ -271,7 +271,7 @@ in {
         pool = builtins.head (builtins.split "/" cfg.temp.zfs.dataset);
     in {
 
-        boot.initrd.postDeviceCommands = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mkAfter ''
+        boot.initrd.postResumeCommands = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mkAfter ''
             echo '${description}'
             ( ${command} )
         '');

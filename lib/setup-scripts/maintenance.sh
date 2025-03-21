@@ -163,7 +163,10 @@ function run-qemu { # ...: qemuArgs
     if [[ ${args[dry-run]:-} ]] ; then
         echo "${qemu[@]}"
     else
-        ( set -x ; "${qemu[@]}" ) || return
+        echo + "${qemu[@]}" ; for _ in $( seq $( @{native.ncurses}/bin/tput lines ) ) ; do echo ; done
+        #sleep 5
+        #sleep 9999999
+        "${qemu[@]}" || return
     fi
 
     # https://askubuntu.com/questions/54814/how-can-i-ctrl-alt-f-to-get-to-a-tty-in-a-qemu-session

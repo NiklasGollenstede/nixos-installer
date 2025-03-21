@@ -108,7 +108,7 @@ in let module = {
     in {
         ${setup}.zfs.extraInitrdPools = keystorePools;
 
-        boot.initrd.postDeviceCommands = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mkAfter ''
+        boot.initrd.postResumeCommands = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mkAfter ''
             ${lib.concatStringsSep "\n" (map verbose.initrd-import-zpool cfg.extraInitrdPools)}
             ${verbose.initrd-load-keys}
         '');
@@ -127,39 +127,10 @@ in let module = {
     }) (lib.mkIf (config.boot.resumeDevice == "") { ## Disallow hibernation without fixed »resumeDevice«:
 
         boot.kernelParams = [ "nohibernate" "hibernate=no" ];
-        assertions = [ { # Ensure that none is overriding the above:
+        assertions = [ { # Ensure that no one is overriding the above:
             assertion = builtins.elem "nohibernate" config.boot.kernelParams;
             message = ''Hibernation with ZFS (and NixOS' initrd) without fixed »resumeDevice« can/will lead to pool corruption. Disallow it by setting »boot.kernelParams = [ "nohibernate" ]«'';
         } ];
-
-
-    }) (lib.mkIf (false && (config.boot.resumeDevice != "")) { ## Make resuming after hibernation safe with ZFS:
-        # or not: https://github.com/NixOS/nixpkgs/commit/c70f0473153c63ad1cf6fbea19f290db6b15291f
-
-        boot.kernelParams = [ "resume=${config.boot.resumeDevice}" ];
-        assertions = [ { # Just making sure ...
-            assertion = builtins.elem "resume=${config.boot.resumeDevice}" config.boot.kernelParams;
-            message = "When using ZFS and not disabling hibernation, make sure to set the »resume=« kernel parameter!";
-        } ];
-
-        boot.initrd.postDeviceCommands = let
-            inherit (config.system.build) extraUtils;
-        in (lib.mkBefore ''
-            # After hibernation, the pools MUST NOT be imported before resuming, as doing so can corrupt them.
-            # NixOS' mess of an initrd script does resuming after mounting FSs (which seems very unnecessarily late, resuming from a "file" doesn't need the FS to be mounted, does it?).
-            # This should generally run after all (also mapped) devices are created, but before any ZFS action, so do the hibernation resume here.
-            # But also only support a fixed »resumeDevice«. No guessing:
-
-            resumeInfo="$(udevadm info -q property "${config.boot.resumeDevice}" )"
-            if [ "$(echo "$resumeInfo" | sed -n 's/^ID_FS_TYPE=//p')" = "swsuspend" ]; then
-                resumeMajor="$(echo "$resumeInfo" | sed -n 's/^MAJOR=//p')"
-                resumeMinor="$(echo "$resumeInfo" | sed -n 's/^MINOR=//p')"
-                echo -n "Attempting to resume from hibernation (device $resumeMajor:$resumeMinor as ${config.boot.resumeDevice}) ..."
-                echo "$resumeMajor:$resumeMinor" > /sys/power/resume 2> /dev/null || echo "failed to wake from hibernation, continuing normal boot!"
-            fi
-        '');
-            #setsid ${extraUtils}/bin/ash -c "exec ${extraUtils}/bin/ash < /dev/$console >/dev/$console 2>/dev/$console"
-        boot.zfs = if (options.boot.zfs?allowHibernation) then { allowHibernation = true; } else { };
 
 
     }) (let ## Implement »cfg.pools.*.autoApplyDuringBoot« and »cfg.pools.*.autoApplyOnActivation«:
@@ -212,7 +183,7 @@ in let module = {
         }); };
     in {
 
-        boot.initrd.postDeviceCommands = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mkIf (anyPool "autoApplyDuringBoot") (lib.mkOrder 2000 ''
+        boot.initrd.postResumeCommands = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mkIf (anyPool "autoApplyDuringBoot") (lib.mkOrder 2000 ''
             ${ensure-datasets-for "autoApplyDuringBoot" extraUtils extraUtils}
         ''));
         boot.initrd.systemd.services = lib.mkIf (config.boot.initrd.systemd.enable) (lib.fun.mapMerge (pool: ensure-datasets-service pool true) (lib.attrValues cfg.pools));

@@ -4,6 +4,9 @@
 
 This module allows copying additional files to the boot partition when installing/updating the bootloader.
 
+There is `boot.loader.systemd-boot/grub.extraFiles`, but at least the implementations are awful (systemd's first deletes all old files, then copies them all again; grub's simply overwrites its files every time, ignoring old files).
+
+To delete previous files, one could: have a list of old files, read that as keys of a named array, add the to-be-installed files to the list of (potential) old files, install the new files and meanwhile remove each one installed from the array, delete all files left in the array (if they exist), write (only) the installed files to the list of (next time) old files.
 
 ## Implementation
 
@@ -39,6 +42,7 @@ in {
 
         tree = lib.mkOption { internal = true; readOnly = true; type = lib.types.package; };
 
+        # Each bootloader seems to keep an option like this separately ...
         targetDir = lib.mkOption { description = ''
             The where the files will be installed (copied) to. This has to be mounted when `nixos-rebuild boot/switch` gets called.
         ''; type = lib.types.strMatching ''^/.*[^/]$''; default = "/boot"; };

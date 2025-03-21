@@ -31,12 +31,13 @@ dirname: inputs: { config, pkgs, lib, utils, ... }: let lib = inputs.self.lib.__
     inherit (inputs.config.rename) setup installer;
     cfg = config.${setup}.keystore;
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
-    keystore = "/run/keystore-${hash}";
-    keystoreKeys = lib.attrValues (lib.filterAttrs (n: v: lib.fun.startsWith "luks/keystore-${hash}/" n) cfg.keys);
+    keystore = "/run/${cfg.name}";
+    keystoreKeys = lib.attrValues (lib.filterAttrs (n: v: lib.fun.startsWith "luks/${cfg.name}/" n) cfg.keys);
 in let module = {
 
     options = { ${setup}.keystore = {
         enable = lib.mkEnableOption "the use of a keystore partition to unlock various things during early boot";
+        name = lib.mkOption { type = lib.types.str; readOnly = true; default = "keystore-${hash}"; };
         enableLuksGeneration = (lib.mkEnableOption "the generation of a LUKS mapper configuration for each »luks/*/0« entry in ».keys«") // { default = true; example = false; };
         keys = lib.mkOption { description = "Keys declared to be generated during installation and then exist in the keystore for unlocking disks and such. See »${dirname}/keystore.nix.md« for much more information."; type = lib.types.attrsOf (lib.types.either (lib.types.nullOr lib.types.str) (lib.types.attrsOf lib.types.str)); default = { }; apply = keys: (
             lib.fun.mapMergeUnique (usage: methods: if methods == null then { } else if builtins.isString methods then { "${usage}" = methods; } else lib.fun.mapMerge (slot: method: if method == null then { } else { "${usage}/${slot}" = method; }) methods) keys
@@ -52,10 +53,10 @@ in let module = {
     config = let
     in lib.mkIf (cfg.enable) (lib.mkMerge [ ({
 
-        ${setup}.keystore.keys."luks/keystore-${hash}/0" = lib.mkOptionDefault "hostname"; # (This is the only key that the setup scripts unconditionally require to be declared.)
+        ${setup}.keystore.keys."luks/${cfg.name}/0" = lib.mkOptionDefault "hostname"; # (This is the only key that the setup scripts unconditionally require to be declared.)
         assertions = [ {
-            assertion = cfg.keys?"luks/keystore-${hash}/0";
-            message = ''At least one key (»0«) for »luks/keystore-${hash}« must be specified!'';
+            assertion = cfg.keys?"luks/${cfg.name}/0";
+            message = ''At least one key (»0«) for »luks/${cfg.name}« must be specified!'';
         } ];
 
     }) ({ ## Declare LUKS devices for all LUKS keys:
@@ -66,13 +67,13 @@ in let module = {
             label = builtins.substring 5 ((builtins.stringLength key) - 7) key;
         in { ${label} = {
             device = lib.mkDefault "/dev/disk/by-partlabel/${label}";
-            keyFile = lib.mkIf (label != "keystore-${hash}") (lib.mkDefault "/run/keystore-${hash}/luks/${label}/0.key");
+            keyFile = lib.mkIf (label != cfg.name) (lib.mkDefault "/run/${cfg.name}/luks/${label}/0.key");
             allowDiscards = lib.mkDefault true; # If attackers can observe trimmed blocks, then they can probably do much worse ...
         }; }) (lib.fun.filterMatching ''^luks/.*/0$'' (lib.attrNames cfg.keys)));
 
         boot.initrd.systemd.services = lib.mkIf (config.boot.initrd.systemd.enable) (lib.fun.mapMerge (key: let
             label = builtins.substring 5 ((builtins.stringLength key) - 7) key;
-        in if label == "keystore-${hash}" || (!config.boot.initrd.luks.devices?${label}) then { } else { "systemd-cryptsetup@${utils.escapeSystemdPath label}" = rec {
+        in if label == cfg.name || (!config.boot.initrd.luks.devices?${label}) then { } else { "systemd-cryptsetup@${utils.escapeSystemdPath label}" = rec {
             overrideStrategy = "asDropin"; # (could this be set via a x-systemd.after= crypttab option?)
             after = [ "systemd-cryptsetup@keystore\\x2d${hash}.service" ]; wants = after; # (this may be implicit if systemd knew about the /run/keystore-... mount point)
         }; }) (lib.fun.filterMatching ''^luks/.*/0$'' (lib.attrNames cfg.keys)));
@@ -80,11 +81,11 @@ in let module = {
 
     }) ({ ## Create and populate keystore during installation:
 
-        fileSystems.${keystore} = { fsType = "vfat"; device = "/dev/mapper/keystore-${hash}"; options = [ "ro" "nosuid" "nodev" "noexec" "noatime" "umask=0277" "noauto" ]; formatArgs = [ ]; };
+        fileSystems.${keystore} = { fsType = "vfat"; device = "/dev/mapper/${cfg.name}"; options = [ "ro" "nosuid" "nodev" "noexec" "noatime" "umask=0277" "noauto" ]; formatArgs = [ ]; };
 
-        ${setup}.disks.partitions."keystore-${hash}" = { type = lib.mkDefault "8309"; order = lib.mkDefault 1375; disk = lib.mkDefault "primary"; size = lib.mkDefault "32M"; };
+        ${setup}.disks.partitions.${cfg.name} = { type = lib.mkDefault "8309"; order = lib.mkDefault 1375; disk = lib.mkDefault "primary"; size = lib.mkDefault "32M"; };
         ${installer}.commands.postFormat = ''( : 'Copy the live keystore to its primary persistent location:'
-            tmp=$(mktemp -d) && ${pkgs.util-linux}/bin/mount "/dev/mapper/keystore-${hash}" $tmp && trap "${pkgs.util-linux}/bin/umount $tmp && rmdir $tmp" EXIT &&
+            tmp=$(mktemp -d) && ${pkgs.util-linux}/bin/mount "/dev/mapper/${cfg.name}" $tmp && trap "${pkgs.util-linux}/bin/umount $tmp && rmdir $tmp" EXIT &&
             ${pkgs.rsync}/bin/rsync -a ${keystore}/ $tmp/
         )'';
 
@@ -93,7 +94,7 @@ in let module = {
     }) (lib.mkIf (!(config.virtualisation.useDefaultFilesystems or false)) (let # (don't bother with any of this if »boot.initrd.luks.devices« is forced to »{ }« in »nixos/modules/virtualisation/qemu-vm.nix«)
     in lib.mkMerge [ ({
 
-        boot.initrd.luks.devices."keystore-${hash}".keyFile = lib.mkMerge [
+        boot.initrd.luks.devices.${cfg.name}.keyFile = lib.mkMerge [
             (lib.mkIf (cfg.unlockMethods.trivialHostname) "${pkgs.writeText "hostname" config.networking.hostName}")
             (lib.mkIf (cfg.unlockMethods.usbPartition) "/dev/disk/by-partlabel/bootkey-${hash}")
         ];
@@ -103,28 +104,21 @@ in let module = {
 
     }) (lib.mkIf (!config.boot.initrd.systemd.enable) { # Legacy initrd
 
-        boot.initrd.luks.devices."keystore-${hash}" = {
+        boot.initrd.luks.devices.${cfg.name} = {
             preLVM = true; # ensure the keystore is opened early (»preLVM« also seems to be pre zpool import, and it is the only option that affects the opening order)
             preOpenCommands = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) verbose.doOpenWithYubikey; # TODO: required?
             fallbackToPassword = true; # (might as well)
             postOpenCommands = ''
                 echo "Mounting ${keystore}"
                 mkdir -p ${keystore}
-                mount -o nodev,umask=0277,ro /dev/mapper/keystore-${hash} ${keystore}
+                mount -o nodev,umask=0277,ro /dev/mapper/${cfg.name} ${keystore}
             '';
         };
 
         boot.initrd.postMountCommands = ''
-            ${if (lib.any (lib.fun.matches "^home/.*$") (lib.attrNames cfg.keys)) then ''
-                echo "Transferring home key composites"
-                # needs to be available later to unlock the home on demand
-                mkdir -p /run/keys/home-composite/ ; chmod 551 /run/keys/home-composite/ ; cp -a ${keystore}/home/*.key /run/keys/home-composite/
-                for name in "$(ls /run/keys/home-composite/)" ; do chown "''${name:0:(-4)}": /run/keys/home-composite/"$name" ; done
-            '' else ""}
-
             echo "Closing ${keystore}"
             umount ${keystore} ; rmdir ${keystore}
-            cryptsetup close /dev/mapper/keystore-${hash}
+            cryptsetup close /dev/mapper/${cfg.name}
         '';
 
         boot.initrd.luks.yubikeySupport = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) true;
@@ -136,17 +130,17 @@ in let module = {
     }) (lib.mkIf (config.boot.initrd.systemd.enable) (let # Systemd initrd
 
         unlockWithYubikey = pkgs.writeShellScript "unlock-keystore" (let
-            dev = config.boot.initrd.luks.devices."keystore-${hash}";
+            dev = config.boot.initrd.luks.devices.${cfg.name};
         in ''
             ${verbose.tryYubikey}
             ${lib.optionalString (dev.keyFile != null) ''
-                if systemd-cryptsetup attach 'keystore-${hash}' '/dev/disk/by-partlabel/keystore-${hash}' ${lib.escapeShellArg dev.keyFile} '${lib.optionalString dev.allowDiscards "discard,"}headless' ; then exit ; fi
-                printf '%s\n\n' 'Unlocking keystore-${hash} with '${lib.escapeShellArg dev.keyFile}' failed.' >/dev/console
+                if systemd-cryptsetup attach '${cfg.name}' '/dev/disk/by-partlabel/${cfg.name}' ${lib.escapeShellArg dev.keyFile} '${lib.optionalString dev.allowDiscards "discard,"}headless' ; then exit ; fi
+                printf '%s\n\n' 'Unlocking ${cfg.name} with '${lib.escapeShellArg dev.keyFile}' failed.' >/dev/console
             ''}
             for attempt in "" 2 3 ; do (
-                passphrase=$( systemd-ask-password 'Please enter passphrase for disk keystore-${hash}'"''${attempt:+ (attempt $attempt/3)}" ) || exit
+                passphrase=$( systemd-ask-password 'Please enter passphrase for disk ${cfg.name}'"''${attempt:+ (attempt $attempt/3)}" ) || exit
                 passphrase="$( tryYubikey "$passphrase" 2>/dev/console )" || exit
-                systemd-cryptsetup attach 'keystore-${hash}' '/dev/disk/by-partlabel/keystore-${hash}' <( printf %s "$passphrase" ) '${lib.optionalString dev.allowDiscards "discard,"}headless' || exit
+                systemd-cryptsetup attach '${cfg.name}' '/dev/disk/by-partlabel/${cfg.name}' <( printf %s "$passphrase" ) '${lib.optionalString dev.allowDiscards "discard,"}headless' || exit
             ) && break ; done || exit
         '');
     in {
@@ -157,23 +151,16 @@ in let module = {
                 postStart = ''
                     echo "Mounting ${keystore}"
                     mkdir -p ${keystore}
-                    mount -o nodev,umask=0277,ro /dev/mapper/keystore-${hash} ${keystore}
+                    mount -o nodev,umask=0277,ro /dev/mapper/${cfg.name} ${keystore}
                 '';
             };
-            # lib.mkIf (lib.any (lib.fun.matches "^home/.*$") (lib.attrNames cfg.keys))
-            initrd-nixos-activation.postStart = ''
-                mkdir -pm 551 /sysroot/run/keys/home-composite/
-                if [[ -e ${keystore}/home/ ]] ; then
-                    cp -a ${keystore}/home/*.key /sysroot/run/keys/home-composite/
-                fi
-            '';
             initrd-cleanup.preStart = ''
                 umount ${keystore} || true
                 rmdir ${keystore} || true
-                systemd-cryptsetup detach keystore-${hash}
+                systemd-cryptsetup detach ${cfg.name}
             '';
         };
-        boot.initrd.luks.devices."keystore-${hash}".keyFileTimeout = 10;
+        boot.initrd.luks.devices.${cfg.name}.keyFileTimeout = 10;
         boot.initrd.systemd.storePaths = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) [ unlockWithYubikey ];
         boot.initrd.systemd.initrdBin = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) [ pkgs.yubikey-personalization ];
 
@@ -241,7 +228,7 @@ in let module = {
     doOpenWithYubikey = (let
         inherit (lib) optionalString;
         inherit (config.boot.initrd) luks;
-        inherit (config.boot.initrd.luks.devices."keystore-${hash}") name device header keyFile keyFileSize keyFileOffset allowDiscards yubikey gpgCard fido2 fallbackToPassword;
+        inherit (config.boot.initrd.luks.devices.${cfg.name}) name device header keyFile keyFileSize keyFileOffset allowDiscards yubikey gpgCard fido2 fallbackToPassword;
         cs-open  = "cryptsetup luksOpen ${device} ${name} ${optionalString allowDiscards "--allow-discards"} ${optionalString (header != null) "--header=${header}"}";
     in ''
         ${tryYubikey}

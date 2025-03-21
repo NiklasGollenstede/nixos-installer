@@ -38,7 +38,7 @@ in { preface = { # (any »preface« options have to be defined here)
     # Example of adding and/or overwriting setup/maintenance functions:
     #installer.scripts.install-overwrite.path = ../lib/install.sh.md;
 
-    boot.initrd.systemd.enable = true;
+    boot.initrd.systemd.enable = true; # default now
 
 
 }) (lib.mkIf (name == "explicit-fs") { ## Minimal explicit FS setup

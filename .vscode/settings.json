@@ -35,8 +35,10 @@
 		"bridgedifs", // virtual box
 		"btrfs", // filesystem
 		"builtins", // nix
+		"bwrap", // program
 		"cachefile", // zfs
 		"canmount", // zfs
+		"chardev", // qemu
 		"checksumming", // word
 		"compress_chksum", // f2fs
 		"concat", // abbr
@@ -108,6 +110,8 @@
 		"lsusb", // program / function
 		"luks", // linux
 		"macaddr", // cli arg
+		"memdev", // qemu
+		"memfd", // qemu
 		"metadata_csum", // ext4 option
 		"mktemp", // program / function
 		"mmap", // abbr "memory map"
@@ -136,6 +140,7 @@
 		"notrunc", // dd option
 		"nounset", // bash
 		"ntfs", // filesystem
+		"numa", // abbr (non-uniform memory architecture)
 		"oneshot", // systemd
 		"openssh", // package
 		"optimise", // B/E
@@ -185,6 +190,7 @@
 		"startvm", // virtual box
 		"stdenv", // nix
 		"storageattach", // virtual box
+		"submounts", // plural
 		"swsuspend", // parameter
 		"sysinit", // systemd
 		"syslinux", // package
@@ -213,9 +219,11 @@
 		"vboxusers", // virtual box
 		"vdev", "vdevs", // zfs
 		"vfat", // linux
+		"vhost", // qemu
 		"virt", // abbr (virtualization)
 		"virtfs", // qemu / filesystem
 		"virtio", // cli arg
+		"virtiofs", "virtiofsd", // linux
 		"virtualbox", // program
 		"virtualisation", // british english
 		"vmdk", // vbox

@@ -12,7 +12,7 @@ dirname: inputs@{ self, nixpkgs, functions, ...}: let
     ) else module;
 
     getPreface = inputs: moduleArgs: mainModule: name: let
-        args = { config = null; pkgs = null; lib = null; name = null; nodes = null; extraModules = null; } // { inherit inputs; } // moduleArgs // { name = name; };
+        args = { config = null; pkgs = null; lib = null; utils = null; name = null; nodes = null; extraModules = null; } // { inherit inputs; } // moduleArgs // { name = name; };
         config = getModuleConfig mainModule inputs args;
     in config.${preface'} or { };
 
@@ -52,7 +52,7 @@ in rec {
             # There is, unfortunately, no way to directly pass modules into all containers. Each container will need to be defined with »config.containers."${name}".config.imports = extraModules«.
             # (One could do that automatically by defining »options.security.containers = lib.mkOption { type = lib.types.submodule (cfg: { options.config = lib.mkOption { apply = _:_.extendModules { modules = extraModules; }; }); }«.)
 
-            nixpkgs = { overlays = overlays; } // (lib.optionalAttrs (buildPlatform != null) { inherit buildPlatform; });
+            nixpkgs = { overlays = lib.mkBefore overlays; } // (lib.optionalAttrs (buildPlatform != null) { inherit buildPlatform; });
 
             _module.args = { inherit inputs; } // moduleArgs; # (pass the args here, so that they also apply to any other evaluation using »extraModules«)
 

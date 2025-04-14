@@ -50,6 +50,7 @@ function register-vbox {(
 declare-command run-qemu '[--disks=diskPaths]' qemuArgs... << 'EOD'
 Runs a host in a QEMU VM, directly from its bootable disks, without requiring any change in it's configuration.
 This function infers many qemu options from the target system's configuration and the current host system.
+Note that this function may add cleanup scripts to the EXIT trap of the calling shell.
 EOD
 declare-flag run-qemu dry-run           "" "Instead of running the (main) qemu (and install) command, only print it."
 declare-flag run-qemu efi               "" "Treat the target system as EFI system, even if not recognized as such automatically."
@@ -67,8 +68,9 @@ Example 2 (connect many VMs, unprivileged):
 $ nix shell nixpkgs#vde2 --command vde_switch -sock /tmp/vm-net
 $ ... --nic=vde,sock=/tmp/vm-net # multiple times"
 declare-flag run-qemu no-serial         "" "Do not connect the calling terminal to a serial adapter the guest can log to and open a terminal on the guests serial, as would be the default if the guests logs to ttyS0."
-declare-flag run-qemu share        "decls" "Host dirs to make available as network shares for the guest, as space separated list of »name:host-path,options«. E.g. »--share='foo:/home/user/foo,readonly=on bar:/tmp/bar«. In the VM the share can be mounted with: »$ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo«."
-declare-flag run-qemu virtio-blk        "" "Pass the system's disks/images as virtio disks, instead of using AHCI+IDE. Default iff »boot.initrd.availableKernelModules« includes »virtio_blk« (because it requires that driver)."
+declare-flag run-qemu share        "decls" "Host dirs to make available as network shares for the guest, as space separated list of »name:host-path,options«. E.g. »--share='foo:/home/user/foo,readonly=on bar:/tmp/bar«. In the VM the share can be mounted with: »$ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo« (or »mount -t virtiofs foo /foo « with »--use-virtio-fs«)."
+declare-flag run-qemu use-virtio-fs     "" "Pass the »share«s as virtio shares, instead of virtfs/9p. Default iff »boot.initrd.availableKernelModules« includes »virtio_fs« (because it requires that driver)."
+declare-flag run-qemu use-virtio-blk    "" "Pass the system's disks/images as virtio disks, instead of using AHCI+IDE. Default iff »boot.initrd.availableKernelModules« includes »virtio_blk« (because it requires that driver)."
 function run-qemu { # ...: qemuArgs
 
     local qemu=( )
@@ -110,24 +112,47 @@ function run-qemu { # ...: qemuArgs
         disks=( ${args[disks]}primary.img ) ; for name in "@{!config.setup.disks.devices[@]}" ; do if [[ $name != primary ]] ; then disks+=( ${args[disks]}${name}.img ) ; fi ; done
     else disks=( ${args[disks]//:/ } ) ; fi
 
-    [[ ' '"@{boot.initrd.availableKernelModules[@]}"' ' != *' 'virtio_blk' '* ]] || args[virtio-blk]=1
+    [[ ' '"@{config.boot.initrd.availableKernelModules[@]}"' ' != *' 'virtio_blk' '* ]] || args[use-virtio-blk]=1
     local index ; for index in ${!disks[@]} ; do
 #       qemu+=( -drive format=raw,if=ide,file="${disks[$index]/*=/}" ) # »if=ide« is the default, which these days isn't great for driver support inside the VM
-        qemu+=( -drive format=raw,file="${disks[$index]/*=/}",media=disk,if=none,index=${index},id=drive${index} ) # create the disk drive, without attaching it, name it driveX
+        qemu+=( -drive format=raw,media=disk,if=none,index=${index},id=drive${index},file="${disks[$index]/*=/}" ) # create the disk drive, without attaching it, name it driveX
 
-        if [[ ! ${args[virtio-blk]:-} ]] ; then
-            qemu+=( -device ahci,acpi-index=${index},id=ahci${index} ) # create an (ich9-)AHCI bus named »ahciX«
-            qemu+=( -device ide-hd,drive=drive${index},bus=ahci${index}.${index} ) # attach IDE?! disk driveX as device X on bus »ahciX«
+        if [[ ! ${args[use-virtio-blk]:-} ]] ; then
+            qemu+=( -device ahci,acpi-index=${index},id=ahci${index} ) # create an (ich9-)AHCI controller/bus named »ahciX« (could probably be used for all disks)
+            qemu+=( -device ide-hd,drive=drive${index},bus=ahci${index}.${index} ) # attach disk driveX to »ahciX« in IDE (legacy) mode
         else
             qemu+=( -device virtio-blk-pci,drive=drive${index},disable-modern=on,disable-legacy=off ) # this should be faster, but seems to require guest drivers
         fi
     done
 
-    if [[ ${args[share]:-} ]] ; then # e.g. --share='foo:/home/user/foo,readonly=on bar:/tmp/bar'
-        local share ; for share in ${args[share]} ; do
-            qemu+=( -virtfs local,security_model=none,mount_tag=${share/:/,path=} )
-            # In the VM: $ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo
-        done
+    if [[ ${args[share]:-} ]] ; then # e.g. --share='home:/home/user,readonly=on,opt=value bar:/tmp/bar'
+        #[[ ' '"@{config.boot.initrd.availableKernelModules[@]}"' ' != *' 'virtiofs' '* ]] || args[use-virtio-fs]=1
+        #args[use-virtio-fs]=1 # the virtiofs module is included by default, so let's always do this for now
+        if [[ ! ${args[use-virtio-fs]:-} ]] ; then
+            local share ; for share in ${args[share]} ; do
+                qemu+=( -virtfs local,security_model=none,mount_tag=${share/:/,path=} )
+                # In the VM: $ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo
+            done
+        else
+            # DAX (page cache sharing between guest Kernel and host daemon) was apparently never stabilized and is now defunct (virtiofsd has no --dax flag anymore, and the Rust implementation makes no (current) mention of it: https://gitlab.com/virtio-fs/virtiofsd/-/issues/39#note_1869835254).
+            qemu+=( -object memory-backend-memfd,id=mem,size=${args[vm-mem]:-4096},share=on -numa node,memdev=mem ) # see https://gitlab.com/virtio-fs/virtiofsd#faq
+            local share ; for share in ${args[share]} ; do
+                local tag=${share%%:*} ; local path=${share#*:} ; path=${path%%,*}
+                local opts= readonly= ; if [[ $share == *,* ]] ; then
+                    opts=,${share#*,}, ; if [[ ${opts} == *,readonly=on,* ]]; then readonly=1 ; opts=${opts//,readonly=on,/,} ; fi ; opts=( ${opts//,/ } )
+                fi
+                local sockPath="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/qemu-@{config.installer.outputName:-@{config.system.name}}-share-${tag}.sock"
+                local newuidmap=$( PATH=$hostPath @{native.which!getExe} newuidmap ) # implicit || true
+                local virtiofsd_pid ; (
+                    PATH="@{native.virtiofsd}/bin:$PATH${newuidmap:+:$( dirname "$newuidmap" )}"
+                    if [[ $readonly == on ]] ; then echo 'readonly not implemented' ; exit 1 ; fi # TODO: bwrap with readonly "/" (unless already r/o)?
+                    set -x ; virtiofsd --socket-path="$sockPath" --shared-dir=${path} --preserve-noatime --xattr --posix-acl --announce-submounts "${opts[@]/#/--}"
+                ) & virtiofsd_pid=$! ; prepend_trap "kill $virtiofsd_pid" EXIT
+                qemu+=( -chardev socket,id=char-share-${tag},path="$sockPath" )
+                qemu+=( -device vhost-user-fs-pci,chardev=char-share-${tag},tag=${tag},cache-size=${args[vm-mem]:-4096} )
+                # In the VM: $ mount -t virtiofs home -m /home/user
+            done
+        fi
     fi
 
     # Add »config.boot.kernelParams = [ "console=tty1" "console=ttyS0" ]« to log to serial (»ttyS0«) and/or the display (»tty1«), preferring the last »console« option for the initrd shell (if enabled and requested).

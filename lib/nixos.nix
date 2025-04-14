@@ -138,13 +138,15 @@ in rec {
         buildPlatform ? null,
         ## The platforms for which the setup scripts (installation & maintenance/debugging) will be defined. Should include the ».buildPlatform« and/or the target system's »config.nixpkgs.hostPlatform«.
         setupPlatforms ? if inputs?systems then import inputs.systems else [ "aarch64-linux" "x86_64-linux" ],
+        ## Optional function that may replace the package set used to build the setup scripts.
+        replaceSetupPkgs ? pkgs: pkgs,
         ## If provided, then change the name of each output attribute by passing it through this function. Allows exporting of multiple variants of a repo's hosts from a single flake (by then merging the results):
         renameOutputs ? false,
         ## Whether to export the »all-systems« package as »packages.*.default« as well.
         asDefaultPackage ? false,
     ... }: let
         getName = if renameOutputs == false then (name: name) else renameOutputs;
-        otherArgs = (builtins.removeAttrs args [ "hosts" "moduleInputs" "overlayInputs" "renameOutputs" "asDefaultPackage" ]) // {
+        otherArgs = (builtins.removeAttrs args [ "hosts" "moduleInputs" "overlayInputs" "replaceSetupPkgs" "renameOutputs" "asDefaultPackage" ]) // {
             inherit inputs modules overlays moduleArgs nixosSystem buildPlatform extraModules prefix;
             nixosArgs = (args.nixosArgs or { }) // { modules = (args.nixosArgs.modules or [ ]) ++ [ { imports = [ (args: {
                 ${installer}.outputName = getName args.config._module.args.name;
@@ -154,7 +156,8 @@ in rec {
     in let outputs = {
         inherit nixosConfigurations;
     } // (forEachSystem setupPlatforms (buildSystem: let
-        pkgs = (import inputs.nixpkgs { inherit overlays; system = buildSystem; });
+        pkgs' = (import inputs.nixpkgs { inherit overlays; system = buildSystem; });
+        pkgs = replaceSetupPkgs pkgs';
     in rec {
 
         apps = lib.mapAttrs (name: system: rec { type = "app"; derivation = writeSystemScripts { inherit name pkgs system; }; program = "${derivation}"; }) nixosConfigurations;

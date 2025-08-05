@@ -5,8 +5,8 @@ This is a library of bash functions, mostly for NixOS system installation.
 
 The (paths to these) scripts are meant to be (and are by default when importing [`../../modules/installer.nix.md`](../../modules/installer.nix.md)) set as `config.installer.scripts.*`.
 [`mkSystemsFlake`](../nixos.nix#mkSystemsFlake) then makes their functions available in the per-host `devShells`/`apps`.
-Host-specific nix variables are available to the bash functions as `@{...}` through [`substituteImplicit`](../scripts.nix#substituteImplicit) with the respective host as root context.
-Any script passed later in `scripts` [can override](../../example/install.sh.md#implementation) the functions of these (earlier) default scripts, e.g.:
+Host-specific nix variables are available to the bash functions as `@{...}` through [`substituteImplicit`](https://github.com/NiklasGollenstede/nix-functions/blob/master/lib/scripts.nix#substituteImplicit) with the respective host as root context.
+Any script passed later in `scripts` [can override](../../example/lib/install.sh.md#implementation) the functions of these (earlier) default scripts, e.g.:
 ```nix
 { config.installer.scripts.override = { path = .../override.sh; order = 1500; }; }
 ```

@@ -11,232 +11,240 @@
 	],
 	"cSpell.diagnosticLevel": "Information", // to find spelling mistakes
 	"cSpell.words": [
-		"aarch64", // processor architecture
-		"AAVMF", // qemu aarch64
-		"acltype", // zfs
-		"acpi", // abbr
-		"ahci", // abbr
-		"armstub", "armstubs", // cocnat
-		"asDropin", // systemd
-		"ashift", // zfs
-		"askpass", // program
-		"attrset", "attrsets", // nix/abbr (attribute set)
-		"autologin", // agetty
-		"autotrim", // zpool property
-		"binfmt", // abbr "binary format"
-		"blkdiscard", // program
-		"blkid", // program / function
-		"blockdev", // program / function
-		"bootable", // word (~= able to boot)
-		"bootkey", // partition name
-		"bootloader", // word
-		"bootpart", // abbr (boot partition)
-		"bridgeadapter", // virtual box
-		"bridgedifs", // virtual box
-		"btrfs", // filesystem
-		"builtins", // nix
-		"bwrap", // program
-		"cachefile", // zfs
-		"canmount", // zfs
-		"chardev", // qemu
-		"checksumming", // word
-		"compress_chksum", // f2fs
-		"concat", // abbr
-		"controlvm", // virtual box
-		"conv", // dd option
-		"convertfromraw", // virtual box
-		"coreutils", // package
-		"createrawvmdk", // virtual box
-		"createvm", // virtual box
-		"cryptsetup", // program
-		"crypttab", // linux
-		"dedup", // zfs
-		"devs", // abbr (devices)
-		"diffutils", // package
-		"dir_nlink", // ext4 option
-		"dmask", // mount
-		"dnodesize", // zfs
-		"dontStrip", // nixos
-		"dontUnpack", // nixos
-		"dosfstools", // package
-		"dotglob", // option
-		"draid", // zfs
-		"e2fsprogs", // package
-		"elif", // abbr (else if)
-		"encryptionroot", // zfs
-		"errexit", // bash
-		"errtrace", // bash
-		"extlinux", // program
-		"extra_isize", // ext4 option
-		"fdisk", // program
-		"fetchurl", // nix function
-		"fido2", // protocol
-		"filesystems", // plural
-		"findutils", // package
-		"fmask", // mount
-		"foldl", // nix (fold left)
-		"foldr", // nix (fold right)
-		"gcroots", // Nix
-		"gdisk", // program
-		"getsize64", // cli arg
-		"getty", // program
-		"github", // name
-		"gnugrep", // package
-		"gnused", // package
-		"gollenstede", // name
-		"gptfdisk", // package
-		"headlessly", // word
-		"hetzner", // name
-		"hostbus", // cli arg
-		"hostfwd", // cli arg
-		"hostiocache", // virtual box
-		"hostport", // cli arg
-		"inetutils", // package
-		"inodes", // plural
-		"internalcommands", // virtual box
-		"ints", // plural
-		"keydev", // cli arg
-		"keyformat", // zfs
-		"keylocation", // zfs
-		"keystatus", // zfs
-		"kmod", // linux
-		"lazy_itable_init", // ext4 option
-		"lazytime", // f2fs
-		"libblockdev", // package
-		"libutil", // concat
-		"logbias", // zfs
-		"losetup", // program / function
-		"lowerdir", // mount overlay option
-		"lsusb", // program / function
-		"luks", // linux
-		"macaddr", // cli arg
-		"memdev", // qemu
-		"memfd", // qemu
-		"metadata_csum", // ext4 option
-		"mktemp", // program / function
-		"mmap", // abbr "memory map"
-		"modifyvm", // virtual box
-		"mountpoint", // program / function
-		"msize", // option
-		"mtab", // linux
-		"nameserver", // concat
-		"namespacing", // word
-		"netdev", // cli arg
-		"niklas", // name
-		"nixbld", // nix
-		"nixos", // (duh)
-		"nixpkgs", // nix
-		"noatime", // mount option
-		"noauto", // mount option
-		"nodev", // mount option
-		"nodiratime", // mount option
-		"nodiscard", // cli arg
-		"noexec", // mount option
-		"nofail", // cli arg
-		"nographic", // cli arg
-		"noheadings", // cli arg
-		"nohibernate", // kernel param
-		"nosuid", // mount option
-		"notrunc", // dd option
-		"nounset", // bash
-		"ntfs", // filesystem
-		"numa", // abbr (non-uniform memory architecture)
-		"oneshot", // systemd
-		"openssh", // package
-		"optimise", // B/E
-		"ostype", // virtual box
-		"overlayed", // word
-		"overridable", // word
-		"overscan", // word
-		"ovmf", // package
-		"partlabel", // linux
-		"partprobe", // program / function
-		"partuuid", // linux
-		"pbkdf", // option
-		"pflash", // cli arg
-		"pipefail", // bash
-		"pkgs", // nix
-		"pname", // nix/abbr (package name)
-		"portcount", // virtual box
-		"posix", // word
-		"posixacl", // zfs
-		"poweroff", // program / function
-		"preconfigured", // word
-		"qcow", // file type (qemu)
-		"raidz", // zfs
-		"ramdisk", // word
-		"ramfs", // linux
-		"raspberrypi", // abbr
-		"raspberrypifw", // package
-		"rawdisk", // virtual box
-		"readlink", // command
-		"realpath", // program / function
-		"reexec", // option
-		"refreservation", // zfs
-		"relatime", // mount option
-		"resolv", // abbr
-		"rootfs", // linux
-		"rpool", // zfs
-		"sandboxing", // word
-		"sata", // storage protocol
-		"screenshotpng", // virtual box
-		"setsid", // program / function
-		"setuid", // cli arg
-		"sgdisk", // program
-		"shopt", // bash option
-		"showvminfo", // virtual box
-		"socat", // program / function
-		"specialisation", "specialisations", // nixos option
-		"startvm", // virtual box
-		"stdenv", // nix
-		"storageattach", // virtual box
-		"submounts", // plural
-		"swsuspend", // parameter
-		"sysinit", // systemd
-		"syslinux", // package
-		"sysroot", // systemd
-		"sysrq", // linux
-		"sysusr", // systemd
-		"temproot", // abbr (temporary root (FS))
-		"timesync", // systemd
-		"tmpdir", // abbr
-		"TMPDIR", // env var
-		"tmpfiles", // nixos option
-		"tmpfs", // linux
-		"toplevel", // nix
-		"typecode", // cli arg
-		"uart", "uarts", // serial protocol
-		"uartmode", // virtual box
-		"uboot", // package
-		"udev", // program
-		"udevadm", // program
-		"udptunnel", // program
-		"UEFI", // abbr
-		"unpartitioned", // word
-		"upperdir", // mount overlay option
-		"upstreamed", // word
-		"urandom", // linux
-		"vboxusers", // virtual box
-		"vdev", "vdevs", // zfs
-		"vfat", // linux
-		"vhost", // qemu
-		"virt", // abbr (virtualization)
-		"virtfs", // qemu / filesystem
-		"virtio", // cli arg
-		"virtiofs", "virtiofsd", // linux
-		"virtualbox", // program
-		"virtualisation", // british english
-		"vmdk", // vbox
-		"wipefs", // program
-		"workdir", // mount overlay option
-		"xattr", // zfs
-		"xchg", // abbr (exchange)
-		"xfsprogs", // package
-		"ykchalresp", // program
-		"ykinfo", // program
-		"yubikey", // program
-		"YubiKeys", // plural
-		"zfsutil", // program / function
-		"zpool", "zpools", // zfs
+		"aarch64",
+		"AAVMF",
+		"acltype",
+		"acpi",
+		"ahci",
+		"armstub",
+		"armstubs",
+		"asDropin",
+		"ashift",
+		"askpass",
+		"attrset",
+		"attrsets",
+		"autologin",
+		"autotrim",
+		"binfmt",
+		"blkdiscard",
+		"blkid",
+		"blockdev",
+		"bootable",
+		"bootkey",
+		"bootloader",
+		"bootpart",
+		"bridgeadapter",
+		"bridgedifs",
+		"btrfs",
+		"builtins",
+		"bwrap",
+		"cachefile",
+		"canmount",
+		"chardev",
+		"checksumming",
+		"compress_chksum",
+		"concat",
+		"controlvm",
+		"conv",
+		"convertfromraw",
+		"coreutils",
+		"createrawvmdk",
+		"createvm",
+		"cryptsetup",
+		"crypttab",
+		"dedup",
+		"devs",
+		"diffutils",
+		"dir_nlink",
+		"dmask",
+		"dnodesize",
+		"dontStrip",
+		"dontUnpack",
+		"dosfstools",
+		"dotglob",
+		"draid",
+		"e2fsprogs",
+		"elif",
+		"encryptionroot",
+		"errexit",
+		"errtrace",
+		"extlinux",
+		"extra_isize",
+		"fdisk",
+		"fetchurl",
+		"fido2",
+		"filesystems",
+		"findutils",
+		"fmask",
+		"foldl",
+		"foldr",
+		"gcroots",
+		"gdisk",
+		"getsize64",
+		"getty",
+		"github",
+		"gnugrep",
+		"gnused",
+		"gollenstede",
+		"gptfdisk",
+		"headlessly",
+		"hetzner",
+		"hostbus",
+		"hostfwd",
+		"hostiocache",
+		"hostport",
+		"inetutils",
+		"inodes",
+		"internalcommands",
+		"ints",
+		"kexec",
+		"keydev",
+		"keyformat",
+		"keylocation",
+		"keystatus",
+		"kmod",
+		"lazy_itable_init",
+		"lazytime",
+		"libblockdev",
+		"libutil",
+		"logbias",
+		"losetup",
+		"lowerdir",
+		"lsusb",
+		"luks",
+		"macaddr",
+		"memdev",
+		"memfd",
+		"metadata_csum",
+		"mktemp",
+		"mmap",
+		"modifyvm",
+		"mountpoint",
+		"msize",
+		"mtab",
+		"nameserver",
+		"namespacing",
+		"netdev",
+		"niklas",
+		"nixbld",
+		"nixos",
+		"nixpkgs",
+		"noatime",
+		"noauto",
+		"nodev",
+		"nodiratime",
+		"nodiscard",
+		"noexec",
+		"nofail",
+		"nographic",
+		"noheadings",
+		"nohibernate",
+		"nosuid",
+		"notrunc",
+		"nounset",
+		"ntfs",
+		"numa",
+		"oneshot",
+		"openssh",
+		"optimise",
+		"ostype",
+		"overlayed",
+		"overridable",
+		"overscan",
+		"ovmf",
+		"partlabel",
+		"partprobe",
+		"partuuid",
+		"pbkdf",
+		"pflash",
+		"pipefail",
+		"pkgs",
+		"pname",
+		"portcount",
+		"posix",
+		"posixacl",
+		"poweroff",
+		"preconfigured",
+		"qcow",
+		"raidz",
+		"ramdisk",
+		"ramfs",
+		"raspberrypi",
+		"raspberrypifw",
+		"rawdisk",
+		"readlink",
+		"realpath",
+		"reexec",
+		"refreservation",
+		"relatime",
+		"resolv",
+		"rootfs",
+		"rpool",
+		"sandboxing",
+		"sata",
+		"screenshotpng",
+		"setsid",
+		"setuid",
+		"sgdisk",
+		"shopt",
+		"showvminfo",
+		"socat",
+		"specialisation",
+		"specialisations",
+		"startvm",
+		"stdenv",
+		"storageattach",
+		"submounts",
+		"swsuspend",
+		"sysinit",
+		"syslinux",
+		"sysroot",
+		"sysrq",
+		"sysusr",
+		"temproot",
+		"timesync",
+		"tmpdir",
+		"TMPDIR",
+		"tmpfiles",
+		"tmpfs",
+		"toplevel",
+		"typecode",
+		"uart",
+		"uartmode",
+		"uarts",
+		"uboot",
+		"udev",
+		"udevadm",
+		"udptunnel",
+		"UEFI",
+		"unpartitioned",
+		"upperdir",
+		"upstreamed",
+		"urandom",
+		"vboxusers",
+		"vdev",
+		"vdevs",
+		"vfat",
+		"vhost",
+		"virt",
+		"virtfs",
+		"virtio",
+		"virtiofs",
+		"virtiofsd",
+		"virtualbox",
+		"virtualisation",
+		"vmdk",
+		"wipefs",
+		"workdir",
+		"xattr",
+		"xchg",
+		"xfsprogs",
+		"ykchalresp",
+		"ykinfo",
+		"yubikey",
+		"YubiKeys",
+		"zfsutil",
+		"zpool",
+		"zpools"
 	],
 }

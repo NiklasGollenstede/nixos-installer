@@ -21,7 +21,7 @@ function mkdir-sticky { # 1: path, 2?: fallbackOwner, 3?: fallbackGroup, 4?: fal
     stat=( $( stat --format '%u %g %a' "$parent" ) ) || return
     if [[ ${stat[2]} =~ ^1...$ ]] ; then # sticky parent
         #echo "Can't infer correct ownership/permissions for child '$( basename "$path" )' of sticky dir '$parent'" 1>&2 ; return 1
-        install --directory --owner="${1:-0}" --group="${2:-0}" ${3+--mode="$3"} "$path" || return
+        install --directory --owner="${1:-0}" --group="${2:-0}" ${3:+--mode="$3"} "$path" || return
     else
         install --directory --owner=${stat[0]} --group=${stat[1]} --mode=${stat[2]} "$path" || return
     fi

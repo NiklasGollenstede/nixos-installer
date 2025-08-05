@@ -1,7 +1,7 @@
 dirname: inputs@{ self, nixpkgs, functions, ...}: let
     inherit (nixpkgs) lib;
-    inherit (functions.lib) forEachSystem getModulesFromInputs getNixFiles getOverlaysFromInputs importWrapped mapMerge mapMergeUnique mergeAttrsUnique; # trace;
-    inherit (inputs.config.rename) installer; preface' = inputs.config.rename.preface;
+    inherit (functions.lib) forEachSystem getModulesFromInputs getNixFiles getOverlaysFromInputs importWrapped mapMerge mapMergeUnique mergeAttrsUnique withOverridable; # trace;
+    inherit (inputs.config.rename) installer; prefaceName = inputs.config.rename.preface;
 
     getModuleConfig = module: inputs: args: if builtins.isFunction module then (
         getModuleConfig (module args) inputs args
@@ -14,9 +14,11 @@ dirname: inputs@{ self, nixpkgs, functions, ...}: let
     getPreface = inputs: moduleArgs: mainModule: name: let
         args = { config = null; pkgs = null; lib = null; utils = null; name = null; nodes = null; extraModules = null; } // { inherit inputs; } // moduleArgs // { name = name; };
         config = getModuleConfig mainModule inputs args;
-    in config.${preface'} or { };
+    in config.${prefaceName} or { };
 
-    getFlakeDir = input: error: if input.sourceInfo.outPath == input.sourceInfo.outPath || lib.hasPrefix input.sourceInfo.outPath input.outPath then input.outPath else throw error;
+    getFlakeDir = input: error: if input != null && input.outPath == input.sourceInfo.outPath || lib.hasPrefix input.sourceInfo.outPath input.outPath then input.outPath else throw error;
+
+    # TODO: Pretty much wherever modules are automatically imported, they should be `filter`ed by `._class or "nixos" == "nixos"`. Or does that happen on import? Docs say "the module system will reject `imports` with a different `_class` declaration". Got to think about where to do this or lift the declaration, especially when aggregating and transforming modules.
 
 in rec {
 
@@ -65,25 +67,31 @@ in rec {
 
     }; in args));
 
-    # Given either a list (or attr set) of »files« (paths to ».nix« or ».nix.md« files for dirs with »default.nix« files in them) or a »dir« path (and optionally a list of base names to »exclude« from it), this builds the NixOS configuration for each host (per file) in the context of all configs provided.
-    # If »files« is an attr set, exactly one host with the attribute's name as hostname is built for each attribute. Otherwise the default is to build for one host per configuration file, named as the file name without extension or the sub-directory name. Setting »${preface'}.instances« can override this to build the same configuration for those multiple names instead (the specific »name« is passed as additional »moduleArgs« to the modules and can thus be used to adjust the config per instance).
+    # Given either a list (or attr set) of »files« (paths to ».nix« or ».nix.md« files or dirs with »default.nix« files in them) or a »dir« path (and optionally a list of base names to »exclude« from it), this builds the NixOS configuration for each host (per file) in the context of all configs provided.
+    # If »files« is an attr set, exactly one host with the attribute's name as hostname is built for each attribute. Otherwise, the _default_ is to build for one host per configuration file, named as the file name without extension or the sub-directory name, but setting »${prefaceName}.instances« can override this to build the same configuration for those multiple names instead (the specific »name« is passed as additional »moduleArgs« to the modules and can thus be used to adjust the config per instance).
     # All other arguments are as specified by »mkSystemsFlake« and are passed to »mkNixosConfiguration«.
-    mkNixosConfigurations = args: let # { files, dir, exclude, ... }
-        files = args.files or (builtins.removeAttrs (getNixFiles args.dir) (args.exclude or [ ]));
-        files' = if builtins.isAttrs files then files else (builtins.listToAttrs (map (entryPath: let
-            stripped = builtins.match ''^(.*)[.]nix[.]md$'' (builtins.baseNameOf entryPath);
-            name = builtins.unsafeDiscardStringContext (if stripped != null then (builtins.elemAt stripped 0) else (builtins.baseNameOf entryPath));
-        in { inherit name; value = entryPath; }) files));
-        moduleArgs = (args.moduleArgs or { }) // { nodes = configs; };
+    mkNixosConfigurations = args@{
+        configs ? (
+            if builtins.isAttrs files then files # legacy
+            else (builtins.listToAttrs (map (path: let
+                stripped = builtins.match ''^(.*)[.]nix[.]md$'' (builtins.baseNameOf path);
+                name = builtins.unsafeDiscardStringContext (if stripped != null then (builtins.elemAt stripped 0) else (builtins.baseNameOf path));
+            in { inherit name; value = path; }) files))
+        ),
+        files ? if builtins.pathExists dir then (builtins.removeAttrs (getNixFiles dir) exclude) else if args?dir then throw "Explicitly provided dir does not exist: ${dir}" else { },
+        dir ? "${getFlakeDir (args.inputs.self or null) "Can't determine flake dir from »inputs.self«. Supply »mkSystemsFlake.hosts.dir« explicitly!"}/hosts",
+        exclude ? [ ],
+    ... }: let # { files, dir, exclude, ... }
+        moduleArgs = (args.moduleArgs or { }) // { nodes = systems; };
 
-        configs = mapMergeUnique (prelimName: mainModule: (let
+        systems = mapMergeUnique (prelimName: mainModule: (let
             instances = let
                 preface = getPreface inputs (moduleArgs // { inherit preface; }) mainModule null; # (we don't yet know the final name)
-            in if !(args?files && builtins.isAttrs files) && preface?instances then preface.instances else [ prelimName ];
+            in if !(args?configs) && preface?instances then preface.instances else [ prelimName ];
         in (mapMergeUnique (name: { "${name}" = let
             preface = getPreface inputs (moduleArgs // { inherit preface; }) mainModule name; # (call again, with name)
         in { inherit preface; } // (mkNixosConfiguration (let systemArgs = (
-            builtins.removeAttrs args [ "files" "dir" "exclude" "prefix" ]
+            builtins.removeAttrs args [ "configs" "files" "dir" "exclude" "prefix" ]
         ) // {
             inherit name mainModule;
             moduleArgs = (moduleArgs // { inherit preface; });
@@ -92,7 +100,7 @@ in rec {
                 prefix = (args.nixosArgs.prefix or [ ]) ++ ((args.prefix or (_: [ ])) name);
             };
             extraModules = (args.extraModules or [ ]) ++ [ { imports = [ (args: {
-                options.${preface'} = {
+                options.${prefaceName} = {
                     instances = lib.mkOption { description = "List of host names to instantiate this host config for, instead of just for the file name."; type = lib.types.listOf lib.types.str; readOnly = true; } // (lib.optionalAttrs (!preface?instances) { default = instances; });
                     id = lib.mkOption { description = "This system's ID. If set, »mkSystemsFlake« will ensure that the ID is unique among all »moduleArgs.nodes«."; type = lib.types.nullOr (lib.types.either lib.types.int lib.types.str); readOnly = true; apply = id: if id == null then null else toString id; } // (lib.optionalAttrs (!preface?id) { default = null; });
                     overrideSystemArgs = lib.mkOption { description = "Function that may override any of the arguments to »mkNixosConfiguration«."; type = lib.types.functionTo lib.types.attrs; readOnly = true; } // (lib.optionalAttrs (!preface?overrideSystemArgs) { default = args: args; });
@@ -100,24 +108,24 @@ in rec {
             }) ]; _file = "${dirname}/nixos.nix#mkNixosConfigurations-extraModule"; } ];
         }; in (
             if preface?overrideSystemArgs then systemArgs // (preface.overrideSystemArgs systemArgs) else systemArgs
-        ))); }) instances))) (files');
+        ))); }) instances))) (configs);
 
         duplicate = let
             getId = node: name: let id = node.preface.id or null; in if id == null then null else toString id;
-            withId = lib.filterAttrs (name: node: (getId node name) != null) configs;
+            withId = lib.filterAttrs (name: node: (getId node name) != null) systems;
             ids = mapMerge (name: node: { "${getId node name}" = name; }) withId;
         in builtins.removeAttrs withId (builtins.attrValues ids);
     in if duplicate != { } then (
-        throw "»${preface'}.id«s are not unique! The following hosts share their IDs with some other host: ${builtins.concatStringsSep ", " (builtins.attrNames duplicate)}"
-    ) else configs;
+        throw "»${prefaceName}.id«s are not unique! The following hosts share their IDs with some other host: ${builtins.concatStringsSep ", " (builtins.attrNames duplicate)}"
+    ) else systems;
 
     # Builds a system of NixOS hosts and exports them, plus »apps« and »devShells« to manage them, as flake outputs.
     # All arguments are optional, as long as the default can be derived from the other arguments as passed.
-    mkSystemsFlake = lib.makeOverridable (args@{
+    mkSystemsFlake = withOverridable (args@{
         # An attrset of imported Nix flakes, for example the argument(s) passed to the flake »outputs« function. All other arguments are optional (and have reasonable defaults) if this is provided and contains »self« and the standard »nixpkgs«. This is also the second argument passed to the individual hosts' top level config files.
         inputs ? { },
-        # Arguments »{ files, dir, exclude, }« to »mkNixosConfigurations«, see there for details. May also be a list of those attrsets, in which case those multiple sets of hosts will be built separately by »mkNixosConfigurations«, allowing for separate sets of »peers« passed to »mkNixosConfiguration«. Each call will receive all other arguments, and the resulting sets of hosts will be merged.
-        hosts ? (let dir = "${getFlakeDir inputs.self "Can't determine flake dir from »inputs.self«. Supply »mkSystemsFlake.hosts.dir« explicitly!"}/hosts"; in if builtins.pathExists dir then { inherit dir; exclude = [ ]; } else { files = { }; }),
+        # Arguments »{ configs, files, dir, exclude, }« to »mkNixosConfigurations«, see there for details. May also be a list of those attrsets, in which case those multiple sets of hosts will be built separately by »mkNixosConfigurations«, allowing for separate sets of »peers« passed to »mkNixosConfiguration«. Each call will receive all other arguments, and the resulting sets of hosts will be merged.
+        hosts ? { }, # ~= { dir = "${inputs.self}/hosts"; }
         # List of Modules to import for all hosts, in addition to the default ones in »nixpkgs«. The host-individual module should selectively enable these. Defaults to ».nixosModules.default« of all »moduleInputs«/»inputs« (including »inputs.self«).
         modules ? (getModulesFromInputs moduleInputs),
         # (Subset of) »inputs« that »modules« will be used from. Example: »{ inherit (inputs) self flakeA flakeB; }«.
@@ -144,7 +152,7 @@ in rec {
         renameOutputs ? false,
         ## Whether to export the »all-systems« package as »packages.*.default« as well.
         asDefaultPackage ? false,
-    ... }: let
+    ... }: override: let
         getName = if renameOutputs == false then (name: name) else renameOutputs;
         otherArgs = (builtins.removeAttrs args [ "hosts" "moduleInputs" "overlayInputs" "replaceSetupPkgs" "renameOutputs" "asDefaultPackage" ]) // {
             inherit inputs modules overlays moduleArgs nixosSystem buildPlatform extraModules prefix;
@@ -155,6 +163,8 @@ in rec {
         nixosConfigurations = if builtins.isList hosts then mergeAttrsUnique (map (hosts: mkNixosConfigurations (otherArgs // hosts)) hosts) else mkNixosConfigurations (otherArgs // hosts);
     in let outputs = {
         inherit nixosConfigurations;
+        inherit override; # where one would expect the override function after calling »mkSystemsFlake«
+        lib.mkHosts = override; # where one might use it to create additional sets of hosts, based on the defaults set for the hosts that are exported by the flake
     } // (forEachSystem setupPlatforms (buildSystem: let
         pkgs' = (import inputs.nixpkgs { inherit overlays; system = buildSystem; });
         pkgs = replaceSetupPkgs pkgs';
@@ -175,6 +185,7 @@ in rec {
 
     })); in if renameOutputs == false then outputs else {
         nixosConfigurations = mapMergeUnique (k: v: { ${renameOutputs k} = v; }) outputs.nixosConfigurations;
+        inherit override; lib.${renameOutputs "mkHosts"} = outputs.lib.mkHosts;
     } // (forEachSystem setupPlatforms (buildSystem: {
         apps = mapMergeUnique (k: v: { ${renameOutputs k} = v; }) outputs.apps.${buildSystem};
         packages.${renameOutputs "all-systems"} = outputs.packages.${buildSystem}.all-systems;
@@ -283,7 +294,7 @@ in rec {
             generic-arg-help "${ownPath}" "$functionDoc" ${esc description} ${esc notesAndExamples} ${esc usageLine} || exit
         ) ; \exit 0 ; fi
 
-        undeclared=x-.* exitCode=3 generic-arg-verify || \exit
+        allowedUndeclaredArgs=x-.* exitCodeOnError=3 generic-arg-verify || \exit
 
         # either call »argv[0]« with the remaining parameters as arguments, or if »$1« is »-c« eval »$2«.
         if [[ ''${args[trace]:-} ]] ; then set -x ; fi

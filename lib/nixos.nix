@@ -51,8 +51,7 @@ in rec {
 
         extraModules = (nixosArgs.extraModules or [ ]) ++ modules ++ extraModules ++ [ { imports = [ (_: {
             # These are passed as »extraModules« module argument and can thus be reused when defining containers and such (so define as much stuff as possible here).
-            # There is, unfortunately, no way to directly pass modules into all containers. Each container will need to be defined with »config.containers."${name}".config.imports = extraModules«.
-            # (One could do that automatically by defining »options.security.containers = lib.mkOption { type = lib.types.submodule (cfg: { options.config = lib.mkOption { apply = _:_.extendModules { modules = extraModules; }; }); }«.)
+            # Containers, for example, should be defined with »config.containers."${name}".config.imports = (moduleArgs.)extraModules«.
 
             nixpkgs = { overlays = lib.mkBefore overlays; } // (lib.optionalAttrs (buildPlatform != null) { inherit buildPlatform; });
 

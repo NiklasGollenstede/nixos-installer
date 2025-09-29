@@ -207,10 +207,12 @@ in {
     }) (lib.mkIf cfg.persistenceFixes { # Cope with the consequences of having »/« (including »/{etc,var,root,...}«) cleared on every reboot.
 
         # SSHd host keys:
-        environment.etc = lib.fun.mapMerge ({ path, ... }: if lib.hasPrefix "/etc/" path then let rel = lib.removePrefix "/etc/" path; in {
+        environment.etc = lib.fun.mapMerge ({ path, ... }: lib.optionalAttrs (lib.hasPrefix "/etc/" path) (let
+            rel = lib.removePrefix "/etc/" path;
+        in {
             "${rel}".source = lib.mkDefault "/${keep}/etc/${rel}";
             "${rel}.pub".source = lib.mkDefault "/${keep}/etc/${rel}.pub";
-        } else { }) (config.services.openssh.hostKeys);
+        })) (config.services.openssh.hostKeys);
 
         systemd.tmpfiles.rules = [ # keep in mind: this does not get applied super early ...
             # »/root/.nix-channels« is already being restored.

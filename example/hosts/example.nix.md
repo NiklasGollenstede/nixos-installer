@@ -14,6 +14,7 @@ To install the system to a (set of) virtual machine disk images, with `$hostname
 Then to boot the system in a qemu VM with KVM:
 ```bash
  nix run .'#'$hostname -- run-qemu --disks=/tmp/$hostname/
+ nix run .'#'minimal-setup -- run-qemu --install --share=home:/home/user,readonly=on
 ```
 See `nix run .#$hostname -- --help` for options and more commands.
 
@@ -177,6 +178,8 @@ in { preface = { # (any »preface« options have to be defined here)
 
     # Some base config:
     documentation.enable = false; # sometimes takes quite long to build
+    #boot.initrd.availableKernelModules = [ "virtiofs" ];
+    # Also want this kconfig (though that may be default or outdated): CONFIG_VIRTIO_FS=y CONFIG_FUSE_DAX=y
 
 
 }) ({ ## Actual Config

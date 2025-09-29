@@ -37,8 +37,8 @@ in {
             The path in whose `./extlinux` sub dir `extlinux` will be installed to. When `nixos-rebuild boot/switch` gets called, this or a parent path needs to be mounted from {option}`.targetPart`.
         ''; type = lib.types.strMatching ''^/.*[^/]$''; default = "/boot"; };
         targetPart = lib.mkOption { description = ''
-            The `/dev/disk/by-{id,label,partlabel,partuuid,uuid}/*` path of the *disk partition* holding the filesystem that `extlinux` is installed to. This must be formatted with a filesystem that `extlinux` supports and mounted as (a parent of) {option}`.targetDir`. The disk on which the partition lies will have the bootloader section of its MBR replaced by `extlinux`'s.
-        ''; type = lib.types.strMatching ''^/.*[^/]$''; default = targetMount.device; };
+            The `/dev/disk/by-{id,label,partlabel,partuuid,uuid}/*` path of the *disk partition* holding the filesystem that `extlinux` is installed to. This must be formatted with a filesystem that `extlinux` supports and must be mounted as (a parent of) {option}`.targetDir`. The disk on which the partition lies will have the bootloader section of its MBR replaced by `extlinux`'s.
+        ''; type = lib.types.strMatching ''^/.*[^/]$''; default = targetMount.device; defaultText = "The `.device` of the `fileSystem` that is mounted at `.targetDir` (or its closest parent)"; };
         extraSettings = lib.mkOption { description = ''
             Additional KEYWORD-value pairs to include at the beginning of `.extraConfig`.
         ''; type = lib.types.attrsOf lib.types.str; default = { }; };
@@ -86,11 +86,13 @@ in {
             diskDev=/dev/$( basename "$( readlink -f /sys/class/block/"$( basename "$( realpath "$partition" )" )"/.. )" ) || exit
 
             if [[ $( cat ${esc cfg.targetDir}/extlinux/installedVersion 2>/dev/null || true ) != ${esc cfg.package} ]] ; then
+                # This copies ldlinux.{sys,c32} to ${cfg.targetDir}/extlinux, and embeds into the target file system the necessary code to open that FS in order to read those files:
                 if ! output=$( ${esc cfg.package}/bin/extlinux --install --heads=64 --sectors=32 ${esc cfg.targetDir}/extlinux 2>&1 ) ; then
                     printf '%s\n' "$output" 1>&2 ; exit 1
                 fi
                 printf '%s\n' ${esc cfg.package} >${esc cfg.targetDir}/extlinux/installedVersion
             fi
+            # And this bit of code let's the BIOS launch the stuff installed above:
             if ! ${pkgs.diffutils}/bin/cmp --quiet --bytes=440 $diskDev ${esc cfg.package}/share/syslinux/mbr.bin ; then
                 dd bs=440 conv=notrunc count=1 if=${esc cfg.package}/share/syslinux/mbr.bin of=$diskDev status=none || exit
             fi
@@ -101,7 +103,7 @@ in {
                         cp ${esc cfg.package}/share/syslinux/$lib.c32 ${esc cfg.targetDir}/extlinux/$lib.c32
                     fi
                 done
-                if ! ${pkgs.gnugrep}/bin/grep -qP '^UI ' ${esc cfg.targetDir}/extlinux/extlinux.conf ; then # `extlinux-conf-builder` above would have recreated this, so the check should always be true
+                if ! ${pkgs.gnugrep}/bin/grep -qP '^UI menu.c32$' ${esc cfg.targetDir}/extlinux/extlinux.conf ; then # `extlinux-conf-builder` above would have recreated this, so the check should always be true
                     ${pkgs.gnused}/bin/sed -i 's/^TIMEOUT /UI menu.c32\nTIMEOUT /' ${esc cfg.targetDir}/extlinux/extlinux.conf
                 fi
             else

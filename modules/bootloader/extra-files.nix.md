@@ -55,11 +55,11 @@ in {
             function copy () { # 1: src, 2: dst
                 cd "$1" ; for name in * ; do
                     if [[ -d "$1"/"$name" ]] ; then
-                        rm "$2"/"$name" 2>/dev/null || true
-                        mkdir -p "$2"/"$name" ; copy "$1"/"$name" "$2"/"$name"
+                        ${pkgs.coreutils}/bin/rm "$2"/"$name" 2>/dev/null || true
+                        ${pkgs.coreutils}/bin/mkdir -p "$2"/"$name" ; copy "$1"/"$name" "$2"/"$name"
                     else
                         if ! ${pkgs.diffutils}/bin/cmp --quiet "$1"/"$name" "$2"/"$name" ; then
-                            cp -a "$1"/"$name" "$2"/"$name"
+                            ${pkgs.coreutils}/bin/cp -a "$1"/"$name" "$2"/"$name"
                         fi
                     fi
                 done

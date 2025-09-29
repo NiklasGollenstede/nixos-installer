@@ -1,7 +1,5 @@
 
-# Some Patches
-
-... for `nixpkgs` or programs therein.
+# Patches for External Software
 
 A patch `<name>-*.patch` is generally for the open source software `<name>` which is added/modified by the nixpkgs overlay in `../overlays/<name>.nix.md`.
 Patches for `nixpkgs` are applied in `../flake.nix`.

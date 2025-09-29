@@ -105,6 +105,7 @@
 		"kmod",
 		"lazy_itable_init",
 		"lazytime",
+		"ldlinux",
 		"libblockdev",
 		"libutil",
 		"logbias",

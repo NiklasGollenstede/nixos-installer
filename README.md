@@ -39,8 +39,6 @@ This is a nix flake repository, so [`flake.nix`](./flake.nix) is the entry point
 The modules in [`setup`](./modules/setup/) allow defining a NixOS system's disk and filesystem setup in sufficient detail that a fully automatic installation is possible.
 The [`installer`](./modules/installer.nix.md) module composes the [`setup-scripts`](./lib/setup-scripts/) and the host's `config` into its individual installer.
 
-There is currently only [one overlay](./overlays/gptfdisk.nix.md) that applies [a patch](./patches/gptfdisk-move-secondary-table.patch) to `sgdisk` (it allows moving the backup GPT table, see [gptfdisk #32](https://sourceforge.net/p/gptfdisk/code/merge-requests/32/)).
-
 [`example/hosts/example`](./example/hosts/example.nix.md) provides some NixOS host definitions that demonstrate different types of disk setups.
 
 [`example/`](./example/) further contains an example for customizing the [installation](./example/lib/install.sh.md) script for the hosts, and this flake's [default config](./example/defaultConfig/flake.nix).

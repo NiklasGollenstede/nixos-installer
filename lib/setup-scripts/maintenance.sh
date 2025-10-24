@@ -53,6 +53,7 @@ This function infers many qemu options from the target system's configuration an
 Note that this function may add cleanup scripts to the EXIT trap of the calling shell.
 EOD
 declare-flag run-qemu dry-run           "" "Instead of running the (main) qemu (and install) command, only print it."
+declare-flag run-qemu direct            "" "Directly boot kernel/initrd/cmdline, skipping the bootloader."
 declare-flag run-qemu efi               "" "Treat the target system as EFI system, even if not recognized as such automatically."
 declare-flag run-qemu efi-vars      "path" "For »--efi« systems, path to a file storing the EFI variables. The default is in »XDG_RUNTIME_DIR«, i.e. it does not persist across host reboots."
 declare-flag run-qemu graphic           "" "Open a graphical window even of the target system logs to serial and not (explicitly) TTY1."
@@ -94,7 +95,10 @@ function run-qemu { # ...: qemuArgs
         qemu+=( -machine type=virt ) # aarch64 has no default, but this seems good
     fi ; qemu+=( -cpu max )
 
-    if [[ @{config.virtualisation.useEFIBoot:-} || @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots SeaBIOS.
+    if [[ ${args[direct]:-} ]] ; then
+        qemu+=( -kernel @{config.system.build.kernel}/bzImage -initrd @{config.system.build.initialRamdisk}/initrd -append "$(echo -n "@{config.boot.kernelParams[@]}") init=@{config.system.build.toplevel}/init" )
+
+    elif [[ @{config.virtualisation.useEFIBoot:-} || @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots SeaBIOS.
         local ovmf ; ovmf=$( build-lazy @{pkgs.OVMF.drvPath!unsafeDiscardStringContext} fd ) || return
         #qemu+=( -bios ${ovmf}/FV/OVMF.fd ) # This works, but is a legacy fallback that stores the EFI vars in /NvVars on the EFI partition (which is really bad).
         local fwName=OVMF ; if [[ @{pkgs.system} == aarch64-* ]] ; then fwName=AAVMF ; fi # fwName=QEMU
@@ -104,9 +108,6 @@ function run-qemu { # ...: qemuArgs
         if [[ ! -e "$efiVars" ]] ; then mkdir -pm700 "$( dirname "$efiVars" )" ; cat ${ovmf}/FV/${fwName}_VARS.fd >"$efiVars" || return ; fi
         # https://lists.gnu.org/archive/html/qemu-discuss/2018-04/msg00045.html
     fi
-#   if [[ @{pkgs.system} == aarch64-* ]] ; then
-#       qemu+=( -kernel @{config.system.build.kernel}/Image -initrd @{config.system.build.initialRamdisk}/initrd -append "$(echo -n "@{config.boot.kernelParams[@]}")" )
-#   fi
 
     if [[ ${args[disks]} == */ ]] ; then
         disks=( ${args[disks]}primary.img ) ; for name in "@{!config.setup.disks.devices[@]}" ; do if [[ $name != primary ]] ; then disks+=( ${args[disks]}${name}.img ) ; fi ; done
@@ -145,7 +146,7 @@ function run-qemu { # ...: qemuArgs
                 local newuidmap=$( PATH=$hostPath @{native.which!getExe} newuidmap ) # implicit || true
                 local virtiofsd_pid ; (
                     PATH="@{native.virtiofsd}/bin:$PATH${newuidmap:+:$( dirname "$newuidmap" )}"
-                    if [[ $readonly == on ]] ; then echo 'readonly not implemented' ; exit 1 ; fi # TODO: bwrap with readonly "/" (unless already r/o)?
+                    if [[ $readonly == on ]] ; then echo 'readonly not implemented' ; \exit 1 ; fi # TODO: bwrap with readonly "/" (unless already r/o)?
                     set -x ; virtiofsd --socket-path="$sockPath" --shared-dir=${path} --preserve-noatime --xattr --posix-acl --announce-submounts "${opts[@]/#/--}"
                 ) & virtiofsd_pid=$! ; prepend_trap "kill $virtiofsd_pid" EXIT
                 qemu+=( -chardev socket,id=char-share-${tag},path="$sockPath" )

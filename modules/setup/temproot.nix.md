@@ -182,6 +182,7 @@ in {
         ${setup} = {
             temproot.temp.mounts = {
                 "/tmp" = { mode = "1777"; };
+                #"/nix/var/nix/builds" = { source = "build"; mode = "750"; }; # New temp dir location for nix builds. But it may actually make sense to keep that on the same FS as the store, to allow moving results.
             };
             temproot.local.mounts = {
                 "/local" = { source = "system"; mode = "755"; extraFsConfig = { neededForBoot = lib.mkIf (config.${setup}.temproot.remote.type == "none") (lib.mkDefault true); }; }; # (see "/remote")
@@ -206,7 +207,7 @@ in {
 
     }) (lib.mkIf cfg.persistenceFixes { # Cope with the consequences of having »/« (including »/{etc,var,root,...}«) cleared on every reboot.
 
-        # SSHd host keys:
+        # Link SSHd host keys from persistent storage to /etc/:
         environment.etc = lib.fun.mapMerge ({ path, ... }: lib.optionalAttrs (lib.hasPrefix "/etc/" path) (let
             rel = lib.removePrefix "/etc/" path;
         in {
@@ -229,9 +230,10 @@ in {
 
         fileSystems = { # this does get applied early
             # (on systems without hardware clock, this allows systemd to provide an at least monolithic time after restarts)
-            "/var/lib/systemd/timesync" = { device = "/local/var/lib/systemd/timesync"; options = [ "bind" ]; }; # TODO: add »neededForBoot = true«?
+            "/var/lib/systemd/timesync" = { device = "/local/var/lib/systemd/timesync"; options = [ "bind" ]; };
             # save persistent timer states
-            "/var/lib/systemd/timers" = { device = "/local/var/lib/systemd/timers"; options = [ "bind" ]; }; # TODO: add »neededForBoot = true«?
+            "/var/lib/systemd/timers" = { device = "/local/var/lib/systemd/timers"; options = [ "bind" ]; };
+            "/var/lib/bluetooth" = lib.mkIf (config.hardware.bluetooth.enable) { device = "/${keep}/var/lib/bluetooth"; options = [ "bind" ]; };
         };
 
         security.sudo.extraConfig = "Defaults lecture=never"; # default is »once«, but we'd forget that we did that

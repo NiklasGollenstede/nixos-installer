@@ -143,7 +143,7 @@ declare-flag install-system inspect-cmd "script" "Instead of opening an interact
 function install-system-to {( set -u # 1: mnt, 2?: topLevel
     targetSystem=${args[toplevel]:-@{config.system.build.toplevel}}
     mnt=$1 ; topLevel=${2:-$targetSystem}
-    beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
+    beLoud=/dev/null ; if [[ ${args[trace]:-} ]] ; then beLoud=/dev/stdout ; fi
     beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
     trap - EXIT # start with empty traps for sub-shell
 

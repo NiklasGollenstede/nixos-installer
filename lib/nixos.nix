@@ -28,7 +28,7 @@ in rec {
         # See »mkSystemsFlake« for documentation of the following arguments:
         inputs ? { }, modules ? (getModulesFromInputs inputs), overlays ? (getOverlaysFromInputs inputs),
         extraModules ? [ ], moduleArgs ? { }, nixosArgs ? { },
-        nixosSystem ? inputs.nixpkgs.lib.nixosSystem,
+        nixosSystem ? inputs.self.lib.nixosSystem or inputs.self.lib.__internal__.nixosSystem or inputs.nixpkgs.lib.nixosSystem,
         buildPlatform ? null,
     }: nixosSystem (nixosArgs // (let args = {
         #system = null; # (This actually does nothing more than setting »config.nixpkgs.system« (which is the same as »config.nixpkgs.buildPlatform.system«) and can be null/unset here.)
@@ -137,8 +137,8 @@ in rec {
         overlayInputs ? inputs,
         # Additional arguments passed to each module evaluated for the host config (if that module is defined as a function).
         moduleArgs ? { },
-        # The »nixosSystem« function defined in »<nixpkgs>/flake.nix«, or equivalent.
-        nixosSystem ? inputs.nixpkgs.lib.nixosSystem,
+        # The »nixosSystem« function defined in »<nixpkgs>/flake.nix«, or equivalent. This determines the default NixOS modules (`baseModules`) and the `lib` and (default) `pkgs` is passed to them.
+        nixosSystem ? inputs.self.lib.nixosSystem or inputs.self.lib.__internal__.nixosSystem or inputs.nixpkgs.lib.nixosSystem, # (priority: exported by self, imported/used by self, default)
         # Attribute path labels to prepend to option names/paths. Useful for debugging when building multiple systems at once.
         prefix ? (name: [ "[${if renameOutputs == false then name else renameOutputs name}]" ]),
         # If provided, this will be set as »config.nixpkgs.buildPlatform« for all hosts, which in turn enables cross-compilation for all hosts whose »config.nixpkgs.hostPlatform« (the architecture they will run on) does not expand to the same value. Without this, building for other platforms may still work (slowly) if »boot.binfmt.emulatedSystems« on the building system is configured for the respective target(s).

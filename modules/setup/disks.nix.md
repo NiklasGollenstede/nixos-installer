@@ -53,6 +53,17 @@ in {
             default = { };
             apply = lib.filterAttrs (k: v: v != null);
         };
+        fileSystems = lib.mkOption {
+            description = "Set of filesystems to be created on partitions or devices during installation. This  by default already contains any matching »config.fileSystems« definitions.";
+            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, config, ... }: { options = {
+                name = lib.mkOption { description = "Attribute and internal name of this filesystem. Recommendation: its intended mount point."; type = lib.types.str; default = name; readOnly = true; };
+                device = lib.mkOption { description = "Device path where this filesystem will be created. Can refer to a partition by its partlabel (»/dev/disk/by-partlabel/...«) or a LUKS mapping (»/dev/mapper/...«)."; type = lib.types.strMatching ''^/dev/(disk/by-partlabel/|mapper/).+$''; };
+                fsType = lib.mkOption { description = "Filesystem type to create."; type = lib.types.str; };
+                formatArgs = lib.mkOption { description = "Options passed to the filesystem creation tool (e.g. »mkfs.ext4«) when formatting this filesystem during installation."; type = lib.types.listOf lib.types.str; default = [ ]; };
+            }; })));
+            default = { };
+            apply = lib.filterAttrs (k: v: v != null);
+        };
         partitionList = lib.mkOption { description = "Partitions as a sorted list."; type = lib.types.listOf (lib.types.attrsOf lib.types.anything); default = lib.sort (before: after: before.order >= after.order) (lib.attrValues cfg.partitions); readOnly = true; internal = true; };
         partitioning = lib.mkOption { description = "The resulting disk partitioning as »sgdisk --backup --print« per disk."; type = lib.types.package; readOnly = true; internal = true; };
     }; };
@@ -60,6 +71,10 @@ in {
     config.${setup} = {
         # (Don't) create all devices referenced by partitions: (The problem with this is that all device attributes depend on the partition attributes, and it would thus be impossible to have a dependency in reverse (e.g. a partition's size based on the disk size).)
         #disks.devices = lib.genAttrs (lib.catAttrs "disk" config.${setup}.disks.partitionList) (name: { });
+
+        disks.fileSystems = lib.mapAttrs (_: fs: { inherit (fs) device fsType formatArgs; }) (lib.filterAttrs (_: fs: (
+            (builtins.match ''^/dev/(disk/by-partlabel/|mapper/).+$'' fs.device) != null
+        )) config.fileSystems);
 
         disks.partitioning = let
             partition-disk = { name = "partition-disk"; text = lib.fun.extractBashFunction (builtins.readFile lib.self.setup-scripts.disk) "partition-disk"; };

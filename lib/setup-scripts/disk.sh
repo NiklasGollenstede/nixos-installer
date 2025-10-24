@@ -90,7 +90,7 @@ function ensure-disks {
 ## Partitions the »blockDevs« (matching »config.setup.disks.devices«) to ensure that all specified »config.setup.disks.partitions« exist.
 #  Tries to abort if any partition already exists on the host.
 function partition-disks {
-    local beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
+    local beLoud=/dev/null ; if [[ ${args[trace]:-} ]] ; then beLoud=/dev/stdout ; fi
     local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
 
     for partDecl in "@{config.setup.disks.partitionList[@]}" ; do
@@ -117,7 +117,7 @@ function partition-disks {
 ## Given a declared disk device's »name« and a path to an actual »blockDev« (or image) file, partitions the device as declared in the config.
 function partition-disk { # 1: name, 2: blockDev, 3?: devSize
     local name=$1 ; local blockDev=$2
-    local beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
+    local beLoud=/dev/null ; if [[ ${args[trace]:-} ]] ; then beLoud=/dev/stdout ; fi
     local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
     eval 'local -A disk='"@{config.setup.disks.devices[$name]}"
     local devSize=${3:-$( @{native.util-linux}/bin/blockdev --getsize64 "$blockDev" )}
@@ -183,18 +183,18 @@ function is-partition-on-disks { # 1: partition, ...: blockDevs
 
 ## For each filesystem in »config.fileSystems« whose ».device« is in »/dev/disk/by-partlabel/«, this creates the specified file system on that partition.
 function format-partitions {
-    local beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
+    local beLoud=/dev/null ; if [[ ${args[trace]:-} ]] ; then beLoud=/dev/stdout ; fi
     local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
-    for fsDecl in "@{config.fileSystems[@]}" ; do
+    for fsDecl in "@{config.setup.disks.fileSystems[@]}" ; do
         eval 'declare -A fs='"$fsDecl"
         if [[ ${fs[device]} == /dev/disk/by-partlabel/* ]] ; then
-            if ! is-partition-on-disks "${fs[device]}" "${blockDevs[@]}" ; then echo "Partition alias ${fs[device]} used by mount ${fs[mountPoint]} does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
+            if ! is-partition-on-disks "${fs[device]}" "${blockDevs[@]}" ; then echo "Partition alias ${fs[device]} used by filesystem ${fs[name]} does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
             @{native.util-linux}/bin/wipefs --all "${fs[device]}" >$beLoud 2>$beSilent || return # else mkfs might refuse to replace any previous filesystems
         elif [[ ${fs[device]} == /dev/mapper/* ]] ; then
-            if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${fs[device]/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device ${fs[device]} used by mount ${fs[mountPoint]} does not point at one of the device mappings ${!config.boot.initrd.luks.devices!catAttrSets.device[@]}" 1>&2 ; \return 1 ; fi
+            if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${fs[device]/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device ${fs[device]} used by filesystem ${fs[name]} does not point at one of the device mappings ${!config.boot.initrd.luks.devices!catAttrSets.device[@]}" 1>&2 ; \return 1 ; fi
         else continue ; fi
-        eval 'declare -a formatArgs='"${fs[formatArgs]}" ; eval 'declare -a options='"${fs[options]}"
-        ( PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH ; ${_set_x:-:} ; mkfs."${fs[fsType]}" "${formatArgs[@]}" "${fs[device]}" >$beLoud 2>$beSilent ) || [[ ' '${options[@]}' ' == *' 'nofail' '* ]] || return
+        eval 'declare -a formatArgs='"${fs[formatArgs]}"
+        ( PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH ; ${_set_x:-:} ; mkfs."${fs[fsType]}" "${formatArgs[@]}" "${fs[device]}" >$beLoud 2>$beSilent ) || return
         @{native.parted}/bin/partprobe "${fs[device]}" || true
     done
     for swapDev in "@{config.swapDevices!catAttrs.device[@]}" ; do
@@ -240,6 +240,18 @@ function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowNoautoFail
 
         if ! @{native.util-linux}/bin/mountpoint -q "$mnt"/"$target" ; then (
 
+            function run-cmd {( # 1: type, 2: cmd
+                type=$1 ; cmd=$2
+                if [[ ${args[trace]:-} ]] ; then echo "Running $type commands for $target:" 1>&2 ; fi
+                PATH=$( printf %s: @{native.util-linux}/{,s}bin @{native.coreutils}/{,s}bin @{native.findutils}/{,s}bin @{native.gnugrep}/{,s}bin @{native.gnused}/{,s}bin @{native.systemd}/{,s}bin ) ; PATH=${PATH%:}
+                set -uo pipefail ; root="$mnt"/ # (same as the 'prepare' snippet in pre-mount-commands.nix)
+                if [[ ${args[quiet]:-} ]] ; then
+                    eval "$cmd" &>/dev/null || exit
+                else eval "$cmd" || exit ; fi
+            )}
+
+            cmd=@{config.fileSystems!catAttrSets.preMountCommands[$target]:-} ; if [[ $cmd ]] ; then run-cmd 'pre-mount' "$cmd" || \exit ; fi
+
             if [[ $options =~ ,x-bind-file, ]] ; then
                 mkdir-sticky "$(dirname "$mnt"/"$target")" && touch -a "$mnt"/"$target" || \exit
             else
@@ -252,21 +264,29 @@ function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowNoautoFail
                 options=${options//,workdir=/,workdir=$mnt\/} ; options=${options//,upperdir=/,upperdir=$mnt\/} # Work and upper dirs must be in target.
                 workdir=$(  <<<"$options" grep -o -P ',workdir=\K[^,]+'  || true ) ; if [[ $workdir  ]] ; then mkdir-sticky "$workdir"  ; fi
                 upperdir=$( <<<"$options" grep -o -P ',upperdir=\K[^,]+' || true ) ; if [[ $upperdir ]] ; then mkdir-sticky "$upperdir" ; fi
-                lowerdir=$( <<<"$options" grep -o -P ',lowerdir=\K[^,]+' || true )
-                options=${options//,lowerdir=$lowerdir,/,lowerdir=$mnt/${lowerdir//:/:$mnt\/},} ; source=overlay
+                ldPre=$( <<<"$options" grep -o -P ',lowerdir=\K[^,]+' || true )
+                ldPost= ; for dir in ${ldPre//:/ } ; do
+                    if [[ $dir != /nix/store && $dir != /nix/store/* ]] ; then dir=$mnt/$dir ; fi ; ldPost+=:$dir
+                done ; ldPost=${ldPost:1}
+                options=${options//,lowerdir=$ldPre,/,lowerdir=$ldPost,} ; source=overlay
                 # TODO: test the lowerdir stuff
             elif [[ $options =~ ,r?bind, ]] ; then
-                if [[ $source == /nix/store/* ]] ; then options=,ro$options ; fi
-                source=$mnt/$source ; if [[ ! -e $source ]] ; then
-                    if [[ $options =~ ,x-bind-file, ]] ; then
-                        mkdir-sticky "$(dirname "$source")" && touch -a "$source" || \exit
-                    else
-                        mkdir-sticky "$source" || \exit
+                if [[ $source == /nix/store || $source == /nix/store/* ]] ; then
+                    options=,ro$options
+                else
+                    source=$mnt/$source ; if [[ ! -e $source ]] ; then
+                        if [[ $options =~ ,x-bind-file, ]] ; then
+                            mkdir-sticky "$(dirname "$source")" && touch -a "$source" || \exit
+                        else
+                            mkdir-sticky "$source" || \exit
+                        fi
                     fi
                 fi
             fi
 
             @{native.util-linux}/bin/mount -t $type -o "${options:1:(-1)}" "$source" "$mnt"/"$target" || \exit
+
+            cmd=@{config.fileSystems!catAttrSets.postMountCommands[$target]:-} ; if [[ $cmd ]] ; then run-cmd 'post-mount' "$cmd" || \exit ; fi
 
         ) || [[ $options == *,nofail,* ]] || [[ $options == *,noauto,* && $allowNoautoFail ]] || exit ; fi # (actually, nofail already makes mount fail silently)
     done 3< <( <$fstabPath grep -v '^#' )

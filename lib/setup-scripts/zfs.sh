@@ -25,7 +25,7 @@ Creates a single of the system's ZFS pools, and its datasets. Can be called manu
 EOD
 declare-flag install-system,create-zpool zpool-force "" "When creating ZFS storage pools, pass the »-f« (force) option. This may be required when installing to disks that are currently part of a pool, or ZFS refuses do reuse them."
 function create-zpool {
-    local beLoud=/dev/null ; if [[ ${args[debug]:-} ]] ; then beLoud=/dev/stdout ; fi
+    local beLoud=/dev/null ; if [[ ${args[trace]:-} ]] ; then beLoud=/dev/stdout ; fi
     local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
     local mnt=$1 ; local poolName=$2
     eval 'local -A pool='"@{config.setup.zfs.pools[$poolName]}"
@@ -56,7 +56,7 @@ function create-zpool {
     if [[ $keySrc == /dev/urandom ]] ; then @{native.zfs}/bin/zfs unload-key "$poolName" &>/dev/null ; fi
 
     ensure-datasets $mnt '^'"$poolName"'($|[/])' || return
-    if [[ ${args[debug]:-} ]] ; then @{native.zfs}/bin/zfs list -o name,canmount,mounted,mountpoint,keystatus,encryptionroot -r "$poolName" ; fi
+    if [[ ${args[trace]:-} ]] ; then @{native.zfs}/bin/zfs list -o name,canmount,mounted,mountpoint,keystatus,encryptionroot -r "$poolName" ; fi
 }
 
 declare-command ensure-datasets mnt filterExp? << 'EOD'

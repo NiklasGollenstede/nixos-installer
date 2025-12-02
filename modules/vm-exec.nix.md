@@ -174,7 +174,7 @@ in let hostModule = {
     }) ({
 
         virtualisation.host.pkgs = lib.mkDefault pkgs.buildPackages;
-        virtualisation.qemu.package = lib.mkIf (pkgs.buildPackages.system != pkgs.system) (cfg.virtualisation.host or { pkgs = pkgs.buildPackages; }).pkgs.qemu_full;
+        virtualisation.qemu.package = lib.mkIf (pkgs.buildPackages.system != pkgs.stdenv.hostPlatform.system) (cfg.virtualisation.host or { pkgs = pkgs.buildPackages; }).pkgs.qemu_full;
 
     }) ({
 

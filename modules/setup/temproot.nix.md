@@ -112,20 +112,21 @@ dirname: inputs: moduleArgs@{ config, options, pkgs, lib, utils, ... }: let lib 
     }) ({
         mounts = lib.mkOption {
             description = "Locations ${if type == "temp" then "(in addition to »/«)" else ""} where a ${desc} filesystem should be mounted. Some are declared by default but may be removed by setting them to »null«.";
-            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
+            type = lib.fun.types.attrsOfSubmodules ({ name, ... }: { options = {
                 target = lib.mkOption { description = "Attribute name as the mount target path."; type = lib.types.strMatching ''^/.*[^/]$''; default = name; readOnly = true; };
                 source = lib.mkOption { description = "Relative source path of the mount. (Irrelevant for »tmpfs«.)"; type = lib.types.str; default = builtins.substring 1 (builtins.stringLength name - 1) name; };
                 uid = lib.mkOption { description = "UID owning the mounted target."; type = lib.types.ints.unsigned; default = 0; };
                 gid = lib.mkOption { description = "GID owning the mounted target."; type = lib.types.ints.unsigned; default = 0; };
                 mode = lib.mkOption { description = "Permission mode of the mounted target."; type = lib.types.str; default = "750"; };
-                options = lib.mkOption { description = "Additional mount options to set. Note that not all mount types support all options, they may be silently ignored or cause errors. »bind« supports setting »nosuid«, »nodev«, »noexec«, »noatime«, »nodiratime«, and »relatime«. »zfs« will explicitly heed »noauto«, the other options are applied but may conflict with the ones implied by the ».zfsProps«."; type = lib.types.attrsOf (lib.types.oneOf [ lib.types.bool lib.types.str lib.types.str lib.types.int ]); default = { }; };
+                options = lib.mkOption { description = "Additional mount options to set. Note that not all mount types support all options, they may be silently ignored or cause errors. »bind« supports setting »nosuid«, »nodev«, »noexec«, »noatime«, »nodiratime«, and »relatime«. »zfs« will explicitly heed »noauto«, the other options are applied but may conflict with the ones implied by the ».zfsProps«."; type = lib.types.attrsOf (lib.types.oneOf [ lib.types.bool lib.types.str lib.types.int ]); default = { }; };
                 extraFsConfig = lib.mkOption { description = "Extra config options to set on the generated »fileSystems.*« entry (unless this mount is forced to »null«)."; type = options.fileSystems.type.nestedTypes.elemType // { visible = "shallow"; }; default = { }; };
                 zfsProps = lib.mkOption { description = "ZFS properties to set on the dataset, if mode type is »zfs«. Note that ZFS mounts made in the initramfs don't have the correct mount options from ZFS properties, so properties that affect mount options should (also) be set as ».options«."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; };
-            }; })));
+            }; config = {
+                options = lib.mkMerge opts.${type}.mountOptions.definitions;
+            }; });
             default = { };
-            apply = lib.filterAttrs (k: v: v != null);
         };
-        mountOptions = lib.mkOption { description = "Mount options that will be merged under ».mounts.*.options«."; type = lib.types.attrsOf (lib.types.oneOf [ lib.types.bool lib.types.str lib.types.str lib.types.int ]); default = { nosuid = true; nodev = true; noatime = true; }; };
+        mountOptions = lib.mkOption { description = "Mount options that will be set for all ».mounts.*.options« (with the same priority). These are also used for ».bind.source«."; type = lib.types.attrsOf (lib.types.oneOf [ lib.types.bool lib.types.str lib.types.int ]); default = { nosuid = true; nodev = true; noatime = true; }; };
     }) ];
 
     zfsNoSyncProps = { sync = "disabled"; logbias = "throughput"; }; # According to the documentation, »logbias« should be irrelevant without sync (i.e. no logging), but some claim setting it to »throughput« still improves performance.
@@ -175,7 +176,9 @@ in {
 
     config = let
 
-        optionsToList = attrs: lib.mapAttrsToList (k: v: if v == true then k else "${k}=${toString v}") (lib.filterAttrs (k: v: v != false) attrs);
+        optionsToList = attrs: let
+            list = lib.mapAttrsToList (k: v: if v == true then k else "${k}=${toString v}") (lib.filterAttrs (k: v: v != false) attrs);
+        in if list == [ ] then lib.mkIf false null else list; # may only assign a non-empty list to fileSystems.*.options -.-
 
     in lib.mkIf cfg.enable (lib.mkMerge ([ ({
 
@@ -265,13 +268,13 @@ in {
             map (def: def.${target}.extraFsConfig or { }) opts.${type}.mounts.definitions
         ) ++ [ (rec {
             fsType = "tmpfs"; device = "tmpfs";
-            options = optionsToList (cfg.${type}.mountOptions // args.options // { uid = toString uid; gid = toString gid; mode = mode; });
+            options = optionsToList (args.options // { uid = toString uid; gid = toString gid; mode = mode; });
         }) ]))) ({ "/" = { options = { }; uid = 0; gid = 0; mode = "755"; }; } // cfg.${type}.mounts);
 
 
     })) (lib.mkIf (cfg.temp.type == "zfs") (let
         description = "ZFS rollback to ${cfg.temp.zfs.dataset}/**@empty";
-        command = ''zfs list -H -o name -t snapshot -r ${lib.escapeShellArg cfg.temp.zfs.dataset} | grep '@empty$' | xargs -n1 -- zfs rollback -r'';
+        command = ''zfs list -H -o name -t snapshot -r ${lib.escapeShellArg cfg.temp.zfs.dataset} | grep '@empty$' | xargs --no-run-if-empty --max-args=1 -- zfs rollback -r'';
         pool = builtins.head (builtins.split "/" cfg.temp.zfs.dataset);
     in {
 
@@ -359,7 +362,7 @@ in {
             map (def: def.${target}.extraFsConfig or { }) opts.${type}.mounts.definitions
         ) ++ [ (rec {
             device = "${cfg.${type}.bind.source}/${source}";
-            options = optionsToList (cfg.${type}.mountOptions // args.options // { bind = true; });
+            options = optionsToList (args.options // { bind = true; });
             preMountCommands = lib.mkIf (!extraFsConfig.neededForBoot && !(lib.elem target utils.pathsNeededForBoot)) ''
                 mkdir -pm 000 -- ${lib.escapeShellArg target}
                 mkdir -pm 000 -- ${lib.escapeShellArg device}
@@ -403,7 +406,7 @@ in {
         fileSystems = lib.mapAttrs (target: args: (lib.mkMerge ((
             map (def: def.${target}.extraFsConfig or { }) opts.${type}.mounts.definitions
         ) ++ [ (rec {
-            options = optionsToList (cfg.${type}.mountOptions // args.options);
+            options = optionsToList args.options;
         }) ]))) ((if type == "temp" then { "/" = { options = { }; }; } else { }) // cfg.${type}.mounts);
 
     }))) [ "temp" "local" "remote" ])));

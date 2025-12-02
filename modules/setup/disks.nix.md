@@ -18,7 +18,7 @@ in {
     options.${setup} = { disks = {
         devices = lib.mkOption {
             description = "Set of disk devices that this host will be installed on.";
-            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
+            type = lib.fun.types.attrsOfSubmodules ({ name, ... }: { options = {
                 name = lib.mkOption { description = "Name that this device is being referred to as in other places."; type = lib.types.str; default = name; readOnly = true; };
                 guid = lib.mkOption { description = "GPT disk GUID of the disk."; type = types.guid; default = lib.fun.sha256guid ("gpt-disk:${name}"+":${globalConfig.networking.hostName}"); };
                 size = lib.mkOption { description = "The size of the disk, either as number in bytes or as argument to »parseSizeSuffix«. When installing to a physical device, its size must match; images are created with this size."; type = lib.types.either lib.types.ints.unsigned lib.types.str; apply = lib.fun.parseSizeSuffix; default = "16G"; };
@@ -33,13 +33,12 @@ in {
                     a;1    # active/boot ; part1
                 ''; };
                 partitionDuringInstallation = (lib.mkEnableOption "partitioning of this disk during system installation. If disabled, the disk needs be partitioned, and its filesystems formatted, already or manually. Declaring filesystems or LUKS mappings on unpartitioned devices via `/dev/disk/by-partlabel/...` will currently break the installation.") // { default = true; };
-            }; })));
+            }; });
             default = { primary = { }; };
-            apply = lib.filterAttrs (k: v: v != null);
         };
         partitions = lib.mkOption {
             description = "Set of disks disk partitions that the system will need/use. Partitions will be created on their respective ».disk«s in ».order« using »sgdisk -n X:+0+$size«.";
-            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, config, ... }: { options = {
+            type = lib.fun.types.attrsOfSubmodules ({ name, config, ... }: { options = {
                 name = lib.mkOption { description = "Name/partlabel that this partition can be referred to as once created."; type = lib.types.str; default = name; readOnly = true; };
                 guid = lib.mkOption { description = "GPT partition GUID of the partition."; type = types.guid; default = lib.fun.sha256guid ("gpt-part:${name}"+":${globalConfig.networking.hostName}"); };
                 disk = lib.mkOption { description = "Name of the disk that this partition resides on, which will automatically be declared with default options."; type = lib.types.str; default = "primary"; };
@@ -49,20 +48,18 @@ in {
                 alignment = lib.mkOption { description = "Adjusted alignment quantifier for this partition only."; type = lib.types.nullOr lib.types.int; default = null; example = 1; };
                 index = lib.mkOption { description = "Optionally explicit partition table index to place this partition in. Use ».order« to make sure that this index hasn't been used yet.."; type = lib.types.nullOr lib.types.int; default = null; };
                 order = lib.mkOption { description = "Creation order ranking of this partition. Higher orders will be created first, and will thus be placed earlier in the partition table (if ».index« isn't explicitly set) and also further to the front of the disk space. No partitions may follow one that has ».size == null«. The computed default puts the partition(s) with ».size == null« last (»500«), partitions with an ».index« before that (»744 + .index«, sorted), and all other partitions at the front (»1000«, unordered)."; type = lib.types.int; default = if config.size == null then 500 else (1000 - (if config.index == null then 0 else 256 - config.index)); };
-            }; })));
+            }; });
             default = { };
-            apply = lib.filterAttrs (k: v: v != null);
         };
         fileSystems = lib.mkOption {
             description = "Set of filesystems to be created on partitions or devices during installation. This  by default already contains any matching »config.fileSystems« definitions.";
-            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, config, ... }: { options = {
+            type = lib.fun.types.attrsOfSubmodules ({ name, config, ... }: { options = {
                 name = lib.mkOption { description = "Attribute and internal name of this filesystem. Recommendation: its intended mount point."; type = lib.types.str; default = name; readOnly = true; };
                 device = lib.mkOption { description = "Device path where this filesystem will be created. Can refer to a partition by its partlabel (»/dev/disk/by-partlabel/...«) or a LUKS mapping (»/dev/mapper/...«)."; type = lib.types.strMatching ''^/dev/(disk/by-partlabel/|mapper/).+$''; };
                 fsType = lib.mkOption { description = "Filesystem type to create."; type = lib.types.str; };
                 formatArgs = lib.mkOption { description = "Options passed to the filesystem creation tool (e.g. »mkfs.ext4«) when formatting this filesystem during installation."; type = lib.types.listOf lib.types.str; default = [ ]; };
-            }; })));
+            }; });
             default = { };
-            apply = lib.filterAttrs (k: v: v != null);
         };
         partitionList = lib.mkOption { description = "Partitions as a sorted list."; type = lib.types.listOf (lib.types.attrsOf lib.types.anything); default = lib.sort (before: after: before.order >= after.order) (lib.attrValues cfg.partitions); readOnly = true; internal = true; };
         partitioning = lib.mkOption { description = "The resulting disk partitioning as »sgdisk --backup --print« per disk."; type = lib.types.package; readOnly = true; internal = true; };
@@ -80,7 +77,11 @@ in {
             partition-disk = { name = "partition-disk"; text = lib.fun.extractBashFunction (builtins.readFile lib.self.setup-scripts.disk) "partition-disk"; };
             esc = lib.escapeShellArg; native = pkgs.buildPackages;
         in pkgs.runCommand "partitioning-${config.networking.hostName}" { } ''
-            ${lib.fun.substituteImplicit { inherit pkgs; scripts = [ partition-disk ]; context = { inherit config native; }; }} # inherit (builtins) trace;
+            ${lib.fun.substituteImplicit {
+                inherit pkgs; scripts = [ partition-disk ];
+                context = { inherit config native; };
+                mapValue = v: if v._type or null == "moduleMeta" then null else v;
+            }} # inherit (builtins) trace;
             set -u ; mkdir -p $out ; declare -A args=([debug]=1)
             ${lib.concatStrings (lib.mapAttrsToList (name: disk: ''
                 name=${esc name} ; img=$name.img

@@ -3,11 +3,11 @@
     "config": {
       "locked": {
         "dir": "example/defaultConfig",
-        "lastModified": 1744631742,
-        "narHash": "sha256-mvuHZ3p9TOXWk4DEJmGYNKodiExnA6NMTPhMroPP4dI=",
+        "lastModified": 1761328076,
+        "narHash": "sha256-kKfm9dviUoZRcyUPtwfN89FtZu0mnOUSLv1j3wy+b68=",
         "owner": "NiklasGollenstede",
         "repo": "nixos-installer",
-        "rev": "5f61f370151fd663ff91fa4acb493b71fa351e02",
+        "rev": "2ab5024770f5747669a1feb1211d2495d6dfd8f9",
         "type": "github"
       },
       "original": {
@@ -24,11 +24,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1754412549,
-        "narHash": "sha256-1nCCnnkDUXbvTaAcv0kHXYH5Vio9Iczoa/BgUzkJ1SA=",
+        "lastModified": 1764600892,
+        "narHash": "sha256-/WJKbxGdXU4TcPX89o2QOt/cgz1S8bF3K66Pz5olPgw=",
         "owner": "NiklasGollenstede",
         "repo": "nix-functions",
-        "rev": "c29b5488c88dc7a37062f6993f3597050a40555a",
+        "rev": "399975f37cd071600727d3e0c9001103881e048a",
         "type": "github"
       },
       "original": {
@@ -39,16 +39,16 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1754292888,
-        "narHash": "sha256-1ziydHSiDuSnaiPzCQh1mRFBsM2d2yRX9I+5OPGEmIE=",
+        "lastModified": 1764522689,
+        "narHash": "sha256-SqUuBFjhl/kpDiVaKLQBoD8TLD+/cTUzzgVFoaHrkqY=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "ce01daebf8489ba97bd1609d185ea276efdeb121",
+        "rev": "8bb5646e0bed5dbd3ab08c7a7cc15b75ab4e1d0f",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixos-25.05",
+        "ref": "nixos-25.11",
         "repo": "nixpkgs",
         "type": "github"
       }

@@ -14,7 +14,7 @@ To install the system to a (set of) virtual machine disk images, with `$hostname
 Then to boot the system in a qemu VM with KVM:
 ```bash
  nix run .'#'$hostname -- run-qemu --disks=/tmp/$hostname/
- nix run .'#'minimal-setup -- run-qemu --install --share=home:/home/user,readonly=on
+ nix run .'#'minimal-setup -- run-qemu --install=always --share=home:/home/user,readonly=on
 ```
 See `nix run .#$hostname -- --help` for options and more commands.
 
@@ -26,14 +26,14 @@ See `nix run .#$hostname -- --help` for options and more commands.
 dirname: inputs: { config, pkgs, lib, name, ... }: let lib = inputs.self.lib.__internal__; in let
     hash = builtins.substring 0 8 (builtins.hashString "sha256" name);
 in { preface = { # (any »preface« options have to be defined here)
-    instances = [ "explicit-fs" "complex-fs" "minimal-setup" "encrypted" "multi-disk-raidz" "rpi" ]; # Generate multiple variants of this host, with these »name«s.
+    instances = [ "explicit-fs" "complex-fs" "minimal-setup" "encrypted" "multi-disk-raidz" "rpi" "fake-rpi" ]; # Generate multiple variants of this host, with these »name«s.
 }; imports = [ ({ ## Hardware
 
     nixpkgs.hostPlatform = if name == "rpi" then "aarch64-linux" else "x86_64-linux"; system.stateVersion = "24.05";
 
     ## What follows is a whole bunch of boilerplate-ish stuff, most of which multiple hosts would have in common and which would thus be moved to one or more modules:
 
-    boot.loader.extlinux.enable = name != "rpi";
+    boot.loader.extlinux.enable = name != "rpi" && name != "fake-rpi";
     boot.loader.grub.enable = false;
 
     # Example of adding and/or overwriting setup/maintenance functions:
@@ -141,7 +141,7 @@ in { preface = { # (any »preface« options have to be defined here)
     setup.disks.partitions."rpool-arc-${hash}" = { type = "bf00"; };
 
 
-}) (lib.optionalAttrs (name == "rpi") { ## Booting on Raspberry PIs
+}) (lib.optionalAttrs (name == "rpi" || name == "fake-rpi") { ## Booting on Raspberry PIs
     # This is mostly a demo for the `extra-files` module, but it does produce an image that boots on a rPI4
 
     setup.temproot = { enable = true; local.bind.base = "ext4"; remote.type = "none"; };
@@ -164,6 +164,7 @@ in { preface = { # (any »preface« options have to be defined here)
             kernel = "u-boot-rpi4.bin";
             armstub = "armstub8-gic.bin";
         };
+    } // lib.optionalAttrs (name == "rpi") {
         "u-boot-rpi4.bin".source = "${pkgs.ubootRaspberryPi4_64bit}/u-boot.bin";
         "armstub8-gic.bin".source = "${pkgs.raspberrypi-armstubs}/armstub8-gic.bin";
     } // (fw [
@@ -193,8 +194,9 @@ in { preface = { # (any »preface« options have to be defined here)
     boot.kernelParams = [ /* "console=tty1" */ "console=ttyS0" "boot.shell_on_fail" ]; # [ "rd.systemd.unit=emergency.target" ]; # "rd.systemd.debug_shell" "rd.systemd.debug-shell=1"
     boot.initrd.systemd.emergencyAccess = true;
 
-    systemd.extraConfig = "StatusUnitFormat=name"; # Show unit names instead of descriptions during boot.
-    boot.initrd.systemd.extraConfig = "StatusUnitFormat=name";
+    # Show unit names instead of descriptions during boot.
+    systemd.settings.Manager.StatusUnitFormat = lib.mkDefault "name";
+    boot.initrd.systemd.settings.Manager.StatusUnitFormat = lib.mkDefault "name";
 
     boot.loader.timeout = lib.mkDefault 1; # save 4 seconds on startup
 

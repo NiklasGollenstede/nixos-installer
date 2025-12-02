@@ -99,6 +99,7 @@
 		"inodes",
 		"internalcommands",
 		"ints",
+		"kconfig",
 		"kexec",
 		"keydev",
 		"keyformat",

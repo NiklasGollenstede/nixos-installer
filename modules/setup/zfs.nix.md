@@ -21,7 +21,7 @@ in let module = {
 
         pools = lib.mkOption {
             description = "ZFS pools created during this host's installation.";
-            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
+            type = lib.fun.types.attrsOfSubmodules ({ name, ... }: { options = {
                 name = lib.mkOption { description = "Attribute name as name of the pool."; type = lib.types.str; default = name; readOnly = true; };
                 vdevArgs = lib.mkOption { description = "List of arguments that specify the virtual devices (vdevs) used when initially creating the pool. Can consist of the device type keywords and partition labels. The latter are prefixed with »/dev/mapper/« if a mapping with that name is configured or »/dev/disk/by-partlabel/« otherwise, and then the resulting argument sequence is is used verbatim in »zpool create«."; type = lib.types.listOf lib.types.str; default = [ name ]; example = [ "raidz1" "data1-..." "data2-..." "data3-..." "cache" "cache-..." ]; };
                 props = lib.mkOption { description = "Zpool properties to pass when creating the pool. May also set »feature@...« and »compatibility«."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; apply = lib.filterAttrs (k: v: v != null); };
@@ -33,14 +33,13 @@ in let module = {
                 props.ashift = lib.mkOptionDefault "12"; # be explicit
                 props.cachefile = lib.mkOptionDefault "none"; # If it works on first boot without (stateful) cachefile, then it will also do so later.
                 props.comment = lib.mkOptionDefault (if (builtins.stringLength config.networking.hostName <= (32 - 9)) then "hostname=${config.networking.hostName}" else config.networking.hostName); # This is just nice to know which host this pool belongs to, without needing to inspect the datasets (»zpool import« shows the comment). The »comment« is limited to 32 characters.
-            }; })));
+            }; });
             default = { };
-            apply = lib.filterAttrs (k: v: v != null);
         };
 
         datasets = lib.mkOption {
             description = "ZFS datasets managed and mounted on this host.";
-            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, ... }: { options = {
+            type = lib.fun.types.attrsOfSubmodules ({ name, ... }: { options = {
                 name = lib.mkOption { description = "Attribute name as name of the dataset."; type = lib.types.str; default = name; readOnly = true; };
                 props = lib.mkOption { description = "ZFS properties to set on the dataset."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; apply = lib.filterAttrs (k: v: v != null); };
                 recursiveProps = lib.mkOption { description = "Whether to apply this dataset's ».props« (but not ».permissions«) recursively to its children, even those that are not declared. This applies to invocations of the »ensure-dataset« function (called either explicitly or after changes by »...pools.*.autoApplyDuringBoot/autoApplyOnActivation«) and makes sense for declared leaf datasets that will have children that the NixOS configuration is not aware of (like receive targets)."; type = lib.types.bool; default = false; };
@@ -51,9 +50,8 @@ in let module = {
                 mode = lib.mkOption { description = "Permission mode of the dataset's root directory."; type = lib.types.str; default = "750"; };
             }; config = {
                 props.canmount = lib.mkOptionDefault "off"; # (need to know this explicitly for each dataset)
-            }; })));
+            }; });
             default = { };
-            apply = lib.filterAttrs (k: v: v != null);
         };
 
         extraInitrdPools = lib.mkOption { description = "Additional pool that are imported in the initrd."; type = lib.types.listOf lib.types.str; default = [ ]; apply = lib.unique; };
@@ -140,11 +138,16 @@ in let module = {
         poolNames = filterBy: lib.attrNames (lib.filterAttrs (name: pool: pool.${filterBy}) cfg.pools);
         filter = pool: "^${pool}($|[/])";
         ensure-datasets = zfsPackage: extraUtils: (let
-            inherit (lib.fun.substituteImplicit { inherit pkgs; scripts = lib.attrValues { inherit (lib.self.setup-scripts) zfs utils; }; context = { inherit config; native = pkgs // { zfs = zfsPackage; } // (lib.optionalAttrs (extraUtils != null) (lib.genAttrs [
-                "kmod" # modprobe
-                "util-linux" # mount umount
-                "nix" "openssh" "jq" # (unused)
-            ] (_: extraUtils))); }; }) script scripts vars;
+            inherit (lib.fun.substituteImplicit {
+                inherit pkgs;
+                scripts = lib.attrValues { inherit (lib.self.setup-scripts) zfs utils; };
+                context = { inherit config; native = pkgs // { zfs = zfsPackage; } // (lib.optionalAttrs (extraUtils != null) (lib.genAttrs [
+                    "kmod" # modprobe
+                    "util-linux" # mount umount
+                    "nix" "openssh" "jq" # (unused)
+                ] (_: extraUtils))); };
+                mapValue = v: if v._type or null == "moduleMeta" then null else v;
+            }) script scripts vars;
         in { script =  pkgs.writeScript "ensure-datasets" ''
             #!${pkgs.pkgsStatic.bash}/bin/bash
             set -o pipefail -o nounset ; declare-command () { : ; } ; declare-flag () { : ; } ;

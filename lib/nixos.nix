@@ -30,16 +30,18 @@ in rec {
         extraModules ? [ ], moduleArgs ? { }, nixosArgs ? { },
         nixosSystem ? inputs.self.lib.nixosSystem or inputs.self.lib.__internal__.nixosSystem or inputs.nixpkgs.lib.nixosSystem,
         buildPlatform ? null,
-    }: nixosSystem (nixosArgs // (let args = {
+        modulesVersion ? builtins.readFile "${(nixosSystem { modules = [ ]; baseModules = [ { options.nixpkgs.flake.source._type = "option"; } ]; }).config.nixpkgs.flake.source}/.version",
+    }: let
+        mainWithName = (let # ensure that in the main module, the "name" parameter is available during the import stage already:
+            module = if (builtins.isPath mainModule) || (builtins.isString mainModule) then (importWrapped inputs mainModule).module else mainModule;
+            bindName2function = func: lib.setFunctionArgs (args: func (args // { inherit name; })) (builtins.removeAttrs (lib.functionArgs func) [ "name" ]);
+            bindName2module = module: if lib.isFunction module then bindName2function module else if module?imports then module // { imports = map bindName2module module.imports; } else module;
+        in bindName2module module);
+    in nixosSystem (nixosArgs // (let args = {
         #system = null; # (This actually does nothing more than setting »config.nixpkgs.system« (which is the same as »config.nixpkgs.buildPlatform.system«) and can be null/unset here.)
 
         modules = (nixosArgs.modules or [ ]) ++ [ { imports = [ # Anything specific to only this evaluation of the module tree should go here.
-            (let # mainModule
-                module = if (builtins.isPath mainModule) || (builtins.isString mainModule) then (importWrapped inputs mainModule).module else mainModule;
-                # ensure that in the main module, the "name" parameter is available during the import stage already:
-                bindName2function = func: lib.setFunctionArgs (args: func (args // { inherit name; })) (builtins.removeAttrs (lib.functionArgs func) [ "name" ]);
-                bindName2module = module: if lib.isFunction module then bindName2function module else if module?imports then module // { imports = map bindName2module module.imports; } else module;
-            in bindName2module module)
+            mainWithName
             { _module.args.name = lib.mkOverride 0 name; } # (specialisations can somehow end up with the name »configuration«, which is very incorrect)
             { networking.hostName = name; }
             # containers may or may not want to inherit extraModules (but it is easy to add), but there is no reason not to inherit specialArgs:
@@ -61,7 +63,7 @@ in rec {
 
         }) ]; _file = "${dirname}/nixos.nix#mkNixosConfiguration-extraModule"; } ];
 
-        specialArgs = (nixosArgs.specialArgs or { }) // { inherit inputs; };
+        specialArgs = (nixosArgs.specialArgs or { }) // { inherit inputs modulesVersion; };
         # (This is already set during module import, while »_module.args« only becomes available during module evaluation (before that, using it causes infinite recursion). Since it can't be ensured that this is set in every circumstance where »extraModules« are being used, it should generally not be used to set custom arguments.)
 
     }; in args));
@@ -139,6 +141,8 @@ in rec {
         moduleArgs ? { },
         # The »nixosSystem« function defined in »<nixpkgs>/flake.nix«, or equivalent. This determines the default NixOS modules (`baseModules`) and the `lib` and (default) `pkgs` is passed to them.
         nixosSystem ? inputs.self.lib.nixosSystem or inputs.self.lib.__internal__.nixosSystem or inputs.nixpkgs.lib.nixosSystem, # (priority: exported by self, imported/used by self, default)
+        # The NixOS version, specifically the version of the NixOS base modules (as opposed to that of `pkgs` or `lib`).
+        modulesVersion ? builtins.readFile "${(nixosSystem { modules = [ ]; baseModules = [ { options.nixpkgs.flake.source._type = "option"; } ]; }).config.nixpkgs.flake.source}/.version", # The (default) `nixosSystem` function defines this itself. While baseModules _can_ be overwritten (as demonstrated here), `modulesPath` _will_ match this, so it should be about as good of a guess as possible.
         # Attribute path labels to prepend to option names/paths. Useful for debugging when building multiple systems at once.
         prefix ? (name: [ "[${if renameOutputs == false then name else renameOutputs name}]" ]),
         # If provided, this will be set as »config.nixpkgs.buildPlatform« for all hosts, which in turn enables cross-compilation for all hosts whose »config.nixpkgs.hostPlatform« (the architecture they will run on) does not expand to the same value. Without this, building for other platforms may still work (slowly) if »boot.binfmt.emulatedSystems« on the building system is configured for the respective target(s).
@@ -154,7 +158,7 @@ in rec {
     ... }: override: let
         getName = if renameOutputs == false then (name: name) else renameOutputs;
         otherArgs = (builtins.removeAttrs args [ "hosts" "moduleInputs" "overlayInputs" "replaceSetupPkgs" "renameOutputs" "asDefaultPackage" ]) // {
-            inherit inputs modules overlays moduleArgs nixosSystem buildPlatform extraModules prefix;
+            inherit inputs modules overlays moduleArgs nixosSystem modulesVersion buildPlatform extraModules prefix;
             nixosArgs = (args.nixosArgs or { }) // { modules = (args.nixosArgs.modules or [ ]) ++ [ { imports = [ (args: {
                 ${installer}.outputName = getName args.config._module.args.name;
             }) ]; _file = "${dirname}/nixos.nix#mkSystemsFlake-extraModule"; } ]; };

@@ -22,12 +22,12 @@ What the installation does is defined solely by the target host's NixOS configur
 The "Installation" section of each host's documentation should contain host specific details, if any.
 Various »FLAG«s below affect how the installation is performed (in VM, verbosity, debugging, ...).
 EOD
-declare-flag install-system,'*' disks "diskPaths" "The disk(s) (to be) used by this system installation.
+declare-flag install-system,'*' disks "diskPaths" 'The disk(s) (to be) used by this system installation.
 If »diskPaths« points to something in »/dev/«, then it is directly used as block device, otherwise »diskPaths« is (re-)created as raw image file and then used as loop device.
 For hosts that install to multiple disks, pass a colon-separated list of »<disk-name>=<path>« pairs (the name may be omitted only for the "default" disk).
 If a directory path ending in a forward slash is passed, it is expanded to ».img« files in that directory, one per (and named after) declared disk.
-Defaults to »/tmp/nixos-img-@{config.installer.outputName:-@{config.system.name}}/«."
-if [[ ! ${args[disks]:-} ]] ; then args[disks]=/tmp/nixos-img-@{config.installer.outputName:-@{config.system.name}}/ ; fi
+Defaults to »${TMPDIR:-/tmp}/nixos-img-@{config.installer.outputName:-@{config.system.name}}/«.'
+if [[ ! ${args[disks]:-} ]] ; then args[disks]=${TMPDIR:-/tmp}/nixos-img-@{config.installer.outputName:-@{config.system.name}}/ ; fi
 
 function install-system {(
     trap - EXIT # start with empty traps for sub-shell
@@ -108,12 +108,12 @@ function exec-in-qemu { # 1: entry, ...: argv
 
     #local output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec
     local output=@{config.system.build.vmExec.drvPath!unsafeDiscardStringContext} # this is more accurate, but also means another system needs to get evaluated every time
-    if [[ @{pkgs.buildPackages.system} != "@{native.system}" ]] ; then
+    if [[ @{pkgs.buildPackages.system} != "@{native.stdenv.hostPlatform.system}" ]] ; then
         echo 'Performing the installation in a cross-ISA qemu system VM; this will be very, very slow (many hours) ...'
         output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec-@{pkgs.buildPackages.system}
     fi
-    local scripts=$self ; if [[ @{pkgs.system} != "@{native.system}" ]] ; then
-        scripts=$( build-lazy @{inputs.self}'#'apps.@{pkgs.system}.@{config.installer.outputName:?}.derivation ) || return
+    local scripts=$self ; if [[ @{pkgs.stdenv.hostPlatform.system} != "@{native.stdenv.hostPlatform.system}" ]] ; then
+        scripts=$( build-lazy @{inputs.self}'#'apps.@{pkgs.stdenv.hostPlatform.system}.@{config.installer.outputName:?}.derivation ) || return
     fi
     local command="$scripts $( printf '%q ' "${newArgs[@]}" ) || exit"
 
@@ -127,7 +127,7 @@ function exec-in-qemu { # 1: entry, ...: argv
 function nixos-install-cmd {( # 1: mnt, 2: topLevel
     # »nixos-install« by default does some stateful things (see »--no-root-passwd« »--no-channel-copy«), builds and copies the system config, registers the system (»nix-env --profile /nix/var/nix/profiles/system --set $targetSystem«), and then calls »NIXOS_INSTALL_BOOTLOADER=1 nixos-enter -- $topLevel/bin/switch-to-configuration boot«, which is essentially the same as »NIXOS_INSTALL_BOOTLOADER=1 nixos-enter -- @{config.system.build.installBootLoader} $targetSystem«, i.e. the side effects of »nixos-enter« and then calling the bootloader-installer.
 
-    #PATH=@{native.nix}/bin:$PATH:@{config.systemd.package}/bin TMPDIR=/tmp LC_ALL=C @{native.nixos-install-tools-no-doc}/bin/nixos-install --system "$2" --no-root-passwd --no-channel-copy --root "$1" || exit # We did most of this, so just install the bootloader:
+    #PATH=@{native.nix}/bin:$PATH:@{config.systemd.package}/bin TMPDIR=${TMPDIR:-/tmp} LC_ALL=C @{native.nixos-install-tools-no-doc}/bin/nixos-install --system "$2" --no-root-passwd --no-channel-copy --root "$1" || exit # We did most of this, so just install the bootloader:
 
     export NIXOS_INSTALL_BOOTLOADER=1 # tells some bootloader installers (systemd & grub) to not skip parts of the installation
     LC_ALL=C PATH=@{native.busybox}/bin:$PATH:@{native.util-linux}/bin @{native.nixos-install-tools-no-doc}/bin/nixos-enter --silent --root "$1" -c "source /etc/set-environment ; ${_set_x:-:} ; @{config.system.build.installBootLoader} $2" || exit
@@ -165,8 +165,8 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
     fi
 
     # Support cross architecture installation (not sure if this is actually required)
-    if [[ $(cat /run/current-system/system 2>/dev/null || echo "x86_64-linux") != "@{pkgs.system}" ]] ; then
-        mkdir -p $mnt/run/binfmt || exit ; [[ ! -e /run/binfmt/"@{pkgs.system}" ]] || cp -a {,$mnt}/run/binfmt/"@{pkgs.system}" || exit # On NixOS, this is a symlink or wrapper script, pointing to the store.
+    if [[ $(cat /run/current-system/system 2>/dev/null || echo "x86_64-linux") != "@{pkgs.stdenv.hostPlatform.system}" ]] ; then
+        mkdir -p $mnt/run/binfmt || exit ; [[ ! -e /run/binfmt/"@{pkgs.stdenv.hostPlatform.system}" ]] || cp -a {,$mnt}/run/binfmt/"@{pkgs.stdenv.hostPlatform.system}" || exit # On NixOS, this is a symlink or wrapper script, pointing to the store.
         # Ubuntu (20.04, by default) uses a statically linked, already loaded qemu binary (F-flag), which therefore does not need to be reference-able from within the chroot.
     fi
 

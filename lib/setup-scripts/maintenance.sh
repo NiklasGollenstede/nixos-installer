@@ -76,7 +76,7 @@ function run-qemu { # ...: qemuArgs
 
     local qemu=( )
 
-    if [[ @{pkgs.system} == "@{native.system}" ]] ; then
+    if [[ @{pkgs.stdenv.hostPlatform.system} == "@{native.stdenv.hostPlatform.system}" ]] ; then
         qemu=( $( build-lazy @{native.qemu_kvm.drvPath!unsafeDiscardStringContext} )/bin/qemu-kvm ) || return
         if [[ ! ${args[no-kvm]:-} && -r /dev/kvm && -w /dev/kvm ]] ; then
             # For KVM to work, vBox must not be running anything at the same time (and vBox hangs on start if qemu runs). Pass »--no-kvm« and accept ~10x slowdown, or stop vBox.
@@ -89,9 +89,9 @@ function run-qemu { # ...: qemuArgs
             args[vm-smp]=1 # the emulation is single-threaded anyway
         fi
     else
-        qemu=( $( build-lazy @{native.qemu_full.drvPath!unsafeDiscardStringContext} )/bin/qemu-system-@{pkgs.system%%-linux} ) || return
+        qemu=( $( build-lazy @{native.qemu_full.drvPath!unsafeDiscardStringContext} )/bin/qemu-system-@{pkgs.stdenv.hostPlatform.system%%-linux} ) || return
     fi
-    if [[ @{pkgs.system} == aarch64-* ]] ; then
+    if [[ @{pkgs.stdenv.hostPlatform.system} == aarch64-* ]] ; then
         qemu+=( -machine type=virt ) # aarch64 has no default, but this seems good
     fi ; qemu+=( -cpu max )
 
@@ -101,7 +101,7 @@ function run-qemu { # ...: qemuArgs
     elif [[ @{config.virtualisation.useEFIBoot:-} || @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots SeaBIOS.
         local ovmf ; ovmf=$( build-lazy @{pkgs.OVMF.drvPath!unsafeDiscardStringContext} fd ) || return
         #qemu+=( -bios ${ovmf}/FV/OVMF.fd ) # This works, but is a legacy fallback that stores the EFI vars in /NvVars on the EFI partition (which is really bad).
-        local fwName=OVMF ; if [[ @{pkgs.system} == aarch64-* ]] ; then fwName=AAVMF ; fi # fwName=QEMU
+        local fwName=OVMF ; if [[ @{pkgs.stdenv.hostPlatform.system} == aarch64-* ]] ; then fwName=AAVMF ; fi # fwName=QEMU
         qemu+=( -drive file=${ovmf}/FV/${fwName}_CODE.fd,if=pflash,format=raw,unit=0,readonly=on )
         local efiVars=${args[efi-vars]:-"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/qemu-@{config.installer.outputName:-@{config.system.name}}-VARS.fd"}
         qemu+=( -drive file="$efiVars",if=pflash,format=raw,unit=1 )
@@ -234,19 +234,27 @@ function mount-keystore-luks {
 
 ## Opens the keystore with the primary unlock method, which may not be convenient to use, but should always be defined.
 function mount-keystore-luks-primary {
-    local usage=luks/keystore-@{config.networking.hostName!hashString.sha256:0:8}/0
-    local method=@{config.setup.keystore.keys[$usage]%%=*}
-    local options=@{config.setup.keystore.keys[$usage]:$(( ${#method} + 1 ))}
-
-    echo 'Opening keystore with primary key (this may cause prompts, but no new keys are written):'
-    local attempt ; for attempt in 2 3 x ; do
-        if mount-keystore-luks --key-file=<( gen-key-"$method" "$usage" "$options" ) ; then break ; fi
-        if [[ $attempt == x ]] ; then \return 1 ; fi ; echo "Retrying ($attempt/3):"
+    mount-keystore-luks-default '0'
+}
+function mount-keystore-default { # ...: indices
+    local indices=( "$@" ) ; if [[ ${#indices[@]} == 0 ]] ; then indices=( $( seq 0 7 ) ) ; fi
+    echo 'Opening keystore with default keys (this may cause prompts, but no new keys are written):'
+    for index in "${indices[@]}" ; do
+        local usage=luks/keystore-@{config.networking.hostName!hashString.sha256:0:8}/$index
+        if [[ ! @{config.setup.keystore.keys[$usage]} ]] ; then continue ; fi
+        local method=@{config.setup.keystore.keys[$usage]%%=*}
+        local options=@{config.setup.keystore.keys[$usage]:$(( ${#method} + 1 ))}
+        local attempt ; for attempt in 2 3 x ; do
+            local key ; key=$( gen-key-"$method" "$usage" "$options" ) || true
+            if [[ $key ]] && mount-keystore-luks --key-file=<( echo -n "$key" ) ; then return ; fi
+            if [[ $attempt == x ]] ; then break ; fi ; echo "Retrying ($attempt/3):"
+        done
     done
+    return 1
 }
 
 declare-command open-system diskImages << 'EOD'
-Performs any steps necessary to mount the target system at »/tmp/nixos-install-@{config.networking.hostName}« on the current host.
+Performs any steps necessary to mount the target system at »${TMPDIR:-/tmp}/nixos-install-@{config.networking.hostName}« on the current host.
 For any steps taken, it also adds the steps to undo them on exit from the calling shell (so this is not useful as a standalone »COMMAND«, use the »bash« or »--command« options, and don't call this from a sub-shell that exits too early).
 »diskImages« may be passed in the same format as to the installer. Any image files passed are ensured to be loop-mounted. »root« may also pass device paths.
 
@@ -269,13 +277,12 @@ function open-system {
     if [[ @{config.setup.keystore.enable} && ! -e /dev/mapper/keystore-@{config.networking.hostName!hashString.sha256:0:8} ]] ; then # Try a bunch of approaches for opening the keystore:
         mount-keystore-luks --key-file=<( printf %s "@{config.networking.hostName}" ) || # costs nothing to try
         mount-keystore-luks --key-file=/dev/disk/by-partlabel/bootkey-@{config.networking.hostName!hashString.sha256:0:8} || # costs nothing to try
-        mount-keystore-luks-primary || # should always be applicable
-        mount-keystore-luks --key-file=<( read -s -p PIN: pin && echo ' touch!' >&2 && @{native.yubikey-personalization}/bin/ykchalresp -2 "$pin" ) ||
+        mount-keystore-default || # should always be applicable
         mount-keystore-luks || # (getting desperate)
         return # oh well
     fi
 
-    export mnt=/tmp/nixos-install-@{config.networking.hostName} # allow this to leak into the calling scope
+    export mnt=${TMPDIR:-/tmp}/nixos-install-@{config.networking.hostName} # allow this to leak into the calling scope
     if [[ ! -e $mnt ]] ; then mkdir -p "$mnt" && prepend_trap "rmdir '$mnt'" EXIT || return ; fi
 
     open-luks-layers || return # Load crypt layers and zfs pools:

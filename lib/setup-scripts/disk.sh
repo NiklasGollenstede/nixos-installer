@@ -10,7 +10,7 @@ function do-disk-setup { # 1: diskPaths
 
     ensure-disks || return
 
-    export mnt=/tmp/nixos-install-@{config.networking.hostName} && mkdir -p "$mnt" && prepend_trap "rmdir $mnt" EXIT || return # »mnt=/run/user/0/...« would be more appropriate, but »nixos-install« does not like the »700« permissions on »/run/user/0«
+    export mnt=${TMPDIR:-/tmp}/nixos-install-@{config.networking.hostName} && mkdir -p "$mnt" && prepend_trap "rmdir $mnt" EXIT || return # »mnt=/run/user/0/...« would be more appropriate, but »nixos-install« does not like the »700« permissions on »/run/user/0«
 
     if [[ ${args[skip-formatting]:-} ]] ; then
         if [[ @{config.setup.keystore.enable} ]] ; then

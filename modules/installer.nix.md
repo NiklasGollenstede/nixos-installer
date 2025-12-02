@@ -23,13 +23,12 @@ in {
                 The functions should expect the bash options `pipefail` and `nounset` (`-u`) to be set.
                 See »./setup-scripts/README.md« for more information.
             '';
-            type = lib.types.attrsOf (lib.types.nullOr (lib.types.submodule ({ name, config, ... }: { options = {
+            type = lib.fun.types.attrsOfSubmodules ({ name, config, ... }: { options = {
                 name = lib.mkOption { description = "Symbolic name of the script."; type = lib.types.str; default = name; readOnly = true; };
                 path = lib.mkOption { description = "Path of file for ».text« to be loaded from."; type = lib.types.nullOr lib.types.path; default = null; };
                 text = lib.mkOption { description = "Script text to process."; type = lib.types.str; default = builtins.readFile config.path; };
                 order = lib.mkOption { description = "Inclusion order of the scripts. Higher orders will be sourced later, and can thus overwrite earlier definitions."; type = lib.types.int; default = 1000; };
-            }; })));
-            apply = lib.filterAttrs (k: v: v != null);
+            }; });
         };
         commands = let cmdOpt = when: mounted: lib.mkOption { description = ''
             Bash commands that are executed during the system installation, ${when}.
@@ -50,8 +49,10 @@ in {
         build.scripts = lib.mkOption {
             type = lib.types.anything; internal = true;
             default = lib.fun.substituteImplicit { # This replaces the `@{}` references in the scripts with normal bash variables that hold serializations of the Nix values they refer to.
-                inherit pkgs; scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues cfg.scripts);
+                inherit pkgs;
+                scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues cfg.scripts);
                 context = { inherit config options pkgs; inherit (moduleArgs) inputs; } // { native = pkgs; };
+                mapValue = v: if v._type or null == "moduleMeta" then null else v;
                 # inherit (builtins) trace;
             };
         };

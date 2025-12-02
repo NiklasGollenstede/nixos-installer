@@ -250,16 +250,6 @@ function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowNoautoFail
                 else eval "$cmd" || exit ; fi
             )}
 
-            cmd=@{config.fileSystems!catAttrSets.preMountCommands[$target]:-} ; if [[ $cmd ]] ; then run-cmd 'pre-mount' "$cmd" || \exit ; fi
-
-            if [[ $options =~ ,x-bind-file, ]] ; then
-                mkdir-sticky "$(dirname "$mnt"/"$target")" && touch -a "$mnt"/"$target" || \exit
-            else
-                mkdir-sticky "$mnt"/"$target" || \exit
-            fi
-
-            [[ $type == tmpfs || $type == auto || $type == */* ]] || @{native.kmod}/bin/modprobe --quiet $type || true # (this does help sometimes)
-
             if [[ $type == overlay ]] ; then
                 options=${options//,workdir=/,workdir=$mnt\/} ; options=${options//,upperdir=/,upperdir=$mnt\/} # Work and upper dirs must be in target.
                 workdir=$(  <<<"$options" grep -o -P ',workdir=\K[^,]+'  || true ) ; if [[ $workdir  ]] ; then mkdir-sticky "$workdir"  ; fi
@@ -270,19 +260,35 @@ function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowNoautoFail
                 done ; ldPost=${ldPost:1}
                 options=${options//,lowerdir=$ldPre,/,lowerdir=$ldPost,} ; source=overlay
                 # TODO: test the lowerdir stuff
+
             elif [[ $options =~ ,r?bind, ]] ; then
-                if [[ $source == /nix/store || $source == /nix/store/* ]] ; then
+                if [[ $source == /nix/store && $target != /nix/store || $source == /nix/store/* ]] ; then
+                    # The source wants to point at *contents* from the /nix/store, which only exist on the "host" so far.
+                    # So bind it from there, but do not allow creating a read-write bind mount to *contents* of the /nix/store:
                     options=,ro$options
                 else
-                    source=$mnt/$source ; if [[ ! -e $source ]] ; then
-                        if [[ $options =~ ,x-bind-file, ]] ; then
-                            mkdir-sticky "$(dirname "$source")" && touch -a "$source" || \exit
-                        else
-                            mkdir-sticky "$source" || \exit
-                        fi
-                    fi
+                    source=$mnt/$source # Otherwise the source should refer to something in the target system.
+                    # "If this mount is a bind mount and the specified [source] does not exist yet it is created as directory."
+                    # -- https://www.freedesktop.org/software/systemd/man/latest/systemd.mount.html#What=
+                    if [[ ! -e $source ]] ; then mkdir-sticky "$source" || \exit ; fi
                 fi
             fi
+
+            # "If the mount point does not exist at the time of mounting, it is created as either a directory, or [as] a file [...] only if this mount is a bind mount and the source (What=) is not a directory."
+            # -- https://www.freedesktop.org/software/systemd/man/latest/systemd.mount.html#Where=
+            if [[ ! -e "$mnt"/"$target" ]] ; then
+                if [[ $options =~ ,r?bind, && ! -d $source ]] ; then
+                    mkdir-sticky "$(dirname "$mnt"/"$target")" && touch -a "$mnt"/"$target" || \exit
+                else
+                    mkdir-sticky "$mnt"/"$target" || \exit
+                fi
+            fi
+
+            # systemd does the creation of What and Where before activating the mount unit and therefore before the pre-mount commands:
+            # TODO: Therefore, it is the preMountCommands' responsibility to fix the ownership of the mount point if required, and a simple mkdir -p instead of mkdir-sticky should be sufficient above.
+            cmd=@{config.fileSystems!catAttrSets.preMountCommands[$target]:-} ; if [[ $cmd ]] ; then run-cmd 'pre-mount' "$cmd" || \exit ; fi
+
+            [[ $type == tmpfs || $type == auto || $type == */* ]] || @{native.kmod}/bin/modprobe --quiet $type || true # (this does help sometimes)
 
             @{native.util-linux}/bin/mount -t $type -o "${options:1:(-1)}" "$source" "$mnt"/"$target" || \exit
 

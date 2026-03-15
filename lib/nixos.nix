@@ -12,7 +12,7 @@ dirname: inputs@{ self, nixpkgs, functions, ...}: let
     ) else module;
 
     getPreface = inputs: moduleArgs: mainModule: name: let
-        args = { config = null; pkgs = null; lib = null; utils = null; name = null; nodes = null; extraModules = null; } // { inherit inputs; } // moduleArgs // { name = name; };
+        args = { config = null; pkgs = null; lib = null; utils = null; name = null; nodes = null; extraModules = null; modulesPath = null; modulesVersion = null; } // { inherit inputs; } // moduleArgs // { name = name; };
         config = getModuleConfig mainModule inputs args;
     in config.${prefaceName} or { };
 
@@ -60,6 +60,7 @@ in rec {
             _module.args = { inherit inputs; } // moduleArgs; # (pass the args here, so that they also apply to any other evaluation using »extraModules«)
 
             system.nixos.revision = lib.mkIf (inputs?nixpkgs.rev) inputs.nixpkgs.rev; # (evaluating the default value fails under some circumstances)
+            system.configurationRevision = lib.mkIf (inputs?nixpkgs.rev) inputs.nixpkgs.rev;
 
         }) ]; _file = "${dirname}/nixos.nix#mkNixosConfiguration-extraModule"; } ];
 

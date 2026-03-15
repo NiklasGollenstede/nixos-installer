@@ -79,7 +79,7 @@ in {
                     exit 0 # it is an error, but we don't want to cause other units to fail because of it
                 fi
             '';
-        in lib.optionalAttrs (!inInitrd || utils.fsNeededForBoot fs) (
+        in lib.optionalAttrs (device != null && (!inInitrd || utils.fsNeededForBoot fs)) (
             (lib.optionalAttrs (
                 fs.preMountCommands != "" || fs.postUnmountCommands != ""
             ) { "${mountPoint''}-before" = (mkService "before") // {

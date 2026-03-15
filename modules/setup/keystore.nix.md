@@ -146,7 +146,7 @@ in let module = {
     in {
         boot.initrd.systemd.services = {
             "systemd-cryptsetup@keystore\\x2d${hash}" = {
-                overrideStrategy = "asDropin";
+                overrideStrategy = "asDropin"; # i.e., these overwrite systemd's defaults:
                 serviceConfig.ExecStart = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) [ "" "${unlockWithYubikey}" ];
                 postStart = ''
                     echo "Mounting ${keystore}"

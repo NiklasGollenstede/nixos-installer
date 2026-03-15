@@ -152,7 +152,7 @@ in let hostModule = {
     }) ({
 
         virtualisation.writableStore = true;
-        virtualisation.additionalPaths = lib.mkForce [ ];
+        virtualisation.additionalPaths = lib.mkForce [ ]; # makes (re-)building the VM a faster
         fileSystems = lib.mkVMOverride {
             "/nix/var/nix/.ro-db" = {
                 fsType = "9p"; device = "nix-var-nix-db"; neededForBoot = true;
@@ -174,7 +174,7 @@ in let hostModule = {
     }) ({
 
         virtualisation.host.pkgs = lib.mkDefault pkgs.buildPackages;
-        virtualisation.qemu.package = lib.mkIf (pkgs.buildPackages.system != pkgs.stdenv.hostPlatform.system) (cfg.virtualisation.host or { pkgs = pkgs.buildPackages; }).pkgs.qemu_full;
+        virtualisation.qemu.package = lib.mkIf (pkgs.buildPackages.stdenv.hostPlatform.system != pkgs.stdenv.hostPlatform.system) (cfg.virtualisation.host or { pkgs = pkgs.buildPackages; }).pkgs.qemu_full;
 
     }) ({
 

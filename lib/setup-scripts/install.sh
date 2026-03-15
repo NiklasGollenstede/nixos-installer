@@ -108,9 +108,9 @@ function exec-in-qemu { # 1: entry, ...: argv
 
     #local output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec
     local output=@{config.system.build.vmExec.drvPath!unsafeDiscardStringContext} # this is more accurate, but also means another system needs to get evaluated every time
-    if [[ @{pkgs.buildPackages.system} != "@{native.stdenv.hostPlatform.system}" ]] ; then
+    if [[ @{pkgs.buildPackages.stdenv.hostPlatform.system} != "@{native.stdenv.hostPlatform.system}" ]] ; then
         echo 'Performing the installation in a cross-ISA qemu system VM; this will be very, very slow (many hours) ...'
-        output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec-@{pkgs.buildPackages.system}
+        output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec-@{pkgs.buildPackages.stdenv.hostPlatform.system}
     fi
     local scripts=$self ; if [[ @{pkgs.stdenv.hostPlatform.system} != "@{native.stdenv.hostPlatform.system}" ]] ; then
         scripts=$( build-lazy @{inputs.self}'#'apps.@{pkgs.stdenv.hostPlatform.system}.@{config.installer.outputName:?}.derivation ) || return

@@ -3,7 +3,8 @@
 # Disk Partitioning and Formatting
 ##
 
-declare-flag install-system skip-formatting "" "Skip partitioning, formatting, and their post-commands. Instead, assume that all required disks/images/zpools are correctly partitioned/formatted, and simply (unlock/import and) mount them. This is useful to skip the destruktive part of the installation, but still do the (largely idempotent) part of copying and linking the current system generation and installing the bootloader -- i.e, repair an installation."
+declare-flag install-system skip-formatting "" "Skip partitioning, formatting, and their post-commands. Instead, assume that all required disks/images/zpools are correctly partitioned/formatted, and simply (unlock/import and) mount them. This is useful to skip the destructive part of the installation, but still do the (largely idempotent) part of copying and linking the current system generation and installing the bootloader -- i.e, update or repair an installation."
+declare-flag install-system keystore "path" 'Use this pre-populated keystore instead of re-generating the keys in a temporary keystore. The keystore can be populated with the »populate-keystore $path« command.'
 
 ## Prepares the disks of the target system for the copying of files.
 function do-disk-setup { # 1: diskPaths
@@ -12,17 +13,26 @@ function do-disk-setup { # 1: diskPaths
 
     export mnt=${TMPDIR:-/tmp}/nixos-install-@{config.networking.hostName} && mkdir -p "$mnt" && prepend_trap "rmdir $mnt" EXIT || return # »mnt=/run/user/0/...« would be more appropriate, but »nixos-install« does not like the »700« permissions on »/run/user/0«
 
-    if [[ ${args[skip-formatting]:-} ]] ; then
-        if [[ @{config.setup.keystore.enable} ]] ; then
-            mount-keystore-luks-primary || return
+    if [[ @{config.setup.keystore.enable} ]] ; then
+        if [[ ${args[keystore]:-} ]] ; then
+            if [[ ! -d ${args[keystore]} ]] ; then echo "Specified --keystore path »${args[keystore]}« does not exist or is not a directory." 1>&2 ; \return 1 ; fi
         else
-            populate-keystore || return # (this may be insufficient)
+            args[keystore]=/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}
+            if [[ ${args[skip-formatting]:-} ]] ; then
+                mount-keystore-default || return
+            else
+                mkdir -p "${args[keystore]}" && prepend_trap "rmdir $( printf '%q' "${args[keystore]}" )" EXIT || return
+                @{native.util-linux}/bin/mount ramfs -t ramfs "${args[keystore]}" && prepend_trap "@{native.util-linux}/bin/umount $( printf '%q' "${args[keystore]}" )" EXIT || return
+                prompt-for-user-passwords || return
+                populate-keystore || return
+            fi
         fi
+    fi
+
+    if [[ ${args[skip-formatting]:-} ]] ; then
         open-luks-layers || return
         if [[ $(LC_ALL=C type -t import-zpools) == function ]] ; then import-zpools $mnt || return ; fi
     else
-        prompt-for-user-passwords || return
-        populate-keystore || return
         partition-disks || return
         create-luks-layers || return
         open-luks-layers || return
@@ -245,6 +255,7 @@ function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowNoautoFail
                 if [[ ${args[trace]:-} ]] ; then echo "Running $type commands for $target:" 1>&2 ; fi
                 PATH=$( printf %s: @{native.util-linux}/{,s}bin @{native.coreutils}/{,s}bin @{native.findutils}/{,s}bin @{native.gnugrep}/{,s}bin @{native.gnused}/{,s}bin @{native.systemd}/{,s}bin ) ; PATH=${PATH%:}
                 set -uo pipefail ; root="$mnt"/ # (same as the 'prepare' snippet in pre-mount-commands.nix)
+                export IN_NIXOS_INSTALLER=1
                 if [[ ${args[quiet]:-} ]] ; then
                     eval "$cmd" &>/dev/null || exit
                 else eval "$cmd" || exit ; fi

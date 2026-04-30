@@ -274,7 +274,7 @@ in {
 
     })) (lib.mkIf (cfg.temp.type == "zfs") (let
         description = "ZFS rollback to ${cfg.temp.zfs.dataset}/**@empty";
-        command = ''zfs list -H -o name -t snapshot -r ${lib.escapeShellArg cfg.temp.zfs.dataset} | grep '@empty$' | xargs --no-run-if-empty --max-args=1 -- zfs rollback -r'';
+        command = ''zfs list -H -o name -t snapshot -r ${lib.escapeShellArg cfg.temp.zfs.dataset} | grep '@empty$' | xargs -r -n 1 -- zfs rollback -r''; # (busybox xargs doesn't support long args)
         pool = builtins.head (builtins.split "/" cfg.temp.zfs.dataset);
     in {
 

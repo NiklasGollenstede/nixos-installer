@@ -18,6 +18,9 @@ dirname: inputs@{ self, nixpkgs, functions, ...}: let
 
     getFlakeDir = input: error: if input != null && input.outPath == input.sourceInfo.outPath || lib.hasPrefix input.sourceInfo.outPath input.outPath then input.outPath else throw error;
 
+    # The (default) `nixosSystem` function itself defines the `baseModules` used. While `baseModules` _can_ be overwritten (as demonstrated here), `modulesPath` _will_ match this, so it should be about as good of a guess as possible, and the evaluation of this should be much less expensive than it looks on first glance, as only two trivial modules are evaluated.
+    getModulesVersion = nixosSystem: builtins.readFile "${(nixosSystem { modules = [ ]; baseModules = [ { options.nixpkgs.flake.source._type = "option"; } ]; }).config.nixpkgs.flake.source}/.version";
+
     # TODO: Pretty much wherever modules are automatically imported, they should be `filter`ed by `._class or "nixos" == "nixos"`. Or does that happen on import? Docs say "the module system will reject `imports` with a different `_class` declaration". Got to think about where to do this or lift the declaration, especially when aggregating and transforming modules.
 
 in rec {
@@ -30,7 +33,7 @@ in rec {
         extraModules ? [ ], moduleArgs ? { }, nixosArgs ? { },
         nixosSystem ? inputs.self.lib.nixosSystem or inputs.self.lib.__internal__.nixosSystem or inputs.nixpkgs.lib.nixosSystem,
         buildPlatform ? null,
-        modulesVersion ? builtins.readFile "${(nixosSystem { modules = [ ]; baseModules = [ { options.nixpkgs.flake.source._type = "option"; } ]; }).config.nixpkgs.flake.source}/.version",
+        modulesVersion ? (getModulesVersion nixosSystem),
     }: let
         mainWithName = (let # ensure that in the main module, the "name" parameter is available during the import stage already:
             module = if (builtins.isPath mainModule) || (builtins.isString mainModule) then (importWrapped inputs mainModule).module else mainModule;
@@ -143,7 +146,7 @@ in rec {
         # The »nixosSystem« function defined in »<nixpkgs>/flake.nix«, or equivalent. This determines the default NixOS modules (`baseModules`) and the `lib` and (default) `pkgs` is passed to them.
         nixosSystem ? inputs.self.lib.nixosSystem or inputs.self.lib.__internal__.nixosSystem or inputs.nixpkgs.lib.nixosSystem, # (priority: exported by self, imported/used by self, default)
         # The NixOS version, specifically the version of the NixOS base modules (as opposed to that of `pkgs` or `lib`).
-        modulesVersion ? builtins.readFile "${(nixosSystem { modules = [ ]; baseModules = [ { options.nixpkgs.flake.source._type = "option"; } ]; }).config.nixpkgs.flake.source}/.version", # The (default) `nixosSystem` function defines this itself. While baseModules _can_ be overwritten (as demonstrated here), `modulesPath` _will_ match this, so it should be about as good of a guess as possible.
+        modulesVersion ? (getModulesVersion nixosSystem),
         # Attribute path labels to prepend to option names/paths. Useful for debugging when building multiple systems at once.
         prefix ? (name: [ "[${if renameOutputs == false then name else renameOutputs name}]" ]),
         # If provided, this will be set as »config.nixpkgs.buildPlatform« for all hosts, which in turn enables cross-compilation for all hosts whose »config.nixpkgs.hostPlatform« (the architecture they will run on) does not expand to the same value. Without this, building for other platforms may still work (slowly) if »boot.binfmt.emulatedSystems« on the building system is configured for the respective target(s).
@@ -229,7 +232,7 @@ in rec {
                     $ nix run .#$host -- install-system --disks=/tmp/system-$host.img
 
                 Test a fresh installation of »$host« in a qemu VM:
-                    $ nix run .#$host -- run-qemu --install=always
+                    $ nix run .#$host -- run-qemu --reinstall
 
                 Run an interactive bash session with the setup functions in the context of the current host:
                     $ nix run /etc/nixos/#$(hostname)

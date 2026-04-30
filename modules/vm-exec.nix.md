@@ -57,11 +57,11 @@ in let hostModule = {
                 script=''${argv[0]:?'The first positional argument must be the script to execute in the VM'} ; argv=( "''${argv[@]:1}" )
 
                 tmp=$( mktemp -d nix-vm.XXXXXXXXXX --tmpdir ) && trap "rm -rf '$tmp'" EXIT || exit
-                mkdir -p $tmp/{xchg,shared} && printf '%s\n' "$script" >$tmp/xchg/script && chmod +x $tmp/xchg/script || exit
+                mkdir -p $tmp/{xchg/args,shared} && printf '%s\n' "$script" >$tmp/xchg/args/script && chmod +x $tmp/xchg/args/script || exit
                 if [[ ! ''${args[initrd-console]:-} ]] ; then noConsole=1 ; fi
-                if [[ ''${args[initrd-console]:-} ]] ; then touch $tmp/xchg/initrd-console ; fi
-                if [[ ''${args[quiet]:-} ]] ; then touch $tmp/xchg/quiet ; fi
-                </etc/hosts grep -oP '127.0.0.[12] (?!localhost)\K.*' >$tmp/xchg/host
+                if [[ ''${args[initrd-console]:-} ]] ; then touch $tmp/xchg/args/initrd-console ; fi
+                if [[ ''${args[quiet]:-} ]] ; then touch $tmp/xchg/args/quiet ; fi
+                </etc/hosts grep -oP '127.0.0.[12] (?!localhost)\K.*' >$tmp/xchg/hostname
 
                 ${cfg.virtualisation.qemu.package}/bin/qemu-img create -f qcow2 $tmp/dummyImage 4M &>/dev/null # do this silently
 
@@ -77,7 +77,7 @@ in let hostModule = {
                     ${launch} "''${argv[@]}" || exit
                 fi
 
-                if [[ -e $tmp/xchg/exit ]] ; then \exit "$( cat $tmp/xchg/exit )" ; fi
+                if [[ -e $tmp/xchg/exit-code ]] ; then \exit "$( cat $tmp/xchg/exit-code )" ; fi
                 echo "Execution in VM failed!" 1>&2 ; \exit 1
             ''} $out/bin/${name}
         '');
@@ -93,7 +93,7 @@ in let hostModule = {
         # Instead of tearing down the initrd environment, adjust some mounts and run the »command« in the initrd:
         boot.initrd.systemd.enable = lib.mkVMOverride false;
         boot.initrd.postMountCommands = lib.mkAfter ''
-            set -x
+            #set -x
 
             for fs in tmp/shared tmp/xchg nix/store nix/var/nix/.ro-db ; do
                 mkdir -p /$fs && mount --move $targetRoot/$fs /$fs || fail
@@ -119,7 +119,7 @@ in let hostModule = {
             # Set up NATed networking:
             cat /etc/hosts >/etc/hosts.cp ; rm /etc/hosts ; mv /etc/hosts.cp /etc/hosts
             $toplevel/sw/bin/perl -pe 's/(127.0.0.[12]|::1)(?! localhost)/# /' -i /etc/hosts
-            { printf '10.0.2.2 ' ; cat /tmp/xchg/host ; } >>/etc/hosts
+            { printf '10.0.2.2 ' ; cat /tmp/xchg/hostname ; } >>/etc/hosts
             ip addr add 10.0.2.15/24 dev eth0
             ip link set dev eth0 up
             ip route add default via 10.0.2.2 dev eth0
@@ -135,11 +135,12 @@ in let hostModule = {
             mkdir -p /bin ; ln -sfT /run/current-system/sw/bin/sh /bin/sh
             mkdir -p /usr/bin ; ln -sfT /run/current-system/sw/bin/env /usr/bin/env
 
-            console=/dev/ttyS0 ; if [[ -e /tmp/xchg/initrd-console ]] ; then console=/dev/console ; fi # (does this even make a difference?)
-            if [[ -e /tmp/xchg/quiet ]] ; then printf '\n%s\n' 'magic:cm4alv0wly79p6i4aq32hy36i...' >$console ; fi
+            console=/dev/ttyS0 ; if [[ -e /tmp/xchg/args/initrd-console ]] ; then console=/dev/console ; fi # (does this even make a difference?)
+            if [[ -e /tmp/xchg/args/quiet ]] ; then printf '\n%s\n' 'magic:cm4alv0wly79p6i4aq32hy36i...' >$console ; fi
+            export BLE_DISABLED=1
 
-            set +x ; exit=0 ; bash /tmp/xchg/script <$console >$console 2>$console || exit=$?
-            echo $exit >/tmp/xchg/exit
+            exit=0 ; bash /tmp/xchg/args/script <$console >$console 2>$console || exit=$?
+            echo $exit >/tmp/xchg/exit-code
 
             sync ; sync
             echo 1 > /proc/sys/kernel/sysrq

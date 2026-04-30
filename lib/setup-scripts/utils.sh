@@ -27,15 +27,14 @@ function mkdir-sticky { # 1: path, 2?: fallbackOwner, 3?: fallbackGroup, 4?: fal
     fi
 }
 
-## Writes a »$name«d secret from stdin to »$targetDir«, ensuring proper file permissions.
-function write-secret {( set -u # 1: path, 2?: owner[:[group]], 3?: mode
-    mkdir -p -- "$(dirname "$1")"/ || exit
-    install -o root -g root -m 000 -T /dev/null "$1" || exit
-    secret=$(tee "$1") # copy stdin to path without removing or adding anything
-    if [[ "${#secret}" == 0 ]] ; then echo "write-secret to $1 was empty!" 1>&2 ; \exit 1 ; fi # could also stat the file ...
-    chown "${2:-root:root}" -- "$1" || exit
-    chmod "${3:-400}"       -- "$1" || exit
-)}
+## Writes a »$name«d secret from stdin to »$path«, ensuring proper file permissions.
+function write-secret { set -u # 1: path
+    mkdir -p -- "$(dirname "$1")"/ || return
+    install -m 200 -T /dev/null "$1" || return
+    local secret=$( tee "$1" ) # copy stdin to path without removing or adding anything
+    if [[ "${#secret}" == 0 ]] ; then echo "write-secret to $1 was empty!" 1>&2 ; \return 1 ; fi # could also stat the file ...
+    chmod 400       -- "$1" || return
+}
 
 ## Interactively prompts for a password to be entered and confirmed.
 function prompt-new-password {( set -u # 1: usage
@@ -54,9 +53,9 @@ function prompt-new-password-thrice {
 
 ## If »secretFile« does not exist, interactively prompts up to three times for the secret to be stored in that file.
 declare-flag '*' no-optional-prompts "" "Skip prompting for (and thus saving) secret marked as optional."
-function prompt-secret-as {( set -u # 1: what, 2: secretFile, 3?: owner[:[group]], 4?: mode
+function prompt-secret-as {( set -u # 1: what, 2: secretFile
     if [[ ${arg_optional:-} && ${args[no-optional-prompts]:-} ]] ; then \return ; fi ; if [[ -e $2 ]] ; then \return ; fi
-    what=$1 ; shift
+    what=$1 ; secretFile=$2
     function prompt {
         read -s -p "Please enter $what: " value || exit ; echo 1>&2
         if (( ${#value} == 0 )) ; then printf 'Nothing entered. ' 1>&2 ; \return 1 ; fi
@@ -64,7 +63,7 @@ function prompt-secret-as {( set -u # 1: what, 2: secretFile, 3?: owner[:[group]
         if [[ $check && $value != "$check" ]] ; then printf 'Entered values mismatch. ' 1>&2 ; \return 1 ; fi
     }
     for attempt in 2 3 x ; do
-        if prompt && printf %s "$value" | write-secret "$@" ; then break ; fi
+        if prompt && printf %s "$value" | write-secret "$secretFile" ; then break ; fi
         if [[ $attempt == x ]] ; then echo "Aborting." 1>&2 ; \return 1 ; fi
         echo "Retrying ($attempt/3):" 1>&2
     done

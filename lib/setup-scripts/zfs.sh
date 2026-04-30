@@ -156,7 +156,7 @@ function ensure-datasets {
 ## Given the name (»datasetPath«) of a ZFS dataset, this deducts crypto-related options from the declared keys (»config.setup.keystore.keys."zfs/..."«).
 function get-zfs-crypt-props { # 1: datasetPath, 2?: name_cryptProps, 3?: name_cryptKey, 4?: name_cryptRoot
     local hash=@{config.networking.hostName!hashString.sha256:0:8}
-    local keystore=/run/keystore-$hash
+    local keystore=${args[keystore]:-/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}}
     local -n __cryptProps=${2:-props} ; local -n __cryptKey=${3:-cryptKey} ; local -n __cryptRoot=${4:-cryptRoot}
 
     local name=$1 ; {
@@ -168,7 +168,7 @@ function get-zfs-crypt-props { # 1: datasetPath, 2?: name_cryptProps, 3?: name_c
         if [[ @{config.setup.keystore.keys[zfs/$name]} == unencrypted ]] ; then
             __cryptProps[encryption]=off  # empty key to disable encryption
         else
-            __cryptProps[encryption]=aes-256-gcm ; __cryptProps[keyformat]=hex ; __cryptProps[keylocation]=file://"$keystore"/zfs/"$name".key
+            __cryptProps[encryption]=aes-256-gcm ; __cryptProps[keyformat]=hex ; __cryptProps[keylocation]=file://$keystore/zfs/$name.key
             __cryptKey=$keystore/zfs/$name.key ; __cryptRoot=$name
         fi
     else

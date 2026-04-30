@@ -57,7 +57,8 @@ declare-flag run-qemu direct            "" "Directly boot kernel/initrd/cmdline,
 declare-flag run-qemu efi               "" "Treat the target system as EFI system, even if not recognized as such automatically."
 declare-flag run-qemu efi-vars      "path" "For »--efi« systems, path to a file storing the EFI variables. The default is in »XDG_RUNTIME_DIR«, i.e. it does not persist across host reboots."
 declare-flag run-qemu graphic           "" "Open a graphical window even of the target system logs to serial and not (explicitly) TTY1."
-declare-flag run-qemu install "[1|always]" "If any of the guest system's disk images does not exist, perform the its installation before starting the VM. If set to »always«, always install before starting the VM."
+declare-flag run-qemu install           "" "If any of the guest system's disk images does not exist, perform the its installation before starting the VM."
+declare-flag run-qemu reinstall         "" "Perform a new installation before starting the VM, replacing any existing images."
 declare-flag run-qemu no-kvm            "" "Do not try to use (or complain about the unavailability of) KVM."
 declare-flag run-qemu nat-fw    "forwards" "Port forwards to the guest's NATed NIC. E.g: »--nat-fw=:8000-:8000,:8001-:8001,127.0.0.1:2022-:22«."
 declare-flag run-qemu no-nat            "" "Do not provide a NATed NIC to the guest."
@@ -177,10 +178,10 @@ function run-qemu { # ...: qemuArgs
 
     apply-vm-args
 
-    if [[ ${args[install]:-} == 1 ]] ; then local disk ; for disk in "${disks[@]}" ; do
-        if [[ ! -e $disk ]] ; then args[install]=always ; fi
+    if [[ ${args[install]:-} ]] ; then local disk ; for disk in "${disks[@]}" ; do
+        if [[ ! -e $disk ]] ; then args[reinstall]=1 ; fi
     done ; fi
-    if [[ ${args[install]:-} == always ]] && [[ ! ${args[dry-run]:-} ]] ; then (
+    if [[ ${args[reinstall]:-} ]] && [[ ! ${args[dry-run]:-} ]] ; then (
         if [[ ! ${args[trace]:-} ]] && [[ ! ${args[debug]:-} ]] ; then args[quiet]=1 ; fi
         args[no-inspect]=1 ; install-system || exit
     ) || return ; fi
@@ -190,8 +191,6 @@ function run-qemu { # ...: qemuArgs
         echo "${qemu[@]}"
     else
         echo + "${qemu[@]}" ; for _ in $( seq $( @{native.ncurses}/bin/tput lines ) ) ; do echo ; done
-        #sleep 5
-        #sleep 9999999
         "${qemu[@]}" || return
     fi
 
@@ -226,10 +225,11 @@ For the exit traps to trigger on exit from the calling script / shell, this can'
 See »open-system«'s implementation for some example calls to this function.
 EOD
 function mount-keystore-luks {
-    local keystore=keystore-@{config.networking.hostName!hashString.sha256:0:8}
-    mkdir -p -- /run/$keystore && prepend_trap "[[ ! -e /run/$keystore ]] || rmdir /run/$keystore" EXIT || return
-    @{native.cryptsetup}/bin/cryptsetup open "$@" /dev/disk/by-partlabel/$keystore $keystore && prepend_trap "@{native.cryptsetup}/bin/cryptsetup close $keystore" EXIT || return
-    @{native.util-linux}/bin/mount -o nodev,umask=0077,fmask=0077,dmask=0077,ro /dev/mapper/$keystore /run/$keystore && prepend_trap "@{native.util-linux}/bin/umount /run/$keystore" EXIT || return
+    local keystore=${args[keystore]:-/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}}
+    local device=keystore-@{config.networking.hostName!hashString.sha256:0:8}
+    mkdir -p -- "$keystore" && prepend_trap "rmdir $( printf '%q' "$keystore" )" EXIT || return
+    @{native.cryptsetup}/bin/cryptsetup open "$@" /dev/disk/by-partlabel/$device $device && prepend_trap "@{native.cryptsetup}/bin/cryptsetup close $device" EXIT || return
+    @{native.util-linux}/bin/mount -o nodev,umask=0077,fmask=0077,dmask=0077,ro /dev/mapper/$device "$keystore" && prepend_trap "@{native.util-linux}/bin/umount $( printf '%q' "$keystore" )" EXIT || return
 }
 
 ## Opens the keystore with the primary unlock method, which may not be convenient to use, but should always be defined.

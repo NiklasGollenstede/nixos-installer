@@ -12,13 +12,10 @@ function prompt-for-user-passwords { # (void)
 }
 
 
-## Mounts a ramfs as the host's keystore and populates it with keys as requested by »config.setup.keystore.keys«.
+## Populates a keystore dir with keys as requested by »config.setup.keystore.keys«.
 #  Depending on the specified key types/sources, this may prompt for user input.
-function populate-keystore { # (void)
-    local keystore=/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}
-
-    mkdir -p $keystore && chmod 750 $keystore && prepend_trap "rmdir $keystore" EXIT || return
-    @{native.util-linux}/bin/mount ramfs -t ramfs $keystore && prepend_trap "@{native.util-linux}/bin/umount $keystore" EXIT || return
+function populate-keystore { # 1?: keystore
+    local keystore=${1:-${args[keystore]?"Keystore path is required"}} ; mkdir -p "$keystore" || return
 
     local -A methods=( ) ; local -A options=( )
     local usage ; for usage in "@{!config.setup.keystore.keys[@]}" ; do
@@ -51,7 +48,7 @@ function populate-keystore { # (void)
 
 ## Creates the LUKS devices specified by the host using the keys created by »populate-keystore«.
 function create-luks-layers { # (void)
-    local keystore=/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}
+    local keystore=${args[keystore]:-/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}}
     for luksName in "@{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ; do
         local rawDev=@{config.boot.initrd.luks.devices!catAttrSets.device[$luksName]}
         if ! is-partition-on-disks "$rawDev" "${blockDevs[@]}" ; then echo "Partition alias $rawDev used by LUKS device $luksName does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
@@ -69,7 +66,7 @@ function create-luks-layers { # (void)
 
 ## Opens the LUKS devices specified by the host, using the host's (open) keystore.
 function open-luks-layers { # (void)
-    local keystore=/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}
+    local keystore=${args[keystore]:-/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}}
     for luksName in "@{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ; do
         if [[ -e /dev/mapper/$luksName ]] ; then continue ; fi
         local rawDev=@{config.boot.initrd.luks.devices!catAttrSets.device[$luksName]}

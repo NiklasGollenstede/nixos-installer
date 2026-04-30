@@ -27,11 +27,11 @@ function gen-key-usb-part {( set -eu # 1: usage
 )}
 
 ## Outputs a key by simply printing an different keystore entry (that must have been generated before).
-function gen-key-copy {( set -eu # 1: _, 2: source
-    source=$2
-    keystore=/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}
+function gen-key-copy { # 1: _, 2: source
+    local source=$2
+    local keystore=${args[keystore]:-/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}}
     cat "$keystore"/"$source".key
-)}
+}
 
 ## Outputs a key by simply using the constant »$value« passed in.
 function gen-key-constant {( set -eu # 1: _, 2: value
@@ -48,7 +48,7 @@ function gen-key-password {( set -eu # 1: usage
 ## Generates a key by prompting for (or reusing) a »$user«'s password, combining it with »$keystore/home/$user.key«.
 function gen-key-home-composite {( set -eu # 1: usage, 2: user
     usage=$1 ; user=$2
-    keystore=/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}
+    keystore=${args[keystore]:-/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}}
     if [[ ${!userPasswords[@]} && ${userPasswords[$user]:-} ]] ; then
         password=${userPasswords[$user]}
     else
@@ -87,21 +87,17 @@ function gen-key-yubikey {( set -eu # 1: usage, 2: serialAndSlotAndSalt(as »ser
     salt=${args/$serial:$slot:/}
     usagE="$usage" ; if [[ "$usage" =~ ^(luks/.*/[0-8])$ ]] ; then usagE="${usage:0:(-2)}" ; fi # produce the same secret, regardless of the target luks slot
     challenge="@{config.networking.hostName}:$usagE${salt:+:$salt}"
-    gen-key-yubikey-challenge "$usage" "$serial:$slot:$challenge" '' "challenge »"$challenge":1/2« to create key »@{config.networking.hostName}:$usage«"
+    gen-key-yubikey-challenge "$usage" "$serial:$slot:$challenge" '' "challenge »$challenge:1/2« to create key »@{config.networking.hostName}:$usage«"
 )}
 
 ## Generates a reproducible secret by challenging slot »$slot« of YubiKey »$serial« with the fixed »$challenge«.
 function gen-key-yubikey-challenge {( set -eu # 1: _, 2: serialAndSlotAndChallenge(as »$serial:$slot:$challenge«), 3?: onlyOnce, 4?: message
-    args=$2 ; onlyOnce=$3 ; message=$4
-    serial=$( <<<"$args" cut -d: -f1 ) ; slot=$( <<<"$args" cut -d: -f2 )
-    challenge=${args/$serial:$slot:/}
+    usage=$1 ; args=$2 ; onlyOnce=${3:-} ; times="twice" ; suffix=':1/2' ; if [[ $onlyOnce ]] ; then times="once" ; suffix='' ; fi
+    serial=$( <<<"$args" cut -d: -f1 ) ; slot=$( <<<"$args" cut -d: -f2 ) ; challenge=${args/$serial:$slot:/}
+    message=${4:-"challenge »$challenge$suffix« to create key »@{config.networking.hostName}:$usage«"}
 
     if [[ "$serial" != "$( @{native.yubikey-personalization}/bin/ykinfo -sq 2>/dev/null )" ]] ; then printf 'Please insert / change to YubiKey with serial %s!\n' "$serial" 1>&2 ; fi
-    if [[ ! $onlyOnce ]] ; then
-        read -p 'Challenging YubiKey '"$serial"' slot '"$slot"' twice with '"$message"'. Enter to continue, or Ctrl+C to abort:'
-    else
-        read -p 'Challenging YubiKey '"$serial"' slot '"$slot"' once with '"$message"'. Enter to continue, or Ctrl+C to abort:'
-    fi
+    read -p "Challenging YubiKey $serial slot $slot $times with $message. Enter to continue, or Ctrl+C to abort:"
     if [[ "$serial" != "$( @{native.yubikey-personalization}/bin/ykinfo -sq )" ]] ; then printf 'YubiKey with serial %s not present, aborting.\n' "$serial" 1>&2 ; \exit 1 ; fi
 
     if [[ ! $onlyOnce ]] ; then

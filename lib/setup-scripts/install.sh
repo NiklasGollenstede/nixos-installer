@@ -40,8 +40,8 @@ declare-flag install-system vm "" "Perform the system installation in a qemu VM 
 The VM boots the target system's kernel (or a slight modification of it, if the system kernel is not bootable in qemu) and performs the installation at the end of the first boot stage (instead of mounting the root filesystem and starting systemd).
 The target disks or images are passed into the VM as block devices (and are the only devices available there). The host's »/nix/« folder is passed as a read-only network share. This makes the installation safe and secure, but also slower (network share), and may cause problems with custom install commands.
 The calling user should have access to KVM, or the installation will be very very slow.
-See also the »--no-vm« and »--vm-shared=« flags."
-declare-flag install-system no-vm "" "Never perform the installation in a VM. Fail if not executed as »root«."
+See also the »--disallow-vm« and »--vm-shared=« flags."
+declare-flag install-system disallow-vm "" "Never perform the installation in a VM. Fail if not executed as »root«."
 
 ## Does some argument validation, performs some sanity checks, includes a hack to make installation work when nix isn't installed for root, and runs the installation in qemu (if requested).
 function prepare-installer {
@@ -51,8 +51,8 @@ function prepare-installer {
     umask g-w,o-w # Ensure that files created without explicit permissions are not writable for group and other.
 
     if [[ "$(id -u)" != '0' ]] ; then
-        if [[ ! ${args[no-vm]:-} ]] ; then exec-in-qemu install-system || return ; \exit 0 ; fi
-        echo 'Script must be run as root or in qemu (without »--no-vm«).' 1>&2 ; \return 1
+        if [[ ! ${args[disallow-vm]:-} ]] ; then exec-in-qemu install-system || return ; \exit 0 ; fi
+        echo 'Script must be run as root or in qemu (without »--disallow-vm«).' 1>&2 ; \return 1
     fi
     if [[ ${args[vm]:-} ]] ; then exec-in-qemu install-system || return ; \exit 0 ; fi
 
@@ -80,10 +80,11 @@ declare-flag install-system vm-shared "dir-path" "When installing inside the VM,
 declare-flag install-system vm-args "qemu-args" "When installing inside the VM, extra arguments to pass to qemu."
 
 ## (Re-)executes the current system's script in a qemu VM.
+#  This changes the global $args, so it should probably be called as the last thing in the script/subshell.
 function exec-in-qemu { # 1: entry, ...: argv
 
-    qemu=( ) ; apply-vm-args
-    args[vm]='' ; args[no-vm]=1
+    local qemu=( ) ; local command='' ; apply-vm-args
+    args[vm]='' ; args[disallow-vm]=1
 
     if [[ ${args[disks]:-} ]] ; then
         # (not sure whether this works for block devices)
@@ -103,6 +104,16 @@ function exec-in-qemu { # 1: entry, ...: argv
         args[disks]=${args[disks]%:}
     fi
 
+    declare -g -A vmShares=( )
+    if [[ ${args[keystore]:-} ]] ; then
+        vmShares[keystore]=${args[keystore]}
+        args[keystore]=/tmp/shares/keystore
+    fi
+    for share in "${!vmShares[@]}" ; do
+        qemu+=( -virtfs local,path="${vmShares[$share]}",security_model=none,mount_tag=shares/"$share",id=shares_"$share",readonly=on )
+        command+="mkdir -p /tmp/shares/$share && mount -t 9p -o trans=virtio,version=9p2000.L,msize=16384,ro shares/$share /tmp/shares/$share || exit"$'\n'
+    done
+
     newArgs=( ) ; (( $# == 0 )) || newArgs+=( "$@" )
     for arg in "${!args[@]}" ; do newArgs+=( --"$arg"="${args[$arg]}" ) ; done
 
@@ -115,7 +126,7 @@ function exec-in-qemu { # 1: entry, ...: argv
     local scripts=$self ; if [[ @{pkgs.stdenv.hostPlatform.system} != "@{native.stdenv.hostPlatform.system}" ]] ; then
         scripts=$( build-lazy @{inputs.self}'#'apps.@{pkgs.stdenv.hostPlatform.system}.@{config.installer.outputName:?}.derivation ) || return
     fi
-    local command="$scripts $( printf '%q ' "${newArgs[@]}" ) || exit"
+    command+="$scripts $( printf '%q ' "${newArgs[@]}" ) || exit"$'\n'
 
     local runInVm ; runInVm=$( build-lazy $output )/bin/run-@{config.system.name}-vm-exec || return
 

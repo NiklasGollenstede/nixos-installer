@@ -20,7 +20,7 @@ function mkdir-sticky { # 1: path, 2?: fallbackOwner, 3?: fallbackGroup, 4?: fal
     parent=$( realpath "$parent" ) || return
     stat=( $( stat --format '%u %g %a' "$parent" ) ) || return
     if [[ ${stat[2]} =~ ^1...$ ]] ; then # sticky parent
-        #echo "Can't infer correct ownership/permissions for child '$( basename "$path" )' of sticky dir '$parent'" 1>&2 ; return 1
+        #echo "Can't infer correct ownership/permissions for child '$( basename "$path" )' of sticky dir '$parent'" 1>&2 ; \return 1
         install --directory --owner="${1:-0}" --group="${2:-0}" ${3:+--mode="$3"} "$path" || return
     else
         install --directory --owner=${stat[0]} --group=${stat[1]} --mode=${stat[2]} "$path" || return
@@ -85,12 +85,11 @@ function run-hook-script { # 1: title, 2: scriptPath
 ## Lazily builds a nix derivation at run time, instead of when building the script.
 #  When maybe-using packages that take long to build, instead of »at{some.package.out}«, use: »$( build-lazy at{some.package.drvPath!unsafeDiscardStringContext} out )«
 function build-lazy { # 1: drvPath, 2?: output
-    # Nix v2.14 introduced a new syntax for selecting the output of multi-output derivations, v2.15 then changed the default when passing the path to an on-disk derivation. »--print-out-paths« is also not available in older versions.
-    if version-gr-eq "@{native.nix.version}" '2.14' ; then
-        PATH=$PATH:@{native.openssh}/bin @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --print-out-paths ${args[quiet]:+--quiet} "$1"'^'"${2:-out}"
-    else
-        PATH=$PATH:@{native.openssh}/bin @{native.nix}/bin/nix --extra-experimental-features nix-command build --no-link --json ${args[quiet]:+--quiet} "$1" | @{native.jq}/bin/jq -r .[0].outputs."${2:-out}"
-    fi
+    nix-wrapped build --no-link --print-out-paths "$1"'^'"${2:-out}"
+}
+declare-flag '*' offline "" "Wether to pass »--offline« to nested nix invocations."
+function nix-wrapped { # ...: args
+    PATH=$PATH:@{native.openssh}/bin @{native.nix}/bin/nix --extra-experimental-features 'nix-command flakes' ${args[quiet]:+--quiet} ${args[offline]:+--offline} "$@"
 }
 
 ## Tests whether (returns 0/success if) the first version argument is greater/less than (or equal) the second version argument.

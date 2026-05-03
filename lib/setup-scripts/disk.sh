@@ -204,7 +204,7 @@ function format-partitions {
             if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${fs[device]/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device ${fs[device]} used by filesystem ${fs[name]} does not point at one of the device mappings ${!config.boot.initrd.luks.devices!catAttrSets.device[@]}" 1>&2 ; \return 1 ; fi
         else continue ; fi
         eval 'declare -a formatArgs='"${fs[formatArgs]}"
-        ( PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH ; ${_set_x:-:} ; mkfs."${fs[fsType]}" "${formatArgs[@]}" "${fs[device]}" >$beLoud 2>$beSilent ) || return
+        ( ${_set_x:-:} ; "${fs[formatProg]}" "${formatArgs[@]}" -- "${fs[device]}" >$beLoud 2>$beSilent ) || return
         @{native.parted}/bin/partprobe "${fs[device]}" || true
     done
     for swapDev in "@{config.swapDevices!catAttrs.device[@]}" ; do
@@ -241,7 +241,7 @@ function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowNoautoFail
     # This function depends on the file at »fstabPath« to be sorted like that.
 
     mnt=$1 ; fstabPath=${2:-"@{config.system.build.toplevel}/etc/fstab"} ; allowNoautoFail=${3:-}
-    PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH
+    #PATH=@{native.e2fsprogs}/bin:@{native.f2fs-tools}/bin:@{native.xfsprogs}/bin:@{native.dosfstools}/bin:$PATH # TODO: why would we need these on the PATH here?
 
     # The following is roughly equivalent to: mount --all --fstab "$fstabPath" --target-prefix "$mnt" -o X-mount.mkdir # (but »--target-prefix« does not apply to bind/overlay sources)
     while read -u3 source target type options numbers ; do

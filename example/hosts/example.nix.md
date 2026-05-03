@@ -15,6 +15,7 @@ Then to boot the system in a qemu VM with KVM:
 ```bash
  nix run .'#'$hostname -- run-qemu --disks=/tmp/$hostname/
  nix run .'#'minimal-setup -- run-qemu --reinstall --share=home:/home/user,readonly=on
+ nix run .'#'erofs -- run-qemu --reinstall
 ```
 See `nix run .#$hostname -- --help` for options and more commands.
 
@@ -23,10 +24,10 @@ See `nix run .#$hostname -- --help` for options and more commands.
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS config flake input:
-dirname: inputs: { config, pkgs, lib, name, ... }: let lib = inputs.self.lib.__internal__; in let
+dirname: inputs: { config, pkgs, lib, name, modulesPath, ... }: let lib = inputs.self.lib.__internal__; in let
     hash = builtins.substring 0 8 (builtins.hashString "sha256" name);
 in { preface = { # (any »preface« options have to be defined here)
-    instances = [ "explicit-fs" "complex-fs" "minimal-setup" "encrypted" "multi-disk-raidz" "rpi" "fake-rpi" ]; # Generate multiple variants of this host, with these »name«s.
+    instances = [ "explicit-fs" "erofs" "complex-fs" "minimal-setup" "encrypted" "multi-disk-raidz" "rpi" "fake-rpi" ]; # Generate multiple variants of this host, with these »name«s.
 }; imports = [ ({ ## Hardware
 
     nixpkgs.hostPlatform = if name == "rpi" then "aarch64-linux" else "x86_64-linux"; system.stateVersion = "24.05";
@@ -59,6 +60,30 @@ in { preface = { # (any »preface« options have to be defined here)
     fileSystems."/boot"      = { fsType  =   "vfat";    device = "/dev/disk/by-partlabel/boot-${hash}"; neededForBoot = true; options = [ "noatime" ]; formatArgs = [ "-F" "32" ]; };
     fileSystems."/system"    = { fsType  =   "ext4";    device = "/dev/disk/by-partlabel/system-${hash}"; neededForBoot = true; options = [ "noatime" ]; formatArgs = [ "-O" "inline_data" "-E" "nodiscard" "-F" ]; };
     fileSystems."/nix/store" = { options = ["bind,ro"]; device = "/system/nix/store"; neededForBoot = true; };
+
+
+}) (lib.optionalAttrs (name == "erofs") { ## With Read-Only FS
+
+    # Declare a store and data partition.
+    setup.disks.partitions."store-${hash}" = { type = "8300"; size = "2G"; };
+    setup.disks.partitions."data-${hash}"  = { type = "8300"; size = null; order = 500; };
+
+    # Put everything except for /boot and /nix/store on a tmpfs. This is the absolute minimum, most usable systems require some more paths that are persistent (e.g. all of /nix and /home).
+    fileSystems."/"          = { fsType  =  "tmpfs";    device = "tmpfs"; neededForBoot = true; options = [ "mode=755" ]; };
+    fileSystems."/data"      = { fsType  =   "ext4";    device = "/dev/disk/by-partlabel/data-${hash}"; formatArgs = [ "-O" "inline_data" "-E" "nodiscard" "-F" ]; };
+    fileSystems."/nix/store" = { fsType  =  "erofs";    device = "/dev/disk/by-partlabel/store-${hash}"; neededForBoot = true; };
+    setup.disks.fileSystems."/nix/store" = {
+        formatArgs = [ "-L${"store-${hash}"}" "-U${config.setup.disks.partitions."store-${hash}".guid}" ];
+        formatProg = pkgs.closure2erofs.override { paths = config.system.build.toplevel; };
+    };
+    nix.enable = false; # won't work
+
+    imports = [ {
+        setup.disks.fileSystems."/nix/store".formatArgs = [
+            "-z" "lz4" # --compress-hints=file
+            #"--blobdev" "..." # Specify an extra blob device to store chunk-based data.
+        ];
+    } ];
 
 
 }) (lib.mkIf (name == "complex-fs") { ## More complex but automatic FS setup
@@ -181,6 +206,12 @@ in { preface = { # (any »preface« options have to be defined here)
     documentation.enable = false; # sometimes takes quite long to build
     #boot.initrd.availableKernelModules = [ "virtiofs" ];
     # Also want this kconfig (though that may be default or outdated): CONFIG_VIRTIO_FS=y CONFIG_FUSE_DAX=y
+
+    # Minimalism:
+    imports = [ "${modulesPath}/profiles/minimal.nix" ];
+    services.dbus.packages = lib.mkForce [ ];
+    programs.git.package = pkgs.gitMinimal;
+    security.sudo.enable = false;
 
 
 }) ({ ## Actual Config

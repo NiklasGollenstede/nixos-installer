@@ -13,6 +13,7 @@ dirname: inputs: { config, pkgs, lib, ... }: let lib = inputs.self.lib.__interna
     inherit (inputs.config.rename) setup;
     cfg = config.${setup}.disks; globalConfig = config;
     types.guid = lib.types.strMatching ''^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'';
+    fsType2tool = { vfat = pkgs.dosfstools; ext4 = pkgs.e2fsprogs.bin; f2fs = pkgs.f2fs-tools; btrfs = pkgs.btrfs-progs; xfs = pkgs.xfsprogs; }; # squashfs = pkgs.squashfsTools; erofs = pkgs.erofs-utils;
 in {
 
     options.${setup} = { disks = {
@@ -52,11 +53,12 @@ in {
             default = { };
         };
         fileSystems = lib.mkOption {
-            description = "Set of filesystems to be created on partitions or devices during installation. This  by default already contains any matching »config.fileSystems« definitions.";
+            description = "Set of filesystems to be created on partitions or devices during installation. This by default already contains any matching »config.fileSystems« definitions.";
             type = lib.fun.types.attrsOfSubmodules ({ name, config, ... }: { options = {
                 name = lib.mkOption { description = "Attribute and internal name of this filesystem. Recommendation: its intended mount point."; type = lib.types.str; default = name; readOnly = true; };
                 device = lib.mkOption { description = "Device path where this filesystem will be created. Can refer to a partition by its partlabel (»/dev/disk/by-partlabel/...«) or a LUKS mapping (»/dev/mapper/...«)."; type = lib.types.strMatching ''^/dev/(disk/by-partlabel/|mapper/).+$''; };
                 fsType = lib.mkOption { description = "Filesystem type to create."; type = lib.types.str; };
+                formatProg = lib.mkOption { description = "The »mkfs.*« program to use to create this file system, invoked with »formatArgs« and the device path as last argument. Defaults are defined for: ${lib.concatStringsSep ", " (lib.attrNames fsType2tool)}"; type = lib.types.pathInStore; };
                 formatArgs = lib.mkOption { description = "Options passed to the filesystem creation tool (e.g. »mkfs.ext4«) when formatting this filesystem during installation."; type = lib.types.listOf lib.types.str; default = [ ]; };
             }; });
             default = { };
@@ -69,7 +71,10 @@ in {
         # (Don't) create all devices referenced by partitions: (The problem with this is that all device attributes depend on the partition attributes, and it would thus be impossible to have a dependency in reverse (e.g. a partition's size based on the disk size).)
         #disks.devices = lib.genAttrs (lib.catAttrs "disk" config.${setup}.disks.partitionList) (name: { });
 
-        disks.fileSystems = lib.mapAttrs (_: fs: { inherit (fs) device fsType formatArgs; }) (lib.filterAttrs (_: fs: (
+        disks.fileSystems = lib.mapAttrs (_: fs: {
+            inherit (fs) device fsType formatArgs;
+            formatProg = lib.mkIf (fsType2tool ? ${fs.fsType}) (lib.mkOptionDefault "${fsType2tool.${fs.fsType}}/bin/mkfs.${fs.fsType}");
+        }) (lib.filterAttrs (_: fs: (
             (builtins.match ''^/dev/(disk/by-partlabel/|mapper/).+$'' fs.device) != null
         )) config.fileSystems);
 

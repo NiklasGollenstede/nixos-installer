@@ -261,7 +261,7 @@ in rec {
                 # add active »hostName« to shell prompt
                 PS1=''${PS1/\\$/\\[\\e[93m\\](${name})\\[\\e[97m\\]\\$}
 
-                source "'"$self"'" ; PATH=$hostPath
+                source '$( printf %q "$self" )' ; PATH=$hostPath
             ') -i -s ':' "$@" # execute : (noop) as command, preserve argv
         fi
 

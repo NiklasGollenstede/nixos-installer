@@ -250,7 +250,7 @@ function mount-keystore-default { # ...: indices
             if [[ $attempt == x ]] ; then break ; fi ; echo "Retrying ($attempt/3):"
         done
     done
-    return 1
+    \return 1
 }
 
 declare-command open-system diskImages << 'EOD'

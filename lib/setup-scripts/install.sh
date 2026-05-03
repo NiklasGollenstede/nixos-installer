@@ -66,14 +66,7 @@ function prepare-installer {
         if @{native.zfs}/bin/zfs get -o value -H name "$poolName" &>/dev/null ; then echo "ZFS pool »$poolName« is already imported. Export the pool before running the installer." 1>&2 ; \return 1 ; fi
     done
 
-    if [[ ${SUDO_USER:-} && ! $( PATH=$hostPath which nix 2>/dev/null ) && $( PATH=$hostPath which su 2>/dev/null ) ]] ; then # use Nix as the user who called this script, if Nix is not be set up for root
-        function nix {( set +x ; declare -a args=("$@") ; PATH=$hostPath su - "$SUDO_USER" -s "@{native.bashInteractive!getExe}" -c "$(declare -p args)"' ; nix "${args[@]}"' )}
-    else # use Nix by absolute path, as it won't be on »$PATH«
-        PATH=$PATH:@{native.nix}/bin
-    fi
-
     _set_x='set -x' ; if [[ ${args[quiet]:-} ]] ; then _set_x=: ; fi
-
 }
 
 declare-flag install-system vm-shared "dir-path" "When installing inside the VM, specifies a host path that is read-write mounted at »/tmp/shared« inside the VM."
@@ -104,7 +97,7 @@ function exec-in-qemu { # 1: entry, ...: argv
         args[disks]=${args[disks]%:}
     fi
 
-    declare -g -A vmShares=( )
+    declare -g -A vmShares
     if [[ ${args[keystore]:-} ]] ; then
         vmShares[keystore]=${args[keystore]}
         args[keystore]=/tmp/shares/keystore
@@ -124,7 +117,7 @@ function exec-in-qemu { # 1: entry, ...: argv
         output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec-@{pkgs.buildPackages.stdenv.hostPlatform.system}
     fi
     local scripts=$self ; if [[ @{pkgs.stdenv.hostPlatform.system} != "@{native.stdenv.hostPlatform.system}" ]] ; then
-        scripts=$( build-lazy @{inputs.self}'#'apps.@{pkgs.stdenv.hostPlatform.system}.@{config.installer.outputName:?}.derivation ) || return
+        scripts=$( build-lazy @{inputs.self}'#'.apps.@{pkgs.stdenv.hostPlatform.system}.@{config.installer.outputName:?}.derivation ) || return
     fi
     command+="$scripts $( printf '%q ' "${newArgs[@]}" ) || exit"$'\n'
 
@@ -182,18 +175,17 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
     fi
 
     # Copy system closure to new nix store:
-    if declare -f nix >&/dev/null ; then chown -R $SUDO_USER: $mnt/nix/store $mnt/nix/var || exit ; fi
-    cmd=( nix --extra-experimental-features nix-command --offline copy --no-check-sigs --to $mnt "$topLevel" )
-    if [[ ${args[quiet]:-} ]] ; then
+    cmd=( nix-wrapped --offline copy --no-check-sigs --to $mnt "$topLevel" )
+    if [[ ' erofs squashfs ' == *' '$( stat --file-system --format=%T $mnt/nix/store )' '* ]] ; then
+        : 'read-only FS, not copying'
+    elif [[ ${args[quiet]:-} ]] ; then
         "${cmd[@]}" --quiet >/dev/null 2> >( grep -Pe '^error:' || true ) || exit
-    elif  [[ ${args[quiet]:-} ]] ; then
+    elif [[ ${args[trace]:-} ]] ; then
         ( set -x ; time "${cmd[@]}" ) || exit
     else
         ( set -x ; "${cmd[@]}" ) || exit
     fi
     rm -rf $mnt/nix/var/nix/gcroots || exit
-    # TODO: if the target has @{config.nix.settings.auto-optimise-store} and the host doesn't (there is no .links dir?), optimize now
-    if declare -f nix >&/dev/null ; then chown -R root:root $mnt/nix $mnt/nix/var || exit ; chown :30000 $mnt/nix/store || exit ; fi
 
     # Set this as the initial system generation (in case »nixos-install-cmd« won't):
     # (does about the same as »nix-env --profile /nix/var/nix/profiles/system --set $targetSystem«)

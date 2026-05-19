@@ -68,8 +68,10 @@ in let module = {
         networking.hostId = lib.mkDefault (builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName)); # ZFS requires one, so might as well set a default.
 
         ## Implement »cfg.datasets.*.mount«:
-        fileSystems = lib.fun.mapMerge (path: { props, mount, ... }: if mount != false then {
-            "${props.mountpoint}" = { fsType = "zfs"; device = path; options = [ "zfsutil" "x-systemd.after=zfs-import.target" ] ++ (lib.optionals (mount == "noauto") [ "noauto" ]); };
+        fileSystems = lib.fun.mapMerge (path: { props, mount, ... }: let
+            pool.name = lib.head (lib.splitString "/" path);
+        in if mount != false then {
+            "${props.mountpoint}" = { fsType = "zfs"; device = path; options = [ "zfsutil" "x-systemd.after=zfs-import.target" "x-systemd.wants=zfs-ensure-${pool.name}.service" "x-systemd.after=zfs-ensure-${pool.name}.service" ] ++ (lib.optionals (mount == "noauto") [ "noauto" ]); };
         } else { }) cfg.datasets;
 
         ## Load keys (only) for (all) datasets that are declared as encryption roots and aren't disabled:
@@ -148,9 +150,9 @@ in let module = {
                 ] (_: extraUtils))); };
                 mapValue = v: if v._type or null == "moduleMeta" then null else v;
             }) script scripts vars;
-        in { script =  pkgs.writeScript "ensure-datasets" ''
+        in { script = pkgs.writeScript "ensure-datasets" ''
             #!${pkgs.pkgsStatic.bash}/bin/bash
-            set -o pipefail -o nounset ; declare-command () { : ; } ; declare-flag () { : ; } ;
+            set -o pipefail -o nounset ; declare-command () { : ; } ; declare-flag () { : ; } ; declare -A args ; declare -a argv
             ${script}
             ensure-datasets "$@"
         ''; inherit scripts vars; });
@@ -172,7 +174,7 @@ in let module = {
             extraUtils = if initrd then "/" else null;
         in rec {
             after = [ "zfs-import-${pool.name}.service" ];
-            before = [ "zfs-import.target" "shutdown.target" ]; wantedBy = [ "zfs-import.target" ]; conflicts = [ "shutdown.target" ];
+            before = [ "shutdown.target" ]; wantedBy = [ ]; conflicts = [ "shutdown.target" ];
             unitConfig.DefaultDependencies = false; # (not after basic.target or sysinit.target)
             serviceConfig.Type = "oneshot";
             script = ''

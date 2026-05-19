@@ -11,11 +11,15 @@ function prompt-for-user-passwords { # (void)
     done
 }
 
+declare-command populate-keystore '[--keystore=]keystore' << 'EOD'
+Populates a keystore dir with keys as requested by »config.setup.keystore.keys«.
+Depending on the specified key types/sources, this may prompt for user input.
 
-## Populates a keystore dir with keys as requested by »config.setup.keystore.keys«.
-#  Depending on the specified key types/sources, this may prompt for user input.
+This can be done explicitly with access to all files and hardware, before passing the result as »--keystore« to a VM installation.
+EOD
 function populate-keystore { # 1?: keystore
-    local keystore=${1:-${args[keystore]?"Keystore path is required"}} ; mkdir -p "$keystore" || return
+    local keystore=${1:-${args[keystore]?"Keystore path is required"}}
+    args[keystore]=$keystore ; mkdir -p "$keystore" || return
 
     local -A methods=( ) ; local -A options=( )
     local usage ; for usage in "@{!config.setup.keystore.keys[@]}" ; do

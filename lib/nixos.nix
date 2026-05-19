@@ -244,6 +244,7 @@ in rec {
         tools = lib.unique (map (p: p.outPath) (lib.filter lib.isDerivation pkgs.stdenv.allowedRequisites));
         esc = lib.escapeShellArg;
     in pkgs.writeShellScript "scripts-${name}" ''
+        # bash
         self=${builtins.placeholder "out"}
 
         # if first arg is »sudo«, re-execute this script with sudo (as root)

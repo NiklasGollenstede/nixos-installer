@@ -51,7 +51,7 @@ in let hostModule = {
         } ''
             mkdir -p $out/bin
             ln -s ${cfg.system.build.toplevel} $out/system
-            ln -s ${pkgs.writeShellScript name ''
+            ln -s ${pkgs.writeShellScript name '' # bash
                 source ${lib.fun.bash.generic-arg-parse}
                 generic-arg-parse "$@" ; set -- ; set -o pipefail -u #; set -x
                 script=''${argv[0]:?'The first positional argument must be the script to execute in the VM'} ; argv=( "''${argv[@]:1}" )
@@ -93,7 +93,7 @@ in let hostModule = {
         # Instead of tearing down the initrd environment, adjust some mounts and run the »command« in the initrd:
         boot.initrd.systemd.enable = lib.mkVMOverride false;
         boot.initrd.postMountCommands = lib.mkAfter ''
-            #set -x
+            #set -x # bash
 
             for fs in tmp/shared tmp/xchg nix/store nix/var/nix/.ro-db ; do
                 mkdir -p /$fs && mount --move $targetRoot/$fs /$fs || fail

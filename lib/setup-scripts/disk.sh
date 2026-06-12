@@ -186,8 +186,10 @@ function partition-disk { # 1: name, 2: blockDev, 3?: devSize
 
 ## Checks whether a »partition« resides on one of the provided »blockDevs«.
 function is-partition-on-disks { # 1: partition, ...: blockDevs
-    local partition=$1 ; shift ; local -a blockDevs=( "$@" )
-    local blockDev=/dev/$( basename "$( readlink -f /sys/class/block/"$( basename "$( realpath "$partition" )" )"/.. )" ) || return
+    local partition=$1 ; shift ; local -a blockDevs=( "$@" ) ; local blockDev
+    partition=$( realpath "$partition" ) || return
+    blockDev=$( readlink -f /sys/class/block/"$( basename "$partition" )"/.. ) || return
+    blockDev=/dev/$( basename "$blockDev" ) || return
     [[ ' '"${blockDevs[@]}"' ' == *' '"$blockDev"' '* ]] || return
 }
 

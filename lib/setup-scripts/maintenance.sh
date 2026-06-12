@@ -53,7 +53,7 @@ This function infers many qemu options from the target system's configuration an
 Note that this function may add cleanup scripts to the EXIT trap of the calling shell.
 EOD
 declare-flag run-qemu dry-run           "" "Instead of running the (main) qemu (and install) command, only print it."
-declare-flag run-qemu direct            "" "Directly boot kernel/initrd/cmdline, skipping the bootloader."
+declare-flag run-qemu direct     "cmdline" "Directly boot kernel/initrd/cmdline, skipping the bootloader. »cmdline«, if provided and unequal »1«, is appended to the kernel's default cmdline."
 declare-flag run-qemu efi               "" "Treat the target system as EFI system, even if not recognized as such automatically."
 declare-flag run-qemu efi-vars      "path" "For »--efi« systems, path to a file storing the EFI variables. The default is in »XDG_RUNTIME_DIR«, i.e. it does not persist across host reboots."
 declare-flag run-qemu graphic           "" "Open a graphical window even of the target system logs to serial and not (explicitly) TTY1."
@@ -97,7 +97,7 @@ function run-qemu { # ...: qemuArgs
     fi ; qemu+=( -cpu max )
 
     if [[ ${args[direct]:-} ]] ; then
-        qemu+=( -kernel @{config.system.build.kernel}/bzImage -initrd @{config.system.build.initialRamdisk}/initrd -append "$(echo -n "@{config.boot.kernelParams[@]}") init=@{config.system.build.toplevel}/init" )
+        qemu+=( -kernel @{config.system.build.kernel}/bzImage -initrd @{config.system.build.initialRamdisk}/initrd -append "$(echo -n "@{config.boot.kernelParams[@]}") init=@{config.system.build.toplevel}/init ${args[direct]}" )
 
     elif [[ @{config.virtualisation.useEFIBoot:-} || @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots SeaBIOS.
         local ovmf ; ovmf=$( build-lazy @{pkgs.OVMF.drvPath!unsafeDiscardStringContext} fd ) || return

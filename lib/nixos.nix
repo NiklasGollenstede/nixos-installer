@@ -1,6 +1,6 @@
-dirname: inputs@{ self, nixpkgs, functions, ...}: let
-    inherit (nixpkgs) lib;
-    inherit (functions.lib) forEachSystem getModulesFromInputs getNixFiles getOverlaysFromInputs importWrapped mapMerge mapMergeUnique mergeAttrsUnique withOverridable; # trace;
+dirname: inputs: let
+    lib = inputs.functions.lib.__internal__; # (our flake exports the result of calling a function defined here that returns a lib thing, which is probably why importing our own lib would result in an infinite recursion)
+    inherit (inputs.functions.lib) forEachSystem getModulesFromInputs getNixFiles getOverlaysFromInputs importWrapped mapMerge mapMergeUnique mergeAttrsUnique withOverridable; # trace;
     inherit (inputs.config.rename) installer; prefaceName = inputs.config.rename.preface;
 
     getModuleConfig = module: inputs: args: if builtins.isFunction module then (
@@ -31,7 +31,7 @@ in rec {
         # See »mkSystemsFlake« for documentation of the following arguments:
         inputs ? { }, modules ? (getModulesFromInputs inputs), overlays ? (getOverlaysFromInputs inputs),
         extraModules ? [ ], moduleArgs ? { }, nixosArgs ? { },
-        nixosSystem ? inputs.self.lib.nixosSystem or inputs.self.lib.__internal__.nixosSystem or inputs.nixpkgs.lib.nixosSystem,
+        nixosSystem ? inputs.self.lib.nixosSystem or inputs.nixpkgs.lib.nixosSystem,
         buildPlatform ? null,
         modulesVersion ? (getModulesVersion nixosSystem),
     }: let
@@ -54,11 +54,11 @@ in rec {
             # `specializations` use `noUserModules`, which inherit specialArgs and extraModules, or `extendModules` inherits all modules and arguments. VM-variants also use `extendModules`.
         ]; _file = "${dirname}/nixos.nix#modules"; } ];
 
-        extraModules = (nixosArgs.extraModules or [ ]) ++ modules ++ extraModules ++ [ { imports = [ (_: {
+        extraModules = (nixosArgs.extraModules or [ ]) ++ modules ++ extraModules ++ [ { imports = [ ({ options, ... }: {
             # These are passed as »extraModules« module argument and can thus be reused when defining containers and such (so define as much stuff as possible here).
             # Containers, for example, should be defined with »config.containers."${name}".config.imports = (moduleArgs.)extraModules«.
 
-            nixpkgs = { overlays = lib.mkBefore overlays; } // (lib.optionalAttrs (buildPlatform != null) { inherit buildPlatform; });
+            nixpkgs = (lib.optionalAttrs (overlays != [ ]) { overlays = lib.mkIf (options.nixpkgs.overlays.type.name !="unique") (lib.mkBefore overlays); }) // (lib.optionalAttrs (buildPlatform != null) { inherit buildPlatform; });
 
             _module.args = { inherit inputs; } // moduleArgs; # (pass the args here, so that they also apply to any other evaluation using »extraModules«)
 
@@ -144,7 +144,7 @@ in rec {
         # Additional arguments passed to each module evaluated for the host config (if that module is defined as a function).
         moduleArgs ? { },
         # The »nixosSystem« function defined in »<nixpkgs>/flake.nix«, or equivalent. This determines the default NixOS modules (`baseModules`) and the `lib` and (default) `pkgs` is passed to them.
-        nixosSystem ? inputs.self.lib.nixosSystem or inputs.self.lib.__internal__.nixosSystem or inputs.nixpkgs.lib.nixosSystem, # (priority: exported by self, imported/used by self, default)
+        nixosSystem ? inputs.self.lib.nixosSystem or inputs.nixpkgs.lib.nixosSystem, # (priority: exported by self, imported/used by self, default)
         # The NixOS version, specifically the version of the NixOS base modules (as opposed to that of `pkgs` or `lib`).
         modulesVersion ? (getModulesVersion nixosSystem),
         # Attribute path labels to prepend to option names/paths. Useful for debugging when building multiple systems at once.
@@ -153,18 +153,16 @@ in rec {
         buildPlatform ? null,
         ## The platforms for which the setup scripts (installation & maintenance/debugging) will be defined. Should include the ».buildPlatform« and/or the target system's »config.nixpkgs.hostPlatform«.
         setupPlatforms ? if inputs?systems then import inputs.systems else [ "aarch64-linux" "x86_64-linux" ],
-        ## Optional function that may replace the package set used to build the setup scripts.
-        replaceSetupPkgs ? pkgs: pkgs,
         ## If provided, then change the name of each output attribute by passing it through this function. Allows exporting of multiple variants of a repo's hosts from a single flake (by then merging the results):
         renameOutputs ? false,
         ## Whether to export the »all-systems« package as »packages.*.default« as well.
         asDefaultPackage ? false,
     ... }: override: let
-        getName = if renameOutputs == false then (name: name) else renameOutputs;
-        otherArgs = (builtins.removeAttrs args [ "hosts" "moduleInputs" "overlayInputs" "replaceSetupPkgs" "renameOutputs" "asDefaultPackage" ]) // {
+        rename = if renameOutputs == false then (name: name) else renameOutputs;
+        otherArgs = (builtins.removeAttrs args [ "hosts" "moduleInputs" "overlayInputs" "renameOutputs" "asDefaultPackage" ]) // {
             inherit inputs modules overlays moduleArgs nixosSystem modulesVersion buildPlatform extraModules prefix;
             nixosArgs = (args.nixosArgs or { }) // { modules = (args.nixosArgs.modules or [ ]) ++ [ { imports = [ (args: {
-                ${installer}.outputName = getName args.config._module.args.name;
+                ${installer}.outputName = rename args.config._module.args.name;
             }) ]; _file = "${dirname}/nixos.nix#mkSystemsFlake-extraModule"; } ]; };
         };
         nixosConfigurations = if builtins.isList hosts then mergeAttrsUnique (map (hosts: mkNixosConfigurations (otherArgs // hosts)) hosts) else mkNixosConfigurations (otherArgs // hosts);
@@ -172,39 +170,53 @@ in rec {
         inherit nixosConfigurations;
         inherit override; # where one would expect the override function after calling »mkSystemsFlake«
         lib.mkHosts = override; # where one might use it to create additional sets of hosts, based on the defaults set for the hosts that are exported by the flake
-    } // (forEachSystem setupPlatforms (buildSystem: let
-        pkgs' = (import inputs.nixpkgs { inherit overlays; system = buildSystem; });
-        pkgs = replaceSetupPkgs pkgs';
-    in rec {
+    } // (forEachSystem setupPlatforms (setupPlatform: rec {
 
-        apps = lib.mapAttrs (name: system: rec { type = "app"; derivation = writeSystemScripts { inherit name pkgs system; }; program = "${derivation}"; }) nixosConfigurations;
+        apps = lib.mapAttrs (name: system: rec { type = "app"; derivation = writeSystemScripts { inherit name system setupPlatform; }; program = "${derivation}"; }) nixosConfigurations;
 
         # dummy that just pulls in all system builds
-        packages = let all-systems = pkgs.runCommandLocal "all-systems" { } ''
-            mkdir -p $out/systems
-            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${system.config.system.build.toplevel} $out/systems/${getName name}") nixosConfigurations)}
-            mkdir -p $out/scripts
-            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${apps.${name}.program} $out/scripts/${getName name}") nixosConfigurations)}
-            mkdir -p $out/inputs
-            ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: { outPath, ... }: "ln -sT ${outPath} $out/inputs/${name}") inputs)}
-        ''; in { inherit all-systems; } // (lib.optionalAttrs asDefaultPackage { default = all-systems ; });
+        packages = let
+            pkgs = (import inputs.nixpkgs { inherit overlays; system = setupPlatform; });
+            all-systems = pkgs.runCommandLocal "all-systems" { } ''
+                mkdir -p $out/systems
+                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${system.config.system.build.toplevel} $out/systems/${rename name}") nixosConfigurations)}
+                mkdir -p $out/scripts
+                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: system: "ln -sT ${apps.${name}.program} $out/scripts/${rename name}") nixosConfigurations)}
+                mkdir -p $out/inputs
+                ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: { outPath, ... }: "ln -sT ${outPath} $out/inputs/${name}") inputs)}
+            '';
+        in { inherit all-systems; } // (lib.optionalAttrs asDefaultPackage { default = all-systems ; });
         checks.all-systems = packages.all-systems;
 
     })); in if renameOutputs == false then outputs else {
         nixosConfigurations = mapMergeUnique (k: v: { ${renameOutputs k} = v; }) outputs.nixosConfigurations;
         inherit override; lib.${renameOutputs "mkHosts"} = outputs.lib.mkHosts;
-    } // (forEachSystem setupPlatforms (buildSystem: {
-        apps = mapMergeUnique (k: v: { ${renameOutputs k} = v; }) outputs.apps.${buildSystem};
-        packages.${renameOutputs "all-systems"} = outputs.packages.${buildSystem}.all-systems;
-        checks.${renameOutputs "all-systems"} = outputs.checks.${buildSystem}.all-systems;
+    } // (forEachSystem setupPlatforms (setupPlatform: {
+        apps = mapMergeUnique (k: v: { ${renameOutputs k} = v; }) outputs.apps.${setupPlatform};
+        packages.${renameOutputs "all-systems"} = outputs.packages.${setupPlatform}.all-systems;
+        checks.${renameOutputs "all-systems"} = outputs.checks.${setupPlatform}.all-systems;
     })));
 
     # This makes the »./setup-scripts/*« callable from the command line:
     writeSystemScripts = {
         system, # The NiOS definition of the system that the scripts are supposed to manage.
         name ? system._module.args.name, # The system's name.
-        pkgs, # Package set for the host calling these scripts, which is not necessarily the same as »system«'s.
-    }: let
+        setupPlatform ? system.config.nixpkgs.hostPlatform.system, # The platform for which the scripts should be built.
+        pkgs ? null, # Package set for the host calling these scripts, which is not necessarily the same as »system«'s. Only pass this if it should actually be different from the »system«'s »pkgs«.
+    }@args: let
+        # BUG: pretty sure `lib.systems.equals` is broken: https://github.com/NixOS/nixpkgs/issues/530431
+        #differentPlatform = !(lib.systems.equals (lib.systems.elaborate setupPlatform) args.system.config.nixpkgs.hostPlatform);
+        differentPlatform = setupPlatform != args.system.config.nixpkgs.hostPlatform.system;
+
+        # If override in the line below is missing, make sure to apply the `../../patches/nixpkgs/pkgs-overridable.patch` to `inputs.nixpkgs`:
+        pkgs = if args.pkgs or null != null then args.pkgs else if !differentPlatform then args.system.config.${installer}.pkgs else args.system.config.${installer}.pkgs.override { localSystem = setupPlatform; crossSystem = null; };
+        system = if args.pkgs or null != null || differentPlatform then args.system.extendModules { modules = [ {
+            virtualisation.exec-vm.installer.config.virtualisation.host.pkgs = lib.mkForce pkgs; # (ths enables full virtualization of the target CPU architecture requested for the installation by the system)
+            #installer.pkgs = lib.mkForce pkgs; # (this would also replace the pkgs inside the build VM)
+        } ]; } else args.system;
+        scripts = system.config.${installer}.build.scripts.override (old: { context = old.context // { native = pkgs; }; }); # (depending on the above, this override may or may not actually change anything)
+        originalSystemScripts = if args.pkgs or null != null || differentPlatform then writeSystemScripts { inherit (args) system; inherit name; } else "";
+
         description = ''
             Call per-host setup and maintenance commands. Most importantly, »install-system«.
         '';
@@ -243,9 +255,9 @@ in rec {
         '';
         tools = lib.unique (map (p: p.outPath) (lib.filter lib.isDerivation pkgs.stdenv.allowedRequisites));
         esc = lib.escapeShellArg;
-    in pkgs.writeShellScript "scripts-${name}" ''
+    in (pkgs.writeShellScript "scripts-${name}" ''
         # bash
-        self=${builtins.placeholder "out"}
+        self=${builtins.placeholder "out"} ; originalSystemScripts=${originalSystemScripts}
 
         # if first arg is »sudo«, re-execute this script with sudo (as root)
         if [[ ''${1:-} == sudo ]] ; then shift ; exec sudo --preserve-env=SSH_AUTH_SOCK -- "$self" "$@" ; fi
@@ -269,8 +281,8 @@ in rec {
         # provide installer tools (not necessarily for system.pkgs.config.hostPlatform)
         hostPath=$PATH ; PATH=${lib.makeBinPath tools}
 
-        source ${inputs.functions.lib.bash.generic-arg-parse}
         set -o pipefail -o nounset # (do not rely on errexit)
+        source ${inputs.functions.lib.bash.generic-arg-parse}
         generic-arg-parse "$@" || exit
 
         if [[ ''${args[debug]:-} ]] ; then # for the aliases to work, they have to be set before the functions are parsed
@@ -294,7 +306,7 @@ in rec {
         source ${inputs.functions.lib.bash.generic-arg-verify}
         source ${inputs.functions.lib.bash.generic-arg-help}
         source ${inputs.functions.lib.bash.prepend_trap}
-        ${system.config.${installer}.build.scripts.override (old: { context = old.context // { native = pkgs; }; })}
+        ${scripts}
         if [[ ''${args[help]:-} ]] ; then (
             functionDoc= ; while IFS= read -u3 -r name ; do
                 functionDoc+=$'\n\n    '"$name"$'\n        '"''${allowedCommands[$name]//$'\n'/$'\n        '}" #$'\n\n'
@@ -313,6 +325,8 @@ in rec {
             entry=''${argv[0]:?} || exit
             argv=( "''${argv[@]:1}" ) ; "$entry" "''${argv[@]}" || exit
         fi
-    '';
+    '').overrideAttrs (old: {
+        passthru = old.passthru // builtins.removeAttrs (system.config.${installer}.build.scripts) [ "__toString" ];
+    });
 
 }

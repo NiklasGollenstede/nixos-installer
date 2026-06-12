@@ -3,11 +3,11 @@
     "config": {
       "locked": {
         "dir": "example/defaultConfig",
-        "lastModified": 1761328076,
-        "narHash": "sha256-kKfm9dviUoZRcyUPtwfN89FtZu0mnOUSLv1j3wy+b68=",
+        "lastModified": 1779219208,
+        "narHash": "sha256-juI9haic9hWDZwH1GgQltR+xA/wk6opxcfwOByr6oFY=",
         "owner": "NiklasGollenstede",
         "repo": "nixos-installer",
-        "rev": "2ab5024770f5747669a1feb1211d2495d6dfd8f9",
+        "rev": "f3732fb4babbac7500128adb149f3172e93598c5",
         "type": "github"
       },
       "original": {
@@ -24,11 +24,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1776950097,
-        "narHash": "sha256-5siviGWojGwoBMzoQx6lEDTXBYY3zbJo0iacuPM1ymI=",
+        "lastModified": 1781274444,
+        "narHash": "sha256-dpeXnsgygtAjK+OWxkEFu8vXb9rcmztiHmA/oQ++xH4=",
         "owner": "NiklasGollenstede",
         "repo": "nix-functions",
-        "rev": "6f53cad55f237338a03d00d262fbb68a1c2bca55",
+        "rev": "ae733ec28650be4144ee5dab19e39d4f67a3d781",
         "type": "github"
       },
       "original": {
@@ -39,16 +39,16 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1764522689,
-        "narHash": "sha256-SqUuBFjhl/kpDiVaKLQBoD8TLD+/cTUzzgVFoaHrkqY=",
+        "lastModified": 1779971959,
+        "narHash": "sha256-R5nauXyqyfRUFiZycFFZdkF7wl6eaUpPLst35+2nJQY=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "8bb5646e0bed5dbd3ab08c7a7cc15b75ab4e1d0f",
+        "rev": "ec942ba042dad5ef097e2ef3a3effc034241f011",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixos-25.11",
+        "ref": "nixos-26.05",
         "repo": "nixpkgs",
         "type": "github"
       }
@@ -57,7 +57,23 @@
       "inputs": {
         "config": "config",
         "functions": "functions",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "systems": "systems"
+      }
+    },
+    "systems": {
+      "locked": {
+        "lastModified": 1689347949,
+        "narHash": "sha256-12tWmuL2zgBgZkdoB6qXZsgJEH9LR3oUgpaQq2RbI80=",
+        "owner": "nix-systems",
+        "repo": "default-linux",
+        "rev": "31732fcf5e8fea42e59c2488ad31a0e651500f68",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default-linux",
+        "type": "github"
       }
     }
   },

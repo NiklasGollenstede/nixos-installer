@@ -16,6 +16,8 @@ Then to boot the system in a qemu VM with KVM:
  nix run .'#'$hostname -- run-qemu --disks=/tmp/$hostname/
  nix run .'#'minimal-setup -- run-qemu --reinstall --share=home:/home/user,readonly=on
  nix run .'#'erofs -- run-qemu --reinstall
+ nix run .'#'rpi -- install-system
+ nix run .'#'rpi-cross -- install-system
 ```
 See `nix run .#$hostname -- --help` for options and more commands.
 
@@ -27,14 +29,14 @@ See `nix run .#$hostname -- --help` for options and more commands.
 dirname: inputs: { config, pkgs, lib, name, modulesPath, ... }: let lib = inputs.self.lib.__internal__; in let
     hash = builtins.substring 0 8 (builtins.hashString "sha256" name);
 in { preface = { # (any »preface« options have to be defined here)
-    instances = [ "explicit-fs" "erofs" "complex-fs" "minimal-setup" "encrypted" "multi-disk-raidz" "rpi" "fake-rpi" ]; # Generate multiple variants of this host, with these »name«s.
+    instances = [ "explicit-fs" "erofs" "complex-fs" "minimal-setup" "encrypted" "multi-disk-raidz" "rpi" "rpi-cross" "fake-rpi" ]; # Generate multiple variants of this host, with these »name«s.
 }; imports = [ ({ ## Hardware
 
-    nixpkgs.hostPlatform = if name == "rpi" then "aarch64-linux" else "x86_64-linux"; system.stateVersion = "24.05";
+    nixpkgs.hostPlatform = if name == "rpi" || name == "rpi-cross" then "aarch64-linux" else "x86_64-linux"; system.stateVersion = "24.05";
 
     ## What follows is a whole bunch of boilerplate-ish stuff, most of which multiple hosts would have in common and which would thus be moved to one or more modules:
 
-    boot.loader.extlinux.enable = name != "rpi" && name != "fake-rpi";
+    boot.loader.extlinux.enable = name != "rpi" && name != "rpi-cross" && name != "fake-rpi";
     boot.loader.grub.enable = false;
 
     # Example of adding and/or overwriting setup/maintenance functions:
@@ -59,7 +61,7 @@ in { preface = { # (any »preface« options have to be defined here)
     fileSystems."/"          = { fsType  =  "tmpfs";    device = "tmpfs"; neededForBoot = true; options = [ "mode=755" ]; };
     fileSystems."/boot"      = { fsType  =   "vfat";    device = "/dev/disk/by-partlabel/boot-${hash}"; neededForBoot = true; options = [ "noatime" ]; formatArgs = [ "-F" "32" ]; };
     fileSystems."/system"    = { fsType  =   "ext4";    device = "/dev/disk/by-partlabel/system-${hash}"; neededForBoot = true; options = [ "noatime" ]; formatArgs = [ "-O" "inline_data" "-E" "nodiscard" "-F" ]; };
-    fileSystems."/nix/store" = { options = ["bind,ro"]; device = "/system/nix/store"; neededForBoot = true; };
+    fileSystems."/nix/store" = { fsType  =   "none";    options = ["bind,ro"]; device = "/system/nix/store"; neededForBoot = true; };
 
 
 }) (lib.optionalAttrs (name == "erofs") { ## With Read-Only FS
@@ -166,8 +168,9 @@ in { preface = { # (any »preface« options have to be defined here)
     setup.disks.partitions."rpool-arc-${hash}" = { type = "bf00"; };
 
 
-}) (lib.optionalAttrs (name == "rpi" || name == "fake-rpi") { ## Booting on Raspberry PIs
+}) (lib.optionalAttrs (name == "rpi" || name == "rpi-cross" || name == "fake-rpi") { ## Booting on Raspberry PIs
     # This is mostly a demo for the `extra-files` module, but it does produce an image that boots on a rPI4
+    # On x64 "rpi" will be installed in a full-system aarch64 VM (qemu tcg); "rpi-cross" will install on x64 (directly or in qemu kvm) with qemu user-mode emulation (binfmt registration). The "fake-rpi" variant is x64, but writes the boot files as if it was a rPI.
 
     setup.temproot = { enable = true; local.bind.base = "ext4"; remote.type = "none"; };
     setup.bootpart.enable = true;
@@ -196,6 +199,8 @@ in { preface = { # (any »preface« options have to be defined here)
         "start4.elf" "fixup4.dat" "bcm2711-rpi-cm4s.dtb" "bcm2711-rpi-400.dtb" "bcm2711-rpi-4-b.dtb" "bcm2711-rpi-cm4.dtb" "bcm2711-rpi-cm4-io.dtb"
     ]);
 
+    installer.pkgs = lib.mkIf (name == "rpi-cross") (pkgs.override { localSystem = "x86_64-linux"; crossSystem = null; }); # Build the default installer to be runnable on x64.
+
     #imports = [ "${inputs.nixos-hardware}/raspberry-pi/4" ]; # activating the correct hardware config should help
     #hardware.deviceTree.filter = "bcm271*.dtb";
 
@@ -222,7 +227,7 @@ in { preface = { # (any »preface« options have to be defined here)
 
     services.getty.autologinUser = "root"; users.users.root.password = "root";
 
-    boot.kernelParams = [ /* "console=tty1" */ "console=ttyS0" "boot.shell_on_fail" ]; # [ "rd.systemd.unit=emergency.target" ]; # "rd.systemd.debug_shell" "rd.systemd.debug-shell=1"
+    boot.kernelParams = [ /* "console=tty1" */ "console=ttyS0" ]; # [ "rd.systemd.unit=emergency.target" ]; # "rd.systemd.debug_shell" "rd.systemd.debug-shell=1"
     boot.initrd.systemd.emergencyAccess = true;
 
     # Show unit names instead of descriptions during boot.
@@ -230,6 +235,9 @@ in { preface = { # (any »preface« options have to be defined here)
     boot.initrd.systemd.settings.Manager.StatusUnitFormat = lib.mkDefault "name";
 
     boot.loader.timeout = lib.mkDefault 1; # save 4 seconds on startup
+
+    nixpkgs.flake.source = lib.mkForce null; # faster installation
+    documentation.enable = false; # faster installation
 
 
 }) ]; }

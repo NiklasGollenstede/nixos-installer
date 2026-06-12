@@ -33,7 +33,7 @@ dirname: inputs: { config, pkgs, lib, utils, ... }: let lib = inputs.self.lib.__
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
     keystore = "/run/${cfg.name}";
     keystoreKeys = lib.attrValues (lib.filterAttrs (n: v: lib.fun.startsWith "luks/${cfg.name}/" n) cfg.keys);
-in let module = {
+in {
 
     options = { ${setup}.keystore = {
         enable = lib.mkEnableOption "the use of a keystore partition to unlock various things during early boot";
@@ -86,8 +86,8 @@ in let module = {
         ${setup}.disks.partitions.${cfg.name} = { type = lib.mkDefault "8309"; order = lib.mkDefault 1375; disk = lib.mkDefault "primary"; size = lib.mkDefault "32M"; };
         ${installer}.commands.postFormat = ''( : 'Copy the live keystore to its primary persistent location:'
             tmp=$(mktemp -d) && ${pkgs.util-linux}/bin/mount "/dev/mapper/${cfg.name}" $tmp && trap "${pkgs.util-linux}/bin/umount $tmp && rmdir $tmp" EXIT &&
-            ${pkgs.rsync}/bin/rsync -a ${keystore}/ $tmp/
-        )'';
+            cp --recursive --preserve=mode -T ''${args[keystore]:-${keystore}}/ $tmp/ || exit
+        ) || exit'';
 
 
         ## Unlocking and closing during early boot
@@ -102,37 +102,22 @@ in let module = {
 
         boot.initrd.supportedFilesystems = [ "vfat" ];
 
-    }) (lib.mkIf (!config.boot.initrd.systemd.enable) { # Legacy initrd
-
-        boot.initrd.luks.devices.${cfg.name} = {
-            preLVM = true; # ensure the keystore is opened early (»preLVM« also seems to be pre zpool import, and it is the only option that affects the opening order)
-            preOpenCommands = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) verbose.doOpenWithYubikey; # TODO: required?
-            fallbackToPassword = true; # (might as well)
-            postOpenCommands = ''
-                echo "Mounting ${keystore}"
-                mkdir -p ${keystore}
-                mount -o nodev,umask=0277,ro /dev/mapper/${cfg.name} ${keystore}
-            '';
-        };
-
-        boot.initrd.postMountCommands = ''
-            echo "Closing ${keystore}"
-            umount ${keystore} ; rmdir ${keystore}
-            cryptsetup close /dev/mapper/${cfg.name}
-        '';
-
-        boot.initrd.luks.yubikeySupport = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) true;
-        boot.initrd.extraUtilsCommands = lib.mkIf (cfg.unlockMethods.pinThroughYubikey) (lib.mkAfter ''
-            copy_bin_and_libs ${verbose.askPassWithYubikey}/bin/cryptsetup-askpass
-            sed -i "s|/bin/sh|$out/bin/sh|" "$out/bin/cryptsetup-askpass"
-        '');
-
     }) (lib.mkIf (config.boot.initrd.systemd.enable) (let # Systemd initrd
 
-        unlockWithYubikey = pkgs.writeShellScript "unlock-keystore" (let
+        unlockWithYubikey = pkgs.writeShellScript "unlock-with-yubikey" (let
             dev = config.boot.initrd.luks.devices.${cfg.name};
         in ''
-            ${verbose.tryYubikey}
+            tryYubikey () { # 1: key
+                local key="$1" ; local slot
+                if   [ "$( ykinfo -q -2 2>/dev/null )" = '1' ] ; then slot=2 ;
+                elif [ "$( ykinfo -q -1 2>/dev/null )" = '1' ] ; then slot=1 ; fi
+                if [ "$slot" ] ; then
+                    echo "Using slot $slot of detected Yubikey ..." >&2
+                    key="$( ykchalresp -$slot "$key" 2>/dev/null )" || true
+                    if [ "$key" ] ; then echo "Got response from Yubikey" >&2 ; fi
+                fi
+                printf '%s' "$key"
+            }
             ${lib.optionalString (dev.keyFile != null) ''
                 if systemd-cryptsetup attach '${cfg.name}' '/dev/disk/by-partlabel/${cfg.name}' ${lib.escapeShellArg dev.keyFile} '${lib.optionalString dev.allowDiscards "discard,"}headless' ; then exit ; fi
                 printf '%s\n\n' 'Unlocking ${cfg.name} with '${lib.escapeShellArg dev.keyFile}' failed.' >/dev/console
@@ -166,135 +151,4 @@ in let module = {
 
     })) ])) ]);
 
-
-}; verbose = rec {
-
-    tryYubikey = ''tryYubikey () { # 1: key
-        local key="$1" ; local slot
-        if   [ "$( ykinfo -q -2 2>/dev/null )" = '1' ] ; then slot=2 ;
-        elif [ "$( ykinfo -q -1 2>/dev/null )" = '1' ] ; then slot=1 ; fi
-        if [ "$slot" ] ; then
-            echo "Using slot $slot of detected Yubikey ..." >&2
-            key="$( ykchalresp -$slot "$key" 2>/dev/null )" || true
-            if [ "$key" ] ; then echo "Got response from Yubikey" >&2 ; fi
-        fi
-        printf '%s' "$key"
-    }'';
-
-    # The next tree strings are copied from https://github.com/NixOS/nixpkgs/blob/1c9b2f18ced655b19bf01ad7d5ef9497d48a32cf/nixos/modules/system/boot/luksroot.nix
-    # The only modification is the addition and invocation of »tryYubikey«
-    commonFunctions = ''
-        die() {
-            echo "$@" >&2
-            exit 1
-        }
-        dev_exist() {
-            local target="$1"
-            if [ -e $target ]; then
-                return 0
-            else
-                local uuid=$(echo -n $target | sed -e 's,UUID=\(.*\),\1,g')
-                blkid --uuid $uuid >/dev/null
-                return $?
-            fi
-        }
-        wait_target() {
-            local name="$1"
-            local target="$2"
-            local secs="''${3:-10}"
-            local desc="''${4:-$name $target to appear}"
-            if ! dev_exist $target; then
-                echo -n "Waiting $secs seconds for $desc..."
-                local success=false;
-                for try in $(seq $secs); do
-                    echo -n "."
-                    sleep 1
-                    if dev_exist $target; then
-                        success=true
-                        break
-                    fi
-                done
-                if [ $success == true ]; then
-                    echo " - success";
-                    return 0
-                else
-                    echo " - failure";
-                    return 1
-                fi
-            fi
-            return 0
-        }
-    '';
-    doOpenWithYubikey = (let
-        inherit (lib) optionalString;
-        inherit (config.boot.initrd) luks;
-        inherit (config.boot.initrd.luks.devices.${cfg.name}) name device header keyFile keyFileSize keyFileOffset allowDiscards yubikey gpgCard fido2 fallbackToPassword;
-        cs-open  = "cryptsetup luksOpen ${device} ${name} ${optionalString allowDiscards "--allow-discards"} ${optionalString (header != null) "--header=${header}"}";
-    in ''
-        ${tryYubikey}
-
-        do_open_passphrase() {
-            local passphrase
-            while true; do
-                echo -n "Passphrase for ${device}: "
-                passphrase=
-                while true; do
-                    if [ -e /crypt-ramfs/passphrase ]; then
-                        echo "reused"
-                        passphrase=$(cat /crypt-ramfs/passphrase)
-                        break
-                    else
-                        # ask cryptsetup-askpass
-                        echo -n "${device}" > /crypt-ramfs/device
-                        # and try reading it from /dev/console with a timeout
-                        IFS= read -t 1 -r passphrase
-                        if [ -n "$passphrase" ]; then
-                           passphrase="$(tryYubikey "$passphrase")"
-                           ${if luks.reusePassphrases then ''
-                             # remember it for the next device
-                             echo -n "$passphrase" > /crypt-ramfs/passphrase
-                           '' else ''
-                             # Don't save it to ramfs. We are very paranoid
-                           ''}
-                           echo
-                           break
-                        fi
-                    fi
-                done
-                echo -n "Verifying passphrase for ${device}..."
-                echo -n "$passphrase" | ${cs-open} --key-file=-
-                if [ $? == 0 ]; then
-                    echo " - success"
-                    ${if luks.reusePassphrases then ''
-                      # we don't rm here because we might reuse it for the next device
-                    '' else ''
-                      rm -f /crypt-ramfs/passphrase
-                    ''}
-                    break
-                else
-                    echo " - failure"
-                    # ask for a different one
-                    rm -f /crypt-ramfs/passphrase
-                fi
-            done
-        }
-    '');
-
-    askPassWithYubikey = pkgs.writeScriptBin "cryptsetup-askpass" ''
-        #!/bin/sh
-
-        ${commonFunctions}
-        ${tryYubikey}
-
-        while true; do
-            wait_target "luks" /crypt-ramfs/device 10 "LUKS to request a passphrase" || die "Passphrase is not requested now"
-            device=$(cat /crypt-ramfs/device)
-            echo -n "Passphrase for $device: "
-            IFS= read -rs passphrase
-            echo
-            rm /crypt-ramfs/device
-            echo -n "$(tryYubikey "$passphrase")" > /crypt-ramfs/passphrase
-        done
-    '';
-
-}; in module
+}

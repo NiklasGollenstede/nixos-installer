@@ -10,10 +10,10 @@ Options to declare devices and partitions to be picked up by the installer scrip
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
 dirname: inputs: { config, pkgs, lib, ... }: let lib = inputs.self.lib.__internal__; in let
-    inherit (inputs.config.rename) setup;
+    inherit (inputs.config.rename) installer setup;
     cfg = config.${setup}.disks; globalConfig = config;
     types.guid = lib.types.strMatching ''^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'';
-    fsType2tool = { vfat = pkgs.dosfstools; ext4 = pkgs.e2fsprogs.bin; f2fs = pkgs.f2fs-tools; btrfs = pkgs.btrfs-progs; xfs = pkgs.xfsprogs; }; # squashfs = pkgs.squashfsTools; erofs = pkgs.erofs-utils;
+    fsType2tool = let pkgs = config.${installer}.pkgs; in { vfat = pkgs.dosfstools; ext4 = pkgs.e2fsprogs.bin; f2fs = pkgs.f2fs-tools; btrfs = pkgs.btrfs-progs; xfs = pkgs.xfsprogs; }; # squashfs = pkgs.squashfsTools; erofs = pkgs.erofs-utils;
 in {
 
     options.${setup} = { disks = {

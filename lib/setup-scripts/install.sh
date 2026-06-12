@@ -92,7 +92,7 @@ function exec-in-qemu { # 1: entry, ...: argv
                 #-device ide-hd,drive=drive${index},bus=ahci${index}.${index} # attach IDE?! disk driveX as device X on bus »ahciX«
                 -device virtio-blk-pci,drive=drive${index},disable-modern=on,disable-legacy=off # alternative to the two lines above (implies to be faster, but seems to require guest drivers)
             )
-            args[disks]+="$name"=/dev/vd"$( printf "\x$(printf %x $(( index - 1 + 97 )) )" )": ; let index+=1
+            args[disks]+="$name"=/dev/vd"$( printf "\x$(printf %x $(( index - 1 + 96 )) )" )": ; let index+=1
         done
         args[disks]=${args[disks]%:}
     fi
@@ -105,25 +105,14 @@ function exec-in-qemu { # 1: entry, ...: argv
     for share in "${!vmShares[@]}" ; do
         qemu+=( -virtfs local,path="${vmShares[$share]}",security_model=none,mount_tag=shares/"$share",id=shares_"$share",readonly=on )
         command+="mkdir -p /tmp/shares/$share && mount -t 9p -o trans=virtio,version=9p2000.L,msize=16384,ro shares/$share /tmp/shares/$share || exit"$'\n'
+        # TODO: unmount these?
     done
 
-    newArgs=( ) ; (( $# == 0 )) || newArgs+=( "$@" )
+    local newArgs=( ) ; (( $# == 0 )) || newArgs+=( "$@" )
     for arg in "${!args[@]}" ; do newArgs+=( --"$arg"="${args[$arg]}" ) ; done
+    command+="${originalSystemScripts:-$self} $( printf '%q ' "${newArgs[@]}" ) || exit"$'\n'
 
-    #local output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec
-    local output=@{config.system.build.vmExec.drvPath!unsafeDiscardStringContext} # this is more accurate, but also means another system needs to get evaluated every time
-    if [[ @{pkgs.buildPackages.stdenv.hostPlatform.system} != "@{native.stdenv.hostPlatform.system}" ]] ; then
-        echo 'Performing the installation in a cross-ISA qemu system VM; this will be very, very slow (many hours) ...'
-        output=@{inputs.self}'#'nixosConfigurations.@{config.installer.outputName:?}.config.system.build.vmExec-@{pkgs.buildPackages.stdenv.hostPlatform.system}
-    fi
-    local scripts=$self ; if [[ @{pkgs.stdenv.hostPlatform.system} != "@{native.stdenv.hostPlatform.system}" ]] ; then
-        scripts=$( build-lazy @{inputs.self}'#'.apps.@{pkgs.stdenv.hostPlatform.system}.@{config.installer.outputName:?}.derivation ) || return
-    fi
-    command+="$scripts $( printf '%q ' "${newArgs[@]}" ) || exit"$'\n'
-
-    local runInVm ; runInVm=$( build-lazy $output )/bin/run-@{config.system.name}-vm-exec || return
-
-    $runInVm ${args[vm-shared]:+--shared="${args[vm-shared]}"} ${args[debug]:+--initrd-console} ${args[trace]:+--initrd-console} ${args[quiet]:+--quiet} -- "$command" "${qemu[@]}" ${args[vm-args]:-} || return # --initrd-console
+    @{config.virtualisation.exec-vm.installer.launch!getExe} ${args[vm-shared]:+--shared="${args[vm-shared]}"} ${args[debug]:+--trace} ${args[trace]:+--trace} ${args[quiet]:+--quiet} -- "$command" "${qemu[@]}" ${args[vm-args]:-} || return
 }
 
 
@@ -181,9 +170,9 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
     elif [[ ${args[quiet]:-} ]] ; then
         "${cmd[@]}" --quiet >/dev/null 2> >( grep -Pe '^error:' || true ) || exit
     elif [[ ${args[trace]:-} ]] ; then
-        ( set -x ; time "${cmd[@]}" ) || exit
+        time "${cmd[@]}" || exit
     else
-        ( set -x ; "${cmd[@]}" ) || exit
+        printf '+ ' ; printf %q' ' nix "${cmd[@]:2}" ; echo ; "${cmd[@]}" || exit
     fi
     rm -rf $mnt/nix/var/nix/gcroots || exit
 

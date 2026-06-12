@@ -66,6 +66,7 @@ in let module = {
         services.zfs.autoScrub.enable = true;
         services.zfs.trim.enable = true; # (default)
         networking.hostId = lib.mkDefault (builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName)); # ZFS requires one, so might as well set a default.
+        boot.zfs.forceImportRoot = lib.mkDefault true; # Not an issue, as every system gets a pool with an individual name.
 
         ## Implement »cfg.datasets.*.mount«:
         fileSystems = lib.fun.mapMerge (path: { props, mount, ... }: let

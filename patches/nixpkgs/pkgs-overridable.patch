@@ -1,0 +1,18 @@
+diff --git a/pkgs/top-level/default.nix b/pkgs/top-level/default.nix
+index 443496f650fb..56b14f1221d3 100644
+--- a/pkgs/top-level/default.nix
++++ b/pkgs/top-level/default.nix
+@@ -35,7 +35,7 @@ let
+       (x: x);
+ 
+   pristineLib = import ../../lib;
+-in
++in pristineLib.makeOverridable (
+ 
+ {
+   # The system packages will be built on. See the manual for the
+@@ -218,3 +218,4 @@ let
+ 
+ in
+ checked pkgs
++)

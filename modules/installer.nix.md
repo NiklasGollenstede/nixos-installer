@@ -11,9 +11,9 @@ This module allows for the composition of the installer from multiple script, wh
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: moduleArgs@{ config, options, pkgs, lib, ... }: let lib = inputs.self.lib.__internal__; in let
+dirname: inputs: moduleArgs@{ config, options, pkgs, lib, modulesPath, ... }: let lib = inputs.self.lib.__internal__; in let
     inherit (inputs.config.rename) installer;
-    cfg = config.${installer};
+    cfg = config.${installer}; opts = options.${installer};
 in {
 
     options = { ${installer} = {
@@ -23,6 +23,7 @@ in {
                 The functions should expect the bash options `pipefail` and `nounset` (`-u`) to be set.
                 See »./setup-scripts/README.md« for more information.
             '';
+            defaultText = "inputs.installer.lib.setup-scripts with order 750";
             type = lib.fun.types.attrsOfSubmodules ({ name, config, ... }: { options = {
                 name = lib.mkOption { description = "Symbolic name of the script."; type = lib.types.str; default = name; readOnly = true; };
                 path = lib.mkOption { description = "Path of file for ».text« to be loaded from."; type = lib.types.nullOr lib.types.path; default = null; };
@@ -46,12 +47,16 @@ in {
             description = ''The name this system is (/ should be) exported as by its defining flake (as »nixosConfigurations.''${outputName}« and »apps.*-linux.''${outputName}«).'';
             type = lib.types.nullOr lib.types.str; default = null;
         };
+        pkgs = lib.mkOption {
+            description = ''The package set used to perform the installation.'';
+            type = lib.types.pkgs; default = pkgs;
+        };
         build.scripts = lib.mkOption {
             type = lib.types.anything; internal = true;
             default = lib.fun.substituteImplicit { # This replaces the `@{}` references in the scripts with normal bash variables that hold serializations of the Nix values they refer to.
                 inherit pkgs;
                 scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues cfg.scripts);
-                context = { inherit config options pkgs; inherit (moduleArgs) inputs; } // { native = pkgs; };
+                context = { inherit config options pkgs; inherit (moduleArgs) inputs; native = cfg.pkgs; };
                 mapValue = v: if v._type or null == "moduleMeta" then null else v;
                 # inherit (builtins) trace;
             };
@@ -61,6 +66,17 @@ in {
     config = {
         ${installer} = {
             scripts = lib.mapAttrs (name: path: lib.mkOptionDefault { inherit path; order = 750; }) (lib.self.setup-scripts);
+        };
+        virtualisation.exec-vm.installer.config = { ... }: {
+            _file = "${dirname}/installer.nix";
+            config.virtualisation.host.pkgs = cfg.pkgs.buildPackages;
+            imports = [ "${modulesPath}/misc/nixpkgs/read-only.nix" ];
+            config.nixpkgs.pkgs = cfg.pkgs;
+            options.nixpkgs.pkgs = lib.mkOption { readOnly = true; };
+            config.boot.binfmt.emulatedSystems = lib.mkIf (!(cfg.pkgs.stdenv.hostPlatform.canExecute pkgs.stdenv.hostPlatform)) [ pkgs.stdenv.hostPlatform.system ];
+            #config.boot.kernelPackages = config.boot.kernelPackages; # It would be nice to always use the target kernel, but that may be a different architecture ...
+            config.boot./* initrd. */supportedFilesystems = lib.mapAttrs (name: enable: lib.mkIf enable true) config.boot.supportedFilesystems;
+            config.networking.hostId = lib.mkIf options.networking.hostId.isDefined config.networking.hostId;
         };
     };
 

@@ -233,10 +233,10 @@ in {
 
         fileSystems = { # this does get applied early
             # (on systems without hardware clock, this allows systemd to provide an at least monolithic time after restarts)
-            "/var/lib/systemd/timesync" = { device = "/local/var/lib/systemd/timesync"; options = [ "bind" ]; };
+            "/var/lib/systemd/timesync" = { device = "/local/var/lib/systemd/timesync"; fsType = "none"; options = [ "bind" ]; };
             # save persistent timer states
-            "/var/lib/systemd/timers" = { device = "/local/var/lib/systemd/timers"; options = [ "bind" ]; };
-            "/var/lib/bluetooth" = lib.mkIf (config.hardware.bluetooth.enable) { device = "/${keep}/var/lib/bluetooth"; options = [ "bind" ]; };
+            "/var/lib/systemd/timers" = { device = "/local/var/lib/systemd/timers"; fsType = "none"; options = [ "bind" ]; };
+            "/var/lib/bluetooth" = lib.mkIf (config.hardware.bluetooth.enable) { device = "/${keep}/var/lib/bluetooth"; fsType = "none"; options = [ "bind" ]; };
         };
 
         security.sudo.extraConfig = "Defaults lecture=never"; # default is »once«, but we'd forget that we did that
@@ -361,7 +361,7 @@ in {
         fileSystems = lib.mkMerge [ (lib.mapAttrs (target: args@{ source, uid, gid, mode, extraFsConfig, ... }: (lib.mkMerge ((
             map (def: def.${target}.extraFsConfig or { }) opts.${type}.mounts.definitions
         ) ++ [ (rec {
-            device = "${cfg.${type}.bind.source}/${source}";
+            device = "${cfg.${type}.bind.source}/${source}"; fsType = "none";
             options = optionsToList (args.options // { bind = true; });
             preMountCommands = lib.mkIf (!extraFsConfig.neededForBoot && !(lib.elem target utils.pathsNeededForBoot)) ''
                 mkdir -pm 000 -- ${lib.escapeShellArg target}

@@ -23,7 +23,7 @@ function populate-keystore { # 1?: keystore
 
     local -A methods=( ) ; local -A options=( )
     local usage ; for usage in "@{!config.setup.keystore.keys[@]}" ; do
-        methods[$usage]=@{config.setup.keystore.keys[$usage]%%=*}
+        methods[$usage]=@{config.setup.keystore.keys[$usage]%%'='*}
         options[$usage]=@{config.setup.keystore.keys[$usage]:$(( ${#methods[$usage]} + 1 ))}
     done
 

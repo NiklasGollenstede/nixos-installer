@@ -15,7 +15,7 @@ This uses the same implementation as `boot.loader.generic-extlinux-compatible` t
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: args@{ config, options, pkgs, lib, ... }: let lib = inputs.self.lib.__internal__; in let
+dirname: inputs: args@{ config, options, pkgs, lib, modulesPath, ... }: let lib = inputs.self.lib.__internal__; in let
     inherit (inputs.config.rename) setup;
     cfg = config.boot.loader.extlinux;
     targetMount = let path = lib.findFirst (path: config.fileSystems?${path}) "/" (lib.fun.parentPaths cfg.targetDir); in config.fileSystems.${path};
@@ -53,7 +53,7 @@ in {
 
     config = let
 
-        generic-extlinux-compatible = "${inputs.nixpkgs}/nixos/modules/system/boot/loader/generic-extlinux-compatible";
+        generic-extlinux-compatible = "${modulesPath}/system/boot/loader/generic-extlinux-compatible";
         extlinux-conf-builder = (import generic-extlinux-compatible { inherit config pkgs lib; }).config.content.system.build.installBootLoader;
 
         esc = lib.escapeShellArg;
@@ -121,9 +121,9 @@ in {
 
     }) (
 
-        (lib.mkIf (options.virtualisation?useDefaultFilesystems) { # (»nixos/modules/virtualisation/qemu-vm.nix« is imported, i.e. we are building a "vmVariant")
+        (lib.mkIf (options.virtualisation?useBootLoader) { # (»nixos/modules/virtualisation/qemu-vm.nix« is imported, i.e. we are building a "vmVariant")
             boot.loader.extlinux = {
-                enable = lib.mkIf config.virtualisation.useDefaultFilesystems (lib.mkVMOverride false);
+                enable = lib.mkIf (!config.virtualisation.useBootLoader) (lib.mkVMOverride false);
                 allowInstableTargetPart = lib.mkVMOverride true; # (»/dev/sdX« etc in the VM are stable (if the VM is invoked the same way))
             };
         })

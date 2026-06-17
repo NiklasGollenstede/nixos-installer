@@ -107,12 +107,13 @@ function exec-in-qemu { # 1: entry, ...: argv
         command+="mkdir -p /tmp/shares/$share && mount -t 9p -o trans=virtio,version=9p2000.L,msize=16384,ro shares/$share /tmp/shares/$share || exit"$'\n'
         # TODO: unmount these?
     done
+    local QEMU_KERNEL_PARAMS=zfs.zfs_arc_max=$(( ${args[vm-mem]:-4096} * 1024 * 1024 / 2 )) # use at most half the VM's RAM for ZFS cache, else it (oddly) runs out of memory
 
     local newArgs=( ) ; (( $# == 0 )) || newArgs+=( "$@" )
     for arg in "${!args[@]}" ; do newArgs+=( --"$arg"="${args[$arg]}" ) ; done
     command+="${originalSystemScripts:-$self} $( printf '%q ' "${newArgs[@]}" ) || exit"$'\n'
 
-    @{config.virtualisation.exec-vm.installer.launch!getExe} ${args[vm-shared]:+--shared="${args[vm-shared]}"} ${args[debug]:+--trace} ${args[trace]:+--trace} ${args[quiet]:+--quiet} -- "$command" "${qemu[@]}" ${args[vm-args]:-} || return
+    QEMU_KERNEL_PARAMS=$QEMU_KERNEL_PARAMS @{config.virtualisation.exec-vm.installer.launch!getExe} ${args[vm-shared]:+--shared="${args[vm-shared]}"} ${args[debug]:+--trace} ${args[trace]:+--trace} ${args[quiet]:+--quiet} -- "$command" "${qemu[@]}" ${args[vm-args]:-} || return
 }
 
 

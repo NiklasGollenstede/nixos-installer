@@ -46,7 +46,7 @@ function create-zpool {
             vdevs[$index]=/dev/mapper/$part
         else
             part=/dev/disk/by-partlabel/$part ; vdevs[$index]=$part
-            if ! is-partition-on-disks "$part" "${blockDevs[@]}" ; then echo "Partition alias $part used by zpool ${pool[name]} does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
+            if ! is-partition-on-disks "$part" "${blockDevs[@]}" ; then echo "Partition alias $part used by zpool ${pool[name]} does not point at one of the target disks" "${blockDevs[@]}" 1>&2 ; \return 1 ; fi
             @{native.util-linux}/bin/wipefs --all "$part" >$beLoud 2>$beSilent || return # else mkfs might refuse to replace any previous filesystems
         fi
     done

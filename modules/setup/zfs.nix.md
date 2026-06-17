@@ -14,7 +14,7 @@ dirname: inputs: { config, options, pkgs, lib, ... }: let lib = inputs.self.lib.
     inherit (inputs.config.rename) setup;
     cfg = config.${setup}.zfs;
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
-in let module = {
+in {
 
     options.${setup} = { zfs = {
         enable = lib.mkEnableOption "NixOS managed ZFS pools and datasets";
@@ -40,7 +40,7 @@ in let module = {
         datasets = lib.mkOption {
             description = "ZFS datasets managed and mounted on this host.";
             type = lib.fun.types.attrsOfSubmodules ({ name, ... }: { options = {
-                name = lib.mkOption { description = "Attribute name as name of the dataset."; type = lib.types.str; default = name; readOnly = true; };
+                name = lib.mkOption { description = "Attribute name as name/path of the dataset."; type = lib.types.str; default = name; readOnly = true; };
                 props = lib.mkOption { description = "ZFS properties to set on the dataset."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; apply = lib.filterAttrs (k: v: v != null); };
                 recursiveProps = lib.mkOption { description = "Whether to apply this dataset's ».props« (but not ».permissions«) recursively to its children, even those that are not declared. This applies to invocations of the »ensure-dataset« function (called either explicitly or after changes by »...pools.*.autoApplyDuringBoot/autoApplyOnActivation«) and makes sense for declared leaf datasets that will have children that the NixOS configuration is not aware of (like receive targets)."; type = lib.types.bool; default = false; };
                 mount = lib.mkOption { description = "Whether to create a »fileSystems« entry to mount the dataset. »noauto« creates an entry with that option set."; type = lib.types.enum [ true "noauto" false ]; default = false; };
@@ -57,8 +57,7 @@ in let module = {
         extraInitrdPools = lib.mkOption { description = "Additional pool that are imported in the initrd."; type = lib.types.listOf lib.types.str; default = [ ]; apply = lib.unique; };
     }; };
 
-    config = let
-    in lib.mkMerge [ (lib.mkIf cfg.enable (lib.mkMerge [ ({
+    config = lib.mkMerge [ (lib.mkIf cfg.enable (lib.mkMerge [ ({
 
         # boot.(initrd.)supportedFilesystems = [ "zfs" ]; # NixOS should figure that out itself based on zfs being used in »config.fileSystems«.
         # boot.zfs.extraPools = [ ]; # Don't need to import pools that have at least one dataset listed in »config.fileSystems« / with ».mount != false«.
@@ -79,7 +78,7 @@ in let module = {
         boot.zfs.requestEncryptionCredentials = lib.attrNames (lib.filterAttrs (name: { props, ... }: if props?keylocation then props.keylocation != "file:///dev/null" else config.${setup}.keystore.keys?"zfs/${name}") cfg.datasets);
 
         ${setup} = {
-            # Set default root dataset properties for every pool:
+            # Declare and set default properties for the root dataset of every pool:
             zfs.datasets = lib.mapAttrs (name: { ... }: { props = {
                 # Properties to set at the root dataset of the root pool at its creation. All are inherited by default, but some can't be changed later.
                 devices = lib.mkOptionDefault "off"; # Don't allow character or block devices on the file systems, where they might be owned by non-root users.
@@ -109,12 +108,7 @@ in let module = {
     in {
         ${setup}.zfs.extraInitrdPools = keystorePools;
 
-        boot.initrd.postResumeCommands = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mkAfter ''
-            ${lib.concatStringsSep "\n" (map verbose.initrd-import-zpool cfg.extraInitrdPools)}
-            ${verbose.initrd-load-keys}
-        '');
-
-        boot.initrd.systemd.services = lib.mkIf (config.boot.initrd.systemd.enable) (lib.fun.mapMerge (pool: { "zfs-import-${pool}" = let
+        boot.initrd.systemd.services = lib.fun.mapMerge (pool: { "zfs-import-${pool}" = let
             service = config.systemd.services."zfs-import-${pool}" or null;
             addPrefix = deps: map (dep: if dep == "zfs-import.target" || dep == "sysusr-usr.mount" then dep else "sysroot-${dep}") deps;
         in lib.mkMerge [ (lib.mkIf (service != null) (
@@ -122,7 +116,24 @@ in let module = {
             // { requiredBy = addPrefix service.requiredBy; before = addPrefix service.before; }
         )) (lib.mkIf (builtins.elem pool keystorePools) (
             rec { after = [ "systemd-cryptsetup@keystore\\x2d${hash}.service" ]; wants = after; } # without this, the keystore's password prompt fails
-        )) ]; }) cfg.extraInitrdPools);
+        )) ]; }) cfg.extraInitrdPools;
+
+
+    }) (let ## Don't let ZFS grab *all* RAM (that does lead to poor responsiveness in high IO situations)
+
+        zfs-arc-limit = { # disable the service if you do not want this, or prefix the script for a different percentage
+            description = "Limit ZFS ARC to some percentage of RAM";
+            wantedBy = [ "zfs.target" ]; after = [ "zfs.target" ]; serviceConfig.Type = "oneshot";
+            script = ''
+                arcPercent=''${arcPercent:-50}
+                while read -r key value _ ; do if [[ "$key" == "MemTotal:" ]] ; then RAM=$(( value * 1024 )) ; break ; fi ; done < /proc/meminfo
+                echo "echo $(( RAM * arcPercent / 100 )) >/sys/module/zfs/parameters/zfs_arc_max"
+                echo $(( RAM * arcPercent / 100 )) >/sys/module/zfs/parameters/zfs_arc_max
+            '';
+        };
+    in {
+        systemd.services.zfs-arc-limit = zfs-arc-limit;
+        #boot.initrd.systemd.services.zfs-arc-limit = lib.mkIf (cfg.extraInitrdPools != [ ]) zfs-arc-limit; # should be fine to just set it later
 
 
     }) (lib.mkIf (config.boot.resumeDevice == "") { ## Disallow hibernation without fixed »resumeDevice«:
@@ -201,41 +212,12 @@ in let module = {
 
 
     }) ])) (
+
         # Disable this module in VMs without filesystems:
         lib.mkIf (options.virtualisation?useDefaultFilesystems) { # (»nixos/modules/virtualisation/qemu-vm.nix« is imported, i.e. we are building a "vmVariant")
             ${setup}.zfs.enable = lib.mkIf config.virtualisation.useDefaultFilesystems (lib.mkVMOverride false);
         }
+
     ) ];
 
-}; verbose = {
-
-    # copied verbatim from https://github.com/NixOS/nixpkgs/blob/f989e13983fd1619f723b42ba271fe0b781dd24b/nixos/modules/tasks/filesystems/zfs.nix
-    # It would be nice if this was done in a somewhat more composable way (why isn't this a function?) ...
-    initrd-import-zpool = pool: ''
-            echo -n "importing root ZFS pool \"${pool}\"..."
-            # Loop across the import until it succeeds, because the devices needed may not be discovered yet.
-            if ! poolImported "${pool}"; then
-              for trial in `seq 1 60`; do
-                poolReady "${pool}" > /dev/null && msg="$(poolImport "${pool}" 2>&1)" && break
-                sleep 1
-                echo -n .
-              done
-              echo
-              if [[ -n "$msg" ]]; then
-                echo "$msg";
-              fi
-              poolImported "${pool}" || poolImport "${pool}"  # Try one last time, e.g. to import a degraded pool.
-            fi
-    '';
-    initrd-load-keys = let
-        inherit (lib) isBool optionalString concatMapStrings; cfgZfs = config.boot.zfs;
-    in ''
-            ${if isBool cfgZfs.requestEncryptionCredentials
-              then optionalString cfgZfs.requestEncryptionCredentials ''
-                zfs load-key -a
-              ''
-              else concatMapStrings (fs: ''
-                zfs load-key ${fs}
-              '') cfgZfs.requestEncryptionCredentials}
-    '';
-}; in module
+}

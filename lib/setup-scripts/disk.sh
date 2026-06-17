@@ -96,8 +96,25 @@ function ensure-disks {
     done
 }
 
+## Wipes all partitions on the given block device to remove any existing filesystem signatures.
+function wipe-partitions { # 1: blockDev
+    local blockDev=$1
+    local beLoud=/dev/null ; if [[ ${args[trace]:-} ]] ; then beLoud=/dev/stdout ; fi
+    local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
+
+    blockDev=$( realpath "$blockDev" ) || return
+    local devName=$( basename "$blockDev" ) ; local sysPath=/sys/class/block/$devName
+    if [[ ! -d "$sysPath" ]] ; then echo "Block device $blockDev not found in sysfs" 1>&2 ; \return 1 ; fi
+
+    local partEntry ; for partEntry in "$sysPath"/"$devName"*/ ; do
+        local partName=$( basename "$partEntry" )
+        if [[ ! -d "$partEntry" || "$partName" == "$devName" || ! -b /dev/"$partName" ]] ; then continue ; fi # (shouldn't happen)
+        @{native.util-linux}/bin/wipefs --all /dev/"$partName" >$beLoud 2>$beSilent || return
+    done
+}
 
 ## Partitions the »blockDevs« (matching »config.setup.disks.devices«) to ensure that all specified »config.setup.disks.partitions« exist.
+#  This uses previously created backup files.
 #  Tries to abort if any partition already exists on the host.
 function partition-disks {
     local beLoud=/dev/null ; if [[ ${args[trace]:-} ]] ; then beLoud=/dev/stdout ; fi
@@ -113,12 +130,13 @@ function partition-disks {
         eval 'local -A disk='"@{config.setup.disks.devices[$name]}"
         if [[ ${disk[serial]:-} ]] ; then
             actual=$( @{native.systemd}/bin/udevadm info --query=property --name="$blockDev" | grep -oP 'ID_SERIAL_SHORT=\K.*' || echo '<none>' )
-            if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev's serial ($actual) does not match the serial (${disk[serial]}) declared for ${disk[name]}" 1>&2 ; \return 1 ; fi
+            if [[ ${disk[serial]} != "$actual" ]] ; then echo "Block device $blockDev's serial ($actual) does not match the serial (${disk[serial]}) declared for $name" 1>&2 ; \return 1 ; fi
         fi
-        @{native.util-linux}/bin/blkdiscard -f "${blockDevs[${disk[name]}]}" &>$beLoud || true
-        # can (and probably should) restore the backup:
-        ( PATH=@{native.gptfdisk}/bin ; ${_set_x:-:} ; sgdisk --zap-all --load-backup=@{config.setup.disks.partitioning}/"${disk[name]}".backup ${disk[allowLarger]:+--move-second-header} "${blockDevs[${disk[name]}]}" >$beLoud 2>$beSilent ) || return
-        #partition-disk "${disk[name]}" "${blockDevs[${disk[name]}]}" || return
+        @{native.util-linux}/bin/blkdiscard -f "${blockDevs[$name]}" &>$beLoud || true # the exit code says very little about whether this actually did anything
+        [[ "${blockDevs[$name]}" != /dev/* ]] || wipe-partitions "${blockDevs[$name]}" || true # (if blkdiscard worked, this is a noop)
+        @{native.gptfdisk}/bin/sgdisk --zap-all ${disk[allowLarger]:+--move-second-header} ${args[trace]:+--print} "${blockDevs[$name]}" >$beLoud 2>$beSilent || true # (broken previous partition tables can cause sgdisk to report failure, even when the new partitions were written just fine)
+        ( PATH=@{native.gptfdisk}/bin ; ${_set_x:-:} ; sgdisk --load-backup=@{config.setup.disks.partitioning}/"$name".backup ${disk[allowLarger]:+--move-second-header} ${args[trace]:+--print} "${blockDevs[$name]}" >$beLoud 2>$beSilent ) || return
+        #partition-disk "$name" "${blockDevs[$name]}" || return
     done
     @{native.parted}/bin/partprobe "${blockDevs[@]}" &>$beLoud || return
     @{native.systemd}/bin/udevadm settle -t 15 || true # sometimes partitions aren't quite made available yet
@@ -155,7 +173,7 @@ function partition-disk { # 1: name, 2: blockDev, 3?: devSize
     done
 
     if [[ ${disk[mbrParts]:-} ]] ; then
-        sgdisk+=( --hybrid "${disk[mbrParts]}" ) # --hybrid: create MBR in addition to GPT; ${disk[mbrParts]}: make these GPT part 1 MBR parts 2[3[4]]
+        sgdisk+=( --hybrid "${disk[mbrParts]}" ) # --hybrid: create MBR in addition to GPT; ${disk[mbrParts]}: make these GPT partition(s) MBR parts 2[3[4]]
     fi
 
     ( PATH=@{native.gptfdisk}/bin ; ${_set_x:-:} ; sgdisk "${sgdisk[@]}" "$blockDev" >$ ) || return # running all at once is much faster
@@ -197,21 +215,21 @@ function is-partition-on-disks { # 1: partition, ...: blockDevs
 function format-partitions {
     local beLoud=/dev/null ; if [[ ${args[trace]:-} ]] ; then beLoud=/dev/stdout ; fi
     local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
-    for fsDecl in "@{config.setup.disks.fileSystems[@]}" ; do
-        eval 'declare -A fs='"$fsDecl"
+    local fsDecl ; for fsDecl in "@{config.setup.disks.fileSystems[@]}" ; do
+        eval 'local -A fs='"$fsDecl"
         if [[ ${fs[device]} == /dev/disk/by-partlabel/* ]] ; then
-            if ! is-partition-on-disks "${fs[device]}" "${blockDevs[@]}" ; then echo "Partition alias ${fs[device]} used by filesystem ${fs[name]} does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
+            if ! is-partition-on-disks "${fs[device]}" "${blockDevs[@]}" ; then echo "Partition alias ${fs[device]} used by filesystem ${fs[name]} does not point at one of the target disks" "${blockDevs[@]}" 1>&2 ; \return 1 ; fi
             @{native.util-linux}/bin/wipefs --all "${fs[device]}" >$beLoud 2>$beSilent || return # else mkfs might refuse to replace any previous filesystems
         elif [[ ${fs[device]} == /dev/mapper/* ]] ; then
             if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${fs[device]/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device ${fs[device]} used by filesystem ${fs[name]} does not point at one of the device mappings ${!config.boot.initrd.luks.devices!catAttrSets.device[@]}" 1>&2 ; \return 1 ; fi
         else continue ; fi
-        eval 'declare -a formatArgs='"${fs[formatArgs]}"
+        eval 'local -a formatArgs='"${fs[formatArgs]}"
         ( ${_set_x:-:} ; "${fs[formatProg]}" "${formatArgs[@]}" -- "${fs[device]}" >$beLoud 2>$beSilent ) || return
         @{native.parted}/bin/partprobe "${fs[device]}" || true
     done
-    for swapDev in "@{config.swapDevices!catAttrs.device[@]}" ; do
+     local swapDev ; for swapDev in "@{config.swapDevices!catAttrs.device[@]}" ; do
         if [[ $swapDev == /dev/disk/by-partlabel/* ]] ; then
-            if ! is-partition-on-disks "$swapDev" "${blockDevs[@]}" ; then echo "Partition alias $swapDev used for SWAP does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
+            if ! is-partition-on-disks "$swapDev" "${blockDevs[@]}" ; then echo "Partition alias $swapDev used for SWAP does not point at one of the target disks" "${blockDevs[@]}" 1>&2 ; \return 1 ; fi
             @{native.util-linux}/bin/wipefs --all "$swapDev" >$beLoud 2>$beSilent || return # else mkswap might refuse to replace any previous filesystems
         elif [[ $swapDev == /dev/mapper/* ]] ; then
             if [[ ! @{config.boot.initrd.luks.devices!catAttrSets.device[${swapDev/'/dev/mapper/'/}]:-} ]] ; then echo "LUKS device $swapDev used for SWAP does not point at one of the device mappings @{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" 1>&2 ; \return 1 ; fi
@@ -257,7 +275,7 @@ function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowNoautoFail
                 if [[ ${args[trace]:-} ]] ; then echo "Running $type commands for $target:" 1>&2 ; fi
                 PATH=$( printf %s: @{native.util-linux}/{,s}bin @{native.coreutils}/{,s}bin @{native.findutils}/{,s}bin @{native.gnugrep}/{,s}bin @{native.gnused}/{,s}bin @{native.systemd}/{,s}bin ) ; PATH=${PATH%:}
                 set -uo pipefail ; root="$mnt"/ # (same as the 'prepare' snippet in pre-mount-commands.nix)
-                export IN_NIXOS_INSTALLER=1
+                export IN_NIXOS_INSTALLER=1 ; unalias exit return 2>/dev/null || true
                 if [[ ${args[quiet]:-} ]] ; then
                     eval "$cmd" &>/dev/null || exit
                 else eval "$cmd" || exit ; fi

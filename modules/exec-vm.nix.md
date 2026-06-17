@@ -41,7 +41,7 @@ in {
                 </etc/hosts grep -oP '127.0.0.[12] (?!localhost)\K.*' >$tmp/xchg/hostname
 
                 export TMPDIR=$tmp USE_TMPDIR=1 SHARED_DIR=''${args[shared]:-$tmp/shared}
-                export QEMU_KERNEL_PARAMS="edd=off"
+                export QEMU_KERNEL_PARAMS="''${QEMU_KERNEL_PARAMS:-} edd=off"
                 #if [[ ! ''${args[trace]:-} ]] ; then
                     QEMU_KERNEL_PARAMS+=" rd.systemd.show_status=error systemd.show_status=error"
                 #fi
@@ -68,6 +68,7 @@ in {
             # Systemd gets upset when running inside a chroot:
             #for fs in dev proc sys run/udev run/systemd ; do /bin/mkdir -p /sysroot/$fs && /bin/mount --rbind /$fs /sysroot/$fs || exit ; done
             #/bin/chroot /sysroot ${run} </dev/ttyS0 >/dev/ttyS0 2>/dev/ttyS0 || true
+
             # So instead move the important mount points into the initramfs:
             for fs in etc tmp/shared tmp/xchg nix/store nix/var/nix/db ; do
                 /bin/mkdir -p /$fs && /bin/mount --rbind /sysroot/$fs /$fs || exit
@@ -76,9 +77,9 @@ in {
             init=''${cmdline##* init=} ; init=''${init%% *} ; system=''${init%/init}
             $system/sw/bin/ln -sfT $system /run/booted-system || exit
             $system/sw/bin/ln -sfT $system /run/current-system || exit
-            #$system/sw/bin/bash
             export HOME=/root ; . /etc/set-environment || exit ; export BLE_DISABLED=1
             chmod 1777 /tmp
+            ${config.system.activationScripts.modprobe.text or ""}
 
             # Set up NATed networking:
             ip addr add 10.0.2.15/24 dev eth0

@@ -55,7 +55,7 @@ function create-luks-layers { # (void)
     local keystore=${args[keystore]:-/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}}
     for luksName in "@{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ; do
         local rawDev=@{config.boot.initrd.luks.devices!catAttrSets.device[$luksName]}
-        if ! is-partition-on-disks "$rawDev" "${blockDevs[@]}" ; then echo "Partition alias $rawDev used by LUKS device $luksName does not point at one of the target disks ${blockDevs[@]}" 1>&2 ; \return 1 ; fi
+        if ! is-partition-on-disks "$rawDev" "${blockDevs[@]}" ; then echo "Partition alias $rawDev used by LUKS device $luksName does not point at one of the target disks" "${blockDevs[@]}" 1>&2 ; \return 1 ; fi
         local primaryKey="$keystore"/luks/"$luksName"/0.key
 
         local keyOptions=( --pbkdf=pbkdf2 --pbkdf-force-iterations=1000 )

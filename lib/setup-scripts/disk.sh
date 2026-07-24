@@ -61,11 +61,12 @@ function do-disk-setup { # 1: diskPaths
 declare-flag install-system image-owner "" "When using image files, »chown« them to this »owner[:group]« before the installation."
 
 ## Parses and expands »diskPaths« to ensure that a disk or image exists for each »config.setup.disks.devices«, creates and loop-mounts images for non-/dev/ paths, and checks whether physical device sizes match.
-function ensure-disks {
+function ensure-disks { # 1: passedOnly
+    local passedOnly=${1:-} # Only check whether all devices' paths were provided, do nothing else.
 
     declare -g -A blockDevs=( ) # this ends up in the caller's scope
     if [[ ${args[disks]} == */ ]] ; then
-        mkdir -p "${args[disks]}"
+        [[ $passedOnly ]] || mkdir -p "${args[disks]}"
         for name in "@{!config.setup.disks.devices[@]}" ; do blockDevs[$name]=${args[disks]}${name}.img ; done
     else
         local path ; for path in ${args[disks]//:/ } ; do
@@ -79,6 +80,7 @@ function ensure-disks {
         if [[ ! @{config.setup.disks.devices!catAttrSets.partitionDuringInstallation[$name]} ]] ; then unset blockDevs[$name] ; continue ; fi
         if [[ ! ${blockDevs[$name]:-} ]] ; then echo "Path for block device $name not provided" 1>&2 ; \return 1 ; fi
         eval 'local -A disk='"@{config.setup.disks.devices[$name]}"
+        if [[ $passedOnly ]] ; then continue ; fi
         if [[ ${blockDevs[$name]} != /dev/* ]] ; then
             local outFile=${blockDevs[$name]} &&
             install -m 640 -T /dev/null "$outFile" && truncate -s "${disk[size]}" "$outFile" || return

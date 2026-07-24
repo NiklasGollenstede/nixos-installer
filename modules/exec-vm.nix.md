@@ -18,7 +18,7 @@ in {
         type = lib.fun.types.attrsOfSubmodules (subModuleArgs@{ name, ... }: { options = {
             config = lib.mkOption {
                 description = lib.mdDoc ''Machine configuration to be added to the system's qemu exec VM.'';
-                 inherit (noUserModules.extendModules { modules = [ "${modulesPath}/virtualisation/qemu-vm.nix" vmModule {
+                inherit (noUserModules.extendModules { modules = [ "${modulesPath}/virtualisation/qemu-vm.nix" vmModule {
                     system.nixos.tags = [ "vm-${name}" ]; # tag this to make clearer what's what
                 } ]; }) type;
                 default = { }; visible = "shallow";
@@ -130,7 +130,7 @@ in {
         services.userborn = { enable = true; static = true; }; # NB: this works here, but is otherwise pretty bad, as uids set to null get potentially unstable values between builds
         system.switch.enable = false;
         documentation.enable = false;
-        environment.etc."machine-id".text = lib.mkDefault "";
+        environment.etc."machine-id".enable = lib.mkDefault false;
         networking.resolvconf.enable = false;
         environment.etc."resolv.conf".text = "nameserver 10.0.2.3\n";
         services.qemuGuest.enable = lib.mkForce false;

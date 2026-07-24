@@ -71,14 +71,15 @@ $ nix shell nixpkgs#vde2 --command vde_switch -sock /tmp/vm-net
 $ ... --nic=vde,sock=/tmp/vm-net # multiple times"
 declare-flag run-qemu no-serial         "" "Do not connect the calling terminal to a serial adapter the guest can log to and open a terminal on the guests serial, as would be the default if the guests logs to ttyS0."
 declare-flag run-qemu share        "decls" "Host dirs to make available as network shares for the guest, as space separated list of »name:host-path,options«. E.g. »--share='foo:/home/user/foo,readonly=on bar:/tmp/bar«. In the VM the share can be mounted with: »$ mount -t 9p -o trans=virtio -o version=9p2000.L -o msize=4194304 -o ro foo /foo« (or »mount -t virtiofs foo /foo « with »--use-virtio-fs«)."
-declare-flag run-qemu use-virtio-fs     "" "Pass the »share«s as virtio shares, instead of virtfs/9p. Default iff »boot.initrd.availableKernelModules« includes »virtio_fs« (because it requires that driver)."
+declare-flag run-qemu use-virtio-fs     "" "Pass the »share«s as virtio shares, instead of virtfs/9p. Experimental." # Default iff »boot.initrd.availableKernelModules« includes »virtio_fs« (because it requires that driver)."
 declare-flag run-qemu use-virtio-blk    "" "Pass the system's disks/images as virtio disks, instead of using AHCI+IDE. Default iff »boot.initrd.availableKernelModules« includes »virtio_blk« (because it requires that driver)."
+declare-flag run-qemu use-pmem-for "[+]name[=ro|rw][:...]" "Pass the named ones of the system's disks/images as pmem devices."
 function run-qemu { # ...: qemuArgs
 
-    local qemu=( )
+    local qemu=( ) ; apply-vm-args
 
     if [[ @{pkgs.stdenv.hostPlatform.system} == "@{native.stdenv.hostPlatform.system}" ]] ; then
-        qemu=( $( build-lazy @{native.qemu_kvm.drvPath!unsafeDiscardStringContext} )/bin/qemu-kvm ) || return
+        qemu=( $( build-lazy @{native.qemu_kvm.drvPath!unsafeDiscardStringContext} )/bin/qemu-kvm "${qemu[@]}" ) || return
         if [[ ! ${args[no-kvm]:-} && -r /dev/kvm && -w /dev/kvm ]] ; then
             # For KVM to work, vBox must not be running anything at the same time (and vBox hangs on start if qemu runs). Pass »--no-kvm« and accept ~10x slowdown, or stop vBox.
             qemu+=( -enable-kvm -cpu host )
@@ -90,14 +91,15 @@ function run-qemu { # ...: qemuArgs
             args[vm-smp]=1 # the emulation is single-threaded anyway
         fi
     else
-        qemu=( $( build-lazy @{native.qemu_full.drvPath!unsafeDiscardStringContext} )/bin/qemu-system-@{pkgs.stdenv.hostPlatform.system%%-linux} ) || return
+        qemu=( $( build-lazy @{native.qemu_full.drvPath!unsafeDiscardStringContext} )/bin/qemu-system-@{pkgs.stdenv.hostPlatform.system%%-linux} "${qemu[@]}" ) || return
     fi
     if [[ @{pkgs.stdenv.hostPlatform.system} == aarch64-* ]] ; then
         qemu+=( -machine type=virt ) # aarch64 has no default, but this seems good
     fi ; qemu+=( -cpu max )
 
     if [[ ${args[direct]:-} ]] ; then
-        qemu+=( -kernel @{config.system.build.kernel}/bzImage -initrd @{config.system.build.initialRamdisk}/initrd -append "$(echo -n "@{config.boot.kernelParams[@]}") init=@{config.system.build.toplevel}/init ${args[direct]}" )
+        local append= ; if [[ ${args[direct]} != 1 ]] ; then append=${args[direct]} ; fi
+        qemu+=( -kernel @{config.system.build.kernel}/bzImage -initrd @{config.system.build.initialRamdisk}/initrd -append "$( echo -n "@{config.boot.kernelParams[@]}" ) init=@{config.system.build.toplevel}/init $append" )
 
     elif [[ @{config.virtualisation.useEFIBoot:-} || @{config.boot.loader.systemd-boot.enable} || ${args[efi]:-} ]] ; then # UEFI. Otherwise it boots SeaBIOS.
         local ovmf ; ovmf=$( build-lazy @{pkgs.OVMF.drvPath!unsafeDiscardStringContext} fd ) || return
@@ -110,14 +112,22 @@ function run-qemu { # ...: qemuArgs
         # https://lists.gnu.org/archive/html/qemu-discuss/2018-04/msg00045.html
     fi
 
-    if [[ ${args[disks]} == */ ]] ; then
-        disks=( ${args[disks]}primary.img ) ; for name in "@{!config.setup.disks.devices[@]}" ; do if [[ $name != primary ]] ; then disks+=( ${args[disks]}${name}.img ) ; fi ; done
-    else disks=( ${args[disks]//:/ } ) ; fi
+    ensure-disks passedOnly || return
 
+    local pmemSize=0
     [[ ' '"@{config.boot.initrd.availableKernelModules[@]}"' ' != *' 'virtio_blk' '* ]] || args[use-virtio-blk]=1
-    local index ; for index in ${!disks[@]} ; do
-#       qemu+=( -drive format=raw,if=ide,file="${disks[$index]/*=/}" ) # »if=ide« is the default, which these days isn't great for driver support inside the VM
-        qemu+=( -drive format=raw,media=disk,if=none,index=${index},id=drive${index},file="${disks[$index]/*=/}" ) # create the disk drive, without attaching it, name it driveX
+    local index=-1 ; local name ; for name in "${!blockDevs[@]}" ; do
+        index=$(( index + 1 ))
+        if [[ :${args[use-pmem-for]:-}: =~ :([+])?"${name//\[\]\.\^\$\*\+\?\{\}\(\)\|\[\]\\/\\&}"([=](ro|rw)?): ]] ; then
+            local add=${BASH_REMATCH[1]} ; local readonly= ; if [[ ${BASH_REMATCH[3]} == ro ]] ; then readonly=1 ; fi
+            local size=$( stat -c%s "${blockDevs[$name]}" ) || return ; pmemSize=$(( pmemSize + size ))
+            # TODO: come up with some way to specify readonly or not
+            qemu+=( -object memory-backend-file,id=pmem${index},share,mem-path="${blockDevs[$name]}",size=$size,${readonly:+readonly=on} )
+            qemu+=( -device virtio-pmem-pci,memdev=pmem${index},id=nv1 )
+            if [[ ! $add ]] ; then continue ; fi
+        fi
+        #qemu+=( -drive format=raw,if=ide,file="${blockDevs[$name]}" ) # »if=ide« is the default, which these days isn't great for driver support inside the VM
+        qemu+=( -drive format=raw,media=disk,if=none,index=${index},id=drive${index},file="${blockDevs[$name]}" ) # create the disk drive, without attaching it, name it driveX
 
         if [[ ! ${args[use-virtio-blk]:-} ]] ; then
             qemu+=( -device ahci,acpi-index=${index},id=ahci${index} ) # create an (ich9-)AHCI controller/bus named »ahciX« (could probably be used for all disks)
@@ -126,6 +136,9 @@ function run-qemu { # ...: qemuArgs
             qemu+=( -device virtio-blk-pci,drive=drive${index},disable-modern=on,disable-legacy=off ) # this should be faster, but seems to require guest drivers
         fi
     done
+    if [[ pmemSize != 0 ]] ; then
+        qemu+=( -m maxmem=$(( ${args[vm-mem]} * 1024 * 1024 + pmemSize )) )
+    fi
 
     if [[ ${args[share]:-} ]] ; then # e.g. --share='home:/home/user,readonly=on,opt=value bar:/tmp/bar'
         #[[ ' '"@{config.boot.initrd.availableKernelModules[@]}"' ' != *' 'virtiofs' '* ]] || args[use-virtio-fs]=1
@@ -176,9 +189,7 @@ function run-qemu { # ...: qemuArgs
         qemu+=( -nic model=virtio-net-pci,mac=$mac,type="${args[nic]}" )
     fi
 
-    apply-vm-args
-
-    if [[ ${args[install]:-} ]] ; then local disk ; for disk in "${disks[@]}" ; do
+    if [[ ${args[install]:-} ]] ; then local disk ; for disk in "${blockDevs[@]}" ; do
         if [[ ! -e $disk ]] ; then args[reinstall]=1 ; fi
     done ; fi
     if [[ ${args[reinstall]:-} ]] && [[ ! ${args[dry-run]:-} ]] ; then (
@@ -188,7 +199,7 @@ function run-qemu { # ...: qemuArgs
 
     qemu+=( "$@" )
     if [[ ${args[dry-run]:-} ]] ; then
-        echo "${qemu[@]}"
+        ( set -x ; : "${qemu[@]}" )
     else
         echo + "${qemu[@]}" ; for _ in $( seq $( @{native.ncurses}/bin/tput lines ) ) ; do echo ; done
         "${qemu[@]}" || return
@@ -201,7 +212,15 @@ declare-flag run-qemu,install-system,'*' vm-mem         "num" "VM RAM in MiB (»
 declare-flag run-qemu,install-system,'*' vm-smp         "num" "Number of guest CPU cores (default: 4)."
 declare-flag run-qemu,install-system,'*' vm-usb-port   "path" "A physical USB port (or hub) to pass to the guest (e.g. a YubiKey for unlocking). Specified as »<bus>-<port>«, where bus and port refer to the physical USB port »/sys/bus/usb/devices/<bus>-<port>« (see »lsusb -tvv«). E.g.: »--vm-usb-port=3-1.1.1.4«."
 function apply-vm-args {
-    qemu+=( -m ${args[vm-mem]:-4096} -smp ${args[vm-smp]:-4} )
+    : ${args[vm-mem]:=4096}
+    if [[ ${args[vm-mem]} =~ ^[[:digit:]]+([TGM])$ ]] ; then
+        local suffix=${BASH_REMATCH[1]} ; args[vm-mem]=${args[vm-mem]:0:-1}
+        case suffix in
+            T) args[vm-mem]=$(( ${args[vm-mem]} * 1024 )) ;&
+            G) args[vm-mem]=$(( ${args[vm-mem]} * 1024 )) ;;
+        esac
+    fi
+    qemu+=( -m ${args[vm-mem]} -smp ${args[vm-smp]:-4} )
 
     if [[ ${args[vm-usb-port]:-} ]] ; then local decl ; for decl in ${args[vm-usb-port]//:/ } ; do
         qemu+=( -usb -device usb-host,hostbus="${decl/-*/}",hostport="${decl/*-/}" )

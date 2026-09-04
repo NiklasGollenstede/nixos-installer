@@ -12,7 +12,7 @@ dirname: inputs: let
     ) else module;
 
     getPreface = inputs: moduleArgs: mainModule: name: let
-        args = { config = null; pkgs = null; lib = null; utils = null; name = null; nodes = null; extraModules = null; modulesPath = null; modulesVersion = null; } // { inherit inputs; } // moduleArgs // { name = name; };
+        args = { config = null; options = null; pkgs = null; lib = null; utils = null; name = null; nodes = null; extraModules = null; modulesPath = null; modulesVersion = null; } // { inherit inputs; } // moduleArgs // { name = name; };
         config = getModuleConfig mainModule inputs args;
     in config.${prefaceName} or { };
 
@@ -207,9 +207,10 @@ in rec {
         # BUG: pretty sure `lib.systems.equals` is broken: https://github.com/NixOS/nixpkgs/issues/530431
         #differentPlatform = !(lib.systems.equals (lib.systems.elaborate setupPlatform) args.system.config.nixpkgs.hostPlatform);
         differentPlatform = setupPlatform != args.system.config.nixpkgs.hostPlatform.system;
-
         # If override in the line below is missing, make sure to apply the `../../patches/nixpkgs/pkgs-overridable.patch` to `inputs.nixpkgs`:
-        pkgs = if args.pkgs or null != null then args.pkgs else if !differentPlatform then args.system.config.${installer}.pkgs else args.system.config.${installer}.pkgs.override { localSystem = setupPlatform; crossSystem = null; };
+        setupPlatformPkgs = if !differentPlatform then args.system.config.${installer}.pkgs else args.system.config.${installer}.pkgs.override { localSystem = setupPlatform; crossSystem = null; };
+
+        pkgs = if args.pkgs or null != null then args.pkgs else setupPlatformPkgs;
         system = if args.pkgs or null != null || differentPlatform then args.system.extendModules { modules = [ {
             virtualisation.exec-vm.installer.config.virtualisation.host.pkgs = lib.mkForce pkgs; # (ths enables full virtualization of the target CPU architecture requested for the installation by the system)
             #installer.pkgs = lib.mkForce pkgs; # (this would also replace the pkgs inside the build VM)

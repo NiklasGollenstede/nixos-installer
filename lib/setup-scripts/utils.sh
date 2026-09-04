@@ -78,7 +78,7 @@ function run-hook-script { # 1: title, 2: scriptPath
         # (this does not help against intentionally malicious scripts, it's quite easy to trick this)
         BASH_PREV_COMMAND= ; set -o functrace ; trap 'if [[ $BASH_COMMAND != "$BASH_PREV_COMMAND" ]] ; then echo -n "> $BASH_COMMAND" >&2 ; read ; fi ; BASH_PREV_COMMAND=$BASH_COMMAND' debug
     fi
-    source "$2"
+    IN_NIXOS_INSTALLER=1 source "$2"
     set +o functrace ; trap - debug
 }
 

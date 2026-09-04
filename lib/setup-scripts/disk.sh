@@ -150,7 +150,7 @@ function partition-disk { # 1: name, 2: blockDev, 3?: devSize
     local beLoud=/dev/null ; if [[ ${args[trace]:-} ]] ; then beLoud=/dev/stdout ; fi
     local beSilent=/dev/stderr ; if [[ ${args[quiet]:-} ]] ; then beSilent=/dev/null ; fi
     eval 'local -A disk='"@{config.setup.disks.devices[$name]}"
-    local devSize=${3:-$( @{native.util-linux}/bin/blockdev --getsize64 "$blockDev" )}
+    local devSize=${3:-$( @{native.util-linux}/bin/blockdev --getsize64 "$blockDev" )} # in bytes
 
     local -a sgdisk=( --zap-all ) # delete existing part tables
     if [[ ${disk[gptOffset]} != 0 ]] ; then
@@ -163,10 +163,10 @@ function partition-disk { # 1: name, 2: blockDev, 3?: devSize
         eval 'local -A part='"$partDecl"
         if [[ ${part[disk]} != "${disk[name]}" ]] ; then continue ; fi
         if [[ ${part[size]:-} =~ ^[0-9]+%$ ]] ; then
-            part[size]=$(( $devSize / 1024 * ${part[size]:0:(-1)} / 100 ))K
+            part[size]=$(( $devSize / 1024 * ${part[size]%\%} / 100 ))K
         fi
         sgdisk+=(
-            --set-alignment="${part[alignment]:-${disk[alignment]}}"
+            --set-alignment="${part[alignment]:-${disk[alignment]}}" --align-end
             --new="${part[index]:-0}":"${part[position]}":+"${part[size]:-}"
             --partition-guid=0:"${part[guid]}"
             --typecode=0:"${part[type]}"
@@ -279,7 +279,7 @@ function mount-system {( # 1: mnt, 2?: fstabPath, 3?: allowNoautoFail
                 set -uo pipefail ; root="$mnt"/ # (same as the 'prepare' snippet in pre-mount-commands.nix)
                 export IN_NIXOS_INSTALLER=1 ; unalias exit return 2>/dev/null || true
                 if [[ ${args[quiet]:-} ]] ; then
-                    eval "$cmd" &>/dev/null || exit
+                    eval "$cmd" >/dev/null || exit
                 else eval "$cmd" || exit ; fi
             )}
 

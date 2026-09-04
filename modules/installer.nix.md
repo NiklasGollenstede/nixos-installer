@@ -48,7 +48,7 @@ in {
             type = lib.types.nullOr lib.types.str; default = null;
         };
         pkgs = lib.mkOption {
-            description = ''The package set used to perform the installation.'';
+            description = ''The package set used to perform the installation. Especially, this sets the architecture for the installation VM (regardless of the target or host architecture). However, the installation is a lot faster if this matches the host architecture, and if this is different from the target architecture, the guest in the VM will use a QEMU binfmt interpreter to run the architecture-specific parts of the installation.'';
             type = lib.types.pkgs; default = pkgs;
         };
         build.scripts = lib.mkOption {

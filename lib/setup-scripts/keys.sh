@@ -52,8 +52,9 @@ function populate-keystore { # 1?: keystore
 
 ## Creates the LUKS devices specified by the host using the keys created by »populate-keystore«.
 function create-luks-layers { # (void)
+    local luksNames=( "$@" ) ; if [[ ${#luksNames[@]} == 0 ]] ; then luksNames=( "@{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ) ; fi
     local keystore=${args[keystore]:-/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}}
-    for luksName in "@{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ; do
+    for luksName in "${luksNames[@]}" ; do
         local rawDev=@{config.boot.initrd.luks.devices!catAttrSets.device[$luksName]}
         if ! is-partition-on-disks "$rawDev" "${blockDevs[@]}" ; then echo "Partition alias $rawDev used by LUKS device $luksName does not point at one of the target disks" "${blockDevs[@]}" 1>&2 ; \return 1 ; fi
         local primaryKey="$keystore"/luks/"$luksName"/0.key
@@ -70,8 +71,9 @@ function create-luks-layers { # (void)
 
 ## Opens the LUKS devices specified by the host, using the host's (open) keystore.
 function open-luks-layers { # (void)
+    local luksNames=( "$@" ) ; if [[ ${#luksNames[@]} == 0 ]] ; then luksNames=( "@{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ) ; fi
     local keystore=${args[keystore]:-/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}}
-    for luksName in "@{!config.boot.initrd.luks.devices!catAttrSets.device[@]}" ; do
+    for luksName in "${luksNames[@]}" ; do
         if [[ -e /dev/mapper/$luksName ]] ; then continue ; fi
         local rawDev=@{config.boot.initrd.luks.devices!catAttrSets.device[$luksName]}
         local primaryKey="$keystore"/luks/"$luksName"/0.key

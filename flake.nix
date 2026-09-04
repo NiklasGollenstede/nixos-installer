@@ -5,7 +5,7 @@
     nixpkgs = { url = "github:NixOS/nixpkgs/nixos-26.05"; };
     functions = { url = "github:NiklasGollenstede/nix-functions"; inputs.nixpkgs.follows = "nixpkgs"; };
     systems.url = "github:nix-systems/default-linux";
-    config.url = "github:NiklasGollenstede/nixos-installer?dir=example/defaultConfig"; # "path:./example/defaultConfig"; # (The latter only works on each host after using this flake directly (not as dependency or another flake). The former effectively points to the last commit, i.e. it takes two commits to apply changes to the default config.)
+    config.url = "path:./example/defaultConfig";
 
 }; outputs = inputs: let patches = {
 

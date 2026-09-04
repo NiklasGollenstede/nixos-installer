@@ -257,7 +257,7 @@ function mount-keystore-luks-primary {
 }
 function mount-keystore-default { # ...: indices
     local indices=( "$@" ) ; if [[ ${#indices[@]} == 0 ]] ; then indices=( $( seq 0 7 ) ) ; fi
-    echo 'Opening keystore with default keys (this may cause prompts, but no new keys are written):'
+    echo 'Opening keystore with default keys (This may cause prompts to re-generate keys, but those are not persisted. Skip to the next prompt/method with Ctrl+D.):'
     for index in "${indices[@]}" ; do
         local usage=luks/keystore-@{config.networking.hostName!hashString.sha256:0:8}/$index
         if [[ ! @{config.setup.keystore.keys[$usage]} ]] ; then continue ; fi

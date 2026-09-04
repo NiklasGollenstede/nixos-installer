@@ -119,13 +119,12 @@ function exec-in-qemu { # 1: entry, ...: argv
 
 ## The default command that will activate the system and install the bootloader. In a separate function to make it easy to replace.
 function nixos-install-cmd {( # 1: mnt, 2: topLevel
-    # »nixos-install« by default does some stateful things (see »--no-root-passwd« »--no-channel-copy«), builds and copies the system config, registers the system (»nix-env --profile /nix/var/nix/profiles/system --set $targetSystem«), and then calls »NIXOS_INSTALL_BOOTLOADER=1 nixos-enter -- $topLevel/bin/switch-to-configuration boot«, which is essentially the same as »NIXOS_INSTALL_BOOTLOADER=1 nixos-enter -- @{config.system.build.installBootLoader} $targetSystem«, i.e. the side effects of »nixos-enter« and then calling the bootloader-installer.
-
-    #PATH=@{native.nix}/bin:$PATH:@{config.systemd.package}/bin TMPDIR=${TMPDIR:-/tmp} LC_ALL=C @{native.nixos-install-tools-no-doc}/bin/nixos-install --system "$2" --no-root-passwd --no-channel-copy --root "$1" || exit # We did most of this, so just install the bootloader:
-
+    # The "normal" thing to do at this point is to call »nixos-install«, which by default does some stateful things (that can be disabled by »--no-root-passwd« and »--no-channel-copy«), builds and copies the system config (which we already did), registers the system (»nix-env --profile /nix/var/nix/profiles/system --set $targetSystem«, did that too), and then calls »NIXOS_INSTALL_BOOTLOADER=1 nixos-enter -- $topLevel/bin/switch-to-configuration boot«, which is essentially the same as »NIXOS_INSTALL_BOOTLOADER=1 nixos-enter -- @{config.system.build.installBootLoader} $targetSystem«, i.e. the side effects of »nixos-enter« and then calling the bootloader installer.
     export NIXOS_INSTALL_BOOTLOADER=1 # tells some bootloader installers (systemd & grub) to not skip parts of the installation
-    LC_ALL=C PATH=@{native.busybox}/bin:$PATH:@{native.util-linux}/bin @{native.nixos-install-tools-no-doc}/bin/nixos-enter --silent --root "$1" -c "source /etc/set-environment ; ${_set_x:-:} ; @{config.system.build.installBootLoader} $2" || exit
-    # (newer versions of »mount« seem to be unable to do »--make-private« on »rootfs« (in the initrd), but busybox's mount still works)
+    export IN_NIXOS_INSTALLER=1 LC_ALL=C PATH=@{native.busybox}/bin:$PATH:@{native.util-linux}/bin # newer versions of »mount« seem to be unable to do »--make-private« on »rootfs« (in the initrd), but busybox's mount still works
+    @{native.nixos-install-tools-no-doc}/bin/nixos-enter --silent --root "$1" \
+    -c "source /etc/set-environment ; ${_set_x:-:} ; @{config.system.build.installBootLoader} $2" \
+    || exit
 )}
 
 declare-flag install-system toplevel "store-path" "Optional replacement for the actual »config.system.build.toplevel«."
@@ -149,6 +148,7 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
     [[ -e $mnt/etc/mtab ]] || ln -sfn /proc/mounts $mnt/etc/mtab || exit
     ln -sT $( realpath $targetSystem ) $mnt/run/current-system || exit
     #mkdir -p /nix/var/nix/db # »nixos-containers« requires this but nothing creates it before nix is used. BUT »nixos-enter« screams: »/nix/var/nix/db exists and is not a regular file.«
+    mkdir -p -m 0755 $mnt/run/user && mkdir -p -m 0700 $mnt/run/user/0 || exit # XDG_RUNTIME_DIR
 
     # If the system configuration is supposed to be somewhere on the system, might as well initialize that:
     if [[ @{config.environment.etc.nixos.source:-} && @{config.environment.etc.nixos.source} != /nix/store/* && @{config.environment.etc.nixos.source} != /run/current-system/config && ! -e $mnt/@{config.environment.etc.nixos.source} && -e $targetSystem/config ]] ; then
@@ -195,14 +195,14 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
         if (( code != 0 )) ; then \exit $code ; fi
     elif [[ ${args[inspect-cmd]:-} ]] ; then
         if (( code != 0 )) ; then \exit $code ; fi
-        eval "${args[inspect-cmd]}" || exit
+        IN_NIXOS_INSTALLER=1 eval "${args[inspect-cmd]}" || exit
     else
         if (( code != 0 )) ; then
             ( set +x ; echo "Something went wrong in the last step of the installation. Inspect the output above and the mounted system in this chroot shell to decide whether it is critical. Exit the shell with 0 to proceed, or non-zero to abort." 1>&2 )
         else
             ( set +x ; echo "[1;32mInstallation done![0m This shell is in a chroot in the mounted system for inspection. Exiting the shell will unmount the system." 1>&2 )
         fi
-        LC_ALL=C PATH=@{native.busybox}/bin:$PATH:@{native.util-linux}/bin @{native.nixos-install-tools-no-doc}/bin/nixos-enter --root $mnt -- /nix/var/nix/profiles/system/sw/bin/bash -c 'source /etc/set-environment ; NIXOS_INSTALL_BOOTLOADER=1 CHROOT_DIR="'"$mnt"'" mnt=/ exec "'"$self"'" bash' || exit # +o monitor
+        IN_NIXOS_INSTALLER=1 LC_ALL=C PATH=@{native.busybox}/bin:$PATH:@{native.util-linux}/bin @{native.nixos-install-tools-no-doc}/bin/nixos-enter --root $mnt -- /nix/var/nix/profiles/system/sw/bin/bash -c 'source /etc/set-environment ; NIXOS_INSTALL_BOOTLOADER=1 CHROOT_DIR="'"$mnt"'" mnt=/ exec "'"$self"'" bash' || exit # +o monitor
     fi
 
     mkdir -p $mnt/var/lib/systemd/timesync && touch $mnt/var/lib/systemd/timesync/clock || true # save current time

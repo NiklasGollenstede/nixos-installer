@@ -3,8 +3,10 @@ dirname: inputs: let
     inherit (inputs.functions.lib) forEachSystem getModulesFromInputs getNixFiles getOverlaysFromInputs importWrapped mapMerge mapMergeUnique mergeAttrsUnique withOverridable; # trace;
     inherit (inputs.config.rename) installer; prefaceName = inputs.config.rename.preface;
 
+    callModule = module: args: module ((lib.mapAttrs (name: default: null) (lib.functionArgs module)) // { inherit args; });
+
     getModuleConfig = module: inputs: args: if builtins.isFunction module then (
-        getModuleConfig (module args) inputs args
+        getModuleConfig (/* callModule */ module args) inputs args
     ) else if (builtins.isPath module) || (builtins.isString module) then (
         getModuleConfig (importWrapped inputs module).required inputs args
     ) else if module?config then module.config else if module?_file && module?imports then (
@@ -254,7 +256,8 @@ in rec {
                 Run a root session in the context of a different host (useful if Nix is not installed for root on the current host):
                     $ nix run .#other-host -- sudo
         '';
-        tools = lib.unique (map (p: p.outPath) (lib.filter lib.isDerivation pkgs.stdenv.allowedRequisites));
+        tools = pkgs.stdenv.initialPath;
+        #tools = lib.unique (map (p: p.outPath) (lib.filter lib.isDerivation pkgs.stdenv.allowedRequisites));
         esc = lib.escapeShellArg;
     in (pkgs.writeShellScript "scripts-${name}" ''
         # bash

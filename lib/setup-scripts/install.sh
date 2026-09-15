@@ -99,12 +99,14 @@ function exec-in-qemu { # 1: entry, ...: argv
 
     declare -g -A vmShares
     if [[ ${args[keystore]:-} ]] ; then
-        vmShares[keystore]=${args[keystore]}
+        vmShares[keystore]=${args[keystore]}:rw
         args[keystore]=/tmp/shares/keystore
     fi
-    for share in "${!vmShares[@]}" ; do
-        qemu+=( -virtfs local,path="${vmShares[$share]}",security_model=none,mount_tag=shares/"$share",id=shares_"$share",readonly=on )
-        command+="mkdir -p /tmp/shares/$share && mount -t 9p -o trans=virtio,version=9p2000.L,msize=16384,ro shares/$share /tmp/shares/$share || exit"$'\n'
+    local share ; for share in "${!vmShares[@]}" ; do
+        local options=${vmShares[$share]##*:} ; vmShares[$share]=${vmShares[$share]%:*}
+        local readonly=off ; if [[ ,$options, == *,ro,* ]] ; then readonly=on ; fi
+        qemu+=( -virtfs local,path="${vmShares[$share]}",security_model=none,mount_tag=shares/"$share",id=shares_"$share",readonly=$readonly )
+        command+="mkdir -p /tmp/shares/$share && mount -t 9p -o trans=virtio,version=9p2000.L,msize=16384${options:+,$options} shares/$share /tmp/shares/$share || exit"$'\n'
         # TODO: unmount these?
     done
     local QEMU_KERNEL_PARAMS=zfs.zfs_arc_max=$(( ${args[vm-mem]:-4096} * 1024 * 1024 / 2 )) # use at most half the VM's RAM for ZFS cache, else it (oddly) runs out of memory
@@ -175,17 +177,17 @@ function install-system-to {( set -u # 1: mnt, 2?: topLevel
     else
         printf '+ ' ; printf %q' ' nix "${cmd[@]:2}" ; echo ; "${cmd[@]}" || exit
     fi
-    rm -rf $mnt/nix/var/nix/gcroots || exit
 
     # Set this as the initial system generation (in case »nixos-install-cmd« won't):
     # (does about the same as »nix-env --profile /nix/var/nix/profiles/system --set $targetSystem«)
+    rm -rf $mnt/nix/var/nix/gcroots || exit
     mkdir -p -m 755 $mnt/nix/var/nix/{profiles,gcroots}/per-user/root/ || exit
     ln -sT $(realpath $targetSystem) $mnt/nix/var/nix/profiles/system-1-link || exit
     ln -sT system-1-link $mnt/nix/var/nix/profiles/system || exit
     ln -sT /nix/var/nix/profiles $mnt/nix/var/nix/gcroots/profiles || exit
 
     # Run the main install command (primarily for the bootloader):
-    @{native.util-linux}/bin/mount -o bind,ro /nix/store $mnt/nix/store || exit ; prepend_trap '! @{native.util-linux}/bin/mountpoint -q $mnt/nix/store || @{native.util-linux}/bin/umount -l $mnt/nix/store' EXIT || exit # all the things required to _run_ the system are copied, but (may) need some more things to initially install it and/or enter the chroot (like qemu, see above)
+    @{native.util-linux}/bin/mount -o bind,ro /nix/store $mnt/nix/store || exit ; prepend_trap '! @{native.util-linux}/bin/mountpoint -q $mnt/nix/store || @{native.util-linux}/bin/umount -l $mnt/nix/store' EXIT || exit # all the things required to _run_ the system are copied, but (may) need some more things to initially install it and/or enter the chroot (like qemu, see above, or the inspect stuff below)
     run-hook-script 'Pre Installation' @{config.installer.commands.preInstall!writeText.preInstallCommands} || exit
     code=0 ; nixos-install-cmd $mnt "$topLevel" >$beLoud 2>$beSilent || code=$?
     run-hook-script 'Post Installation' @{config.installer.commands.postInstall!writeText.postInstallCommands} || exit

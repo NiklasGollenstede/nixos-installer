@@ -1,9 +1,9 @@
 dirname: inputs: let
     lib = inputs.functions.lib.__internal__; # (our flake exports the result of calling a function defined here that returns a lib thing, which is probably why importing our own lib would result in an infinite recursion)
-    inherit (inputs.functions.lib) forEachSystem getModulesFromInputs getNixFiles getOverlaysFromInputs importWrapped mapMerge mapMergeUnique mergeAttrsUnique withOverridable; # trace;
+    inherit (inputs.functions.lib) forEachSystem getModulesFromInputs getNixFiles getOverlaysFromInputs importWrapped mapMerge mapMergeUnique mergeAttrsUnique withOverride; # trace;
     inherit (inputs.config.rename) installer; prefaceName = inputs.config.rename.preface;
 
-    callModule = module: args: module ((lib.mapAttrs (name: default: null) (lib.functionArgs module)) // { inherit args; });
+    #callModule = module: args: module ((lib.mapAttrs (name: default: null) (lib.functionArgs module)) // { inherit args; });
 
     getModuleConfig = module: inputs: args: if builtins.isFunction module then (
         getModuleConfig (/* callModule */ module args) inputs args
@@ -128,7 +128,7 @@ in rec {
 
     # Builds a system of NixOS hosts and exports them, plus »apps« and »devShells« to manage them, as flake outputs.
     # All arguments are optional, as long as the default can be derived from the other arguments as passed.
-    mkSystemsFlake = withOverridable (args@{
+    mkSystemsFlake = withOverride (args@{
         # An attrset of imported Nix flakes, for example the argument(s) passed to the flake »outputs« function. All other arguments are optional (and have reasonable defaults) if this is provided and contains »self« and the standard »nixpkgs«. This is also the second argument passed to the individual hosts' top level config files.
         inputs ? { },
         # Arguments »{ configs, files, dir, exclude, }« to »mkNixosConfigurations«, see there for details. May also be a list of those attrsets, in which case those multiple sets of hosts will be built separately by »mkNixosConfigurations«, allowing for separate sets of »peers« passed to »mkNixosConfiguration«. Each call will receive all other arguments, and the resulting sets of hosts will be merged.
@@ -209,8 +209,8 @@ in rec {
         # BUG: pretty sure `lib.systems.equals` is broken: https://github.com/NixOS/nixpkgs/issues/530431
         #differentPlatform = !(lib.systems.equals (lib.systems.elaborate setupPlatform) args.system.config.nixpkgs.hostPlatform);
         differentPlatform = setupPlatform != args.system.config.nixpkgs.hostPlatform.system;
-        # If override in the line below is missing, make sure to apply the `../../patches/nixpkgs/pkgs-overridable.patch` to `inputs.nixpkgs`:
-        setupPlatformPkgs = if !differentPlatform then args.system.config.${installer}.pkgs else args.system.config.${installer}.pkgs.override { localSystem = setupPlatform; crossSystem = null; };
+        # If override in the line below is missing, make sure to apply the `../../patches/nixpkgs/pkgs-overridable.patch` (or `../../patches/nixpkgs/better-nixpkgsFun.patch`) to `inputs.nixpkgs`:
+        setupPlatformPkgs = if !differentPlatform then args.system.config.${installer}.pkgs else (args.system.config.${installer}.pkgs.mkPkgs args.system.config.${installer}.pkgs.override) { localSystem = setupPlatform; crossSystem = null; };
 
         pkgs = if args.pkgs or null != null then args.pkgs else setupPlatformPkgs;
         system = if args.pkgs or null != null || differentPlatform then args.system.extendModules { modules = [ {

@@ -1,0 +1,13 @@
+diff --git a/pkgs/top-level/stage.nix b/pkgs/top-level/stage.nix
+index 0668737c9ee4..2d18da5bdd83 100644
+--- a/pkgs/top-level/stage.nix
++++ b/pkgs/top-level/stage.nix
+@@ -280,6 +280,8 @@ let
+     # Prefer appendOverlays if used repeatedly.
+     extend = f: self.appendOverlays [ f ];
+
++    mkPkgs = nixpkgsFun;
++
+     # Fully static packages.
+     # Currently uses Musl on Linux (couldn’t get static glibc to work).
+     pkgsStatic = nixpkgsFun {

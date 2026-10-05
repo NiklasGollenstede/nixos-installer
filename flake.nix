@@ -11,7 +11,7 @@
 
     nixpkgs = [
         #(throw "Should not be evaluated when using installer as input")
-        ./patches/nixpkgs/pkgs-overridable.patch
+        ./patches/nixpkgs/better-nixpkgsFun-26-05.patch
     ];
 
 }; in inputs.functions.lib.patchFlakeInputsAndImportRepo inputs patches ./. (inputs: repo': let

@@ -199,7 +199,7 @@ function run-qemu { # ...: qemuArgs
 
     qemu+=( "$@" )
     if [[ ${args[dry-run]:-} ]] ; then
-        ( set -x ; : "${qemu[@]}" )
+        local cmd=$( ( PS4= ; set -x ; : "${qemu[@]}" ) 2>&1 ) ; echo "${cmd:2}"
     else
         echo + "${qemu[@]}" ; for _ in $( seq $( @{native.ncurses}/bin/tput lines ) ) ; do echo ; done
         "${qemu[@]}" || return

@@ -1,0 +1,124 @@
+diff --git a/lib/customisation.nix b/lib/customisation.nix
+index 883f99928a49..6bc0e2b16c12 100644
+--- a/lib/customisation.nix
++++ b/lib/customisation.nix
+@@ -215,6 +215,59 @@ rec {
+     else
+       mirrorArgs f';
+ 
++  /**
++    Builds functions whose arguments can be overridden, similar to
++    `makeOverridable`, but instead of setting the override function as
++    `override` on the attributes that the original function returns
++    (and concerning itself with `overrideDerivation` and `overrideAttrs`),
++    the override function is passed as second argument to the original
++    function (who can then return or use it in whatever way it chooses).
++
++    # Inputs
++
++    `f_args_override`
++
++    : 1\. Function argument
++
++    # Type
++
++    ```
++    withOverride :: (AttrSet -> (AttrSet -> a) -> a) -> AttrSet -> a
++    ```
++    I.e., the only argument to this function is a function that takes some
++    argument plus override function while returning something that includes
++    the override function, and this function returns a function that takes the
++    same argument and returns the same thing (as far as types are concerned).
++
++    # Examples
++    :::{.example}
++    ## `lib.customisation.withOverride` usage example
++
++    ```nix
++    add_a_b = withOverride ({ a, b, }: override: {
++      result = a + b;
++      set_a = a: override { inherit a; };
++    });
++    five = add_a_b { a = 2; b = 3; };
++    more = five.set_a 10;
++    assert fife.result == 5 && more.result == 13;
++    ```
++    :::
++  */
++  withOverride =
++    f_args_override:
++    let
++      keepSignature = mirrorFunctionArgs f_args_override;
++    in
++    keepSignature (
++      origArgs:
++      let
++        addArgs = newArgs: origArgs // (if isFunction newArgs then newArgs origArgs else newArgs);
++        override = keepSignature (newArgs: withOverride f_args_override (addArgs newArgs));
++      in
++      f_args_override origArgs override
++    );
++
+   /**
+     Call the package function in the file `fn` with the required
+     arguments automatically.  The function is called with the
+diff --git a/lib/default.nix b/lib/default.nix
+index 751738a98965..c7393d6f442f 100644
+--- a/lib/default.nix
++++ b/lib/default.nix
+@@ -407,6 +407,7 @@ let
+       inherit (self.customisation)
+         overrideDerivation
+         makeOverridable
++        withOverride
+         callPackageWith
+         callPackagesWith
+         extendDerivation
+diff --git a/pkgs/top-level/default.nix b/pkgs/top-level/default.nix
+index c00efe313abd..01550cf9177d 100644
+--- a/pkgs/top-level/default.nix
++++ b/pkgs/top-level/default.nix
+@@ -18,6 +18,7 @@
+   or dot-files.
+ */
+ 
++(import ../../lib).withOverride (
+ {
+   # The system packages will be built on. See the manual for the
+   # subtle division of labor between these two `*System`s and the three
+@@ -48,6 +49,7 @@
+   # Ignore unexpected args.
+   ...
+ }@args:
++override:
+ 
+ let # Rename the function arguments
+   config0 = config;
+@@ -192,7 +194,7 @@ let
+   # via `evalModules` is not idempotent. In other words, if you add `config` to
+   # `newArgs`, expect strange very hard to debug errors! (Yes, I'm speaking from
+   # experience here.)
+-  nixpkgsFun = newArgs: import ./. (args // newArgs);
++  nixpkgsFun = override;
+ 
+   # Partially apply some arguments for building bootstrapping stage pkgs
+   # sets. Only apply arguments which no stdenv would want to override.
+@@ -254,3 +256,4 @@ let
+ 
+ in
+ checked pkgs
++)
+diff --git a/pkgs/top-level/stage.nix b/pkgs/top-level/stage.nix
+index 0668737c9ee4..34536a78f76c 100644
+--- a/pkgs/top-level/stage.nix
++++ b/pkgs/top-level/stage.nix
+@@ -280,6 +280,9 @@ let
+     # Prefer appendOverlays if used repeatedly.
+     extend = f: self.appendOverlays [ f ];
+ 
++    # Define a custom packe set variant. See ./variants.nix for inspiration.
++    mkPkgs = nixpkgsFun;
++
+     # Fully static packages.
+     # Currently uses Musl on Linux (couldn’t get static glibc to work).
+     pkgsStatic = nixpkgsFun {

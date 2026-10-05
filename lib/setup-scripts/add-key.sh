@@ -46,31 +46,33 @@ function gen-key-password {( set -eu # 1: usage
 )}
 
 ## Generates a key by prompting for (or reusing) a »$user«'s password, combining it with »$keystore/home/$user.key«.
-function gen-key-home-composite {( set -eu # 1: usage, 2: user
-    usage=$1 ; user=$2
-    keystore=${args[keystore]:-/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}}
+function gen-key-home-composite { set -eu # 1: usage, 2: user
+    local usage=$1 ; local user=$2
+    local keystore=${args[keystore]:-/run/keystore-@{config.networking.hostName!hashString.sha256:0:8}}
     if [[ ${!userPasswords[@]} && ${userPasswords[$user]:-} ]] ; then
-        password=${userPasswords[$user]}
+        local password=${userPasswords[$user]}
     else
-        password=$( prompt-new-password "for the user account »$user« (as component for key »(@{config.networking.hostName}:)$usage«)" )
-        if [[ ! $password ]] ; then \exit 1 ; fi ; userPasswords[$user]=$password # TODO: won't propagate
+        local password=$( prompt-new-password "for the user account »$user« (as component for key »(@{config.networking.hostName}:)$usage«)" )
+        if [[ ! $password ]] ; then \exit 1 ; fi
+        declare -g -A userPasswords ; userPasswords[$user]=$password
     fi
     { cat "$keystore"/home/"$user".key && cat <<<"$password" ; } | sha256sum | head -c 64
-)}
+}
 
 ## Generates a reproducible, host-independent key by challenging slot »$slot« of YubiKey »$serial« with »$user«'s password.
-function gen-key-home-yubikey {( set -eu # 1: usage, 2: serialAndSlotAndUser(as »serial:slot:user«)
-    usage=$1 ; args=$2
-    serial=$( <<<"$args" cut -d: -f1 ) ; slot=$( <<<"$args" cut -d: -f2 )
-    user=${args#$serial:$slot:}
+function gen-key-home-yubikey { set -eu # 1: usage, 2: serialAndSlotAndUser(as »serial:slot:user«)
+    local usage=$1 ; local args=$2
+    local serial=$( <<<"$args" cut -d: -f1 ) ; slot=$( <<<"$args" cut -d: -f2 )
+    local user=${args#$serial:$slot:}
     if [[ ${!userPasswords[@]} && ${userPasswords[$user]:-} ]] ; then
-        password=${userPasswords[$user]}
+        local password=${userPasswords[$user]}
     else
-        password=$( prompt-new-password "for the user account »$user« (as YubiKey challenge for key »:$usage«)" )
-        if [[ ! $password ]] ; then \exit 1 ; fi ; userPasswords[$user]=$password # TODO: won't propagate
+        local password=$( prompt-new-password "for the user account »$user« (as YubiKey challenge for key »:$usage«)" )
+        if [[ ! $password ]] ; then \exit 1 ; fi
+        declare -g -A userPasswords ; userPasswords[$user]=$password
     fi
     gen-key-yubikey-challenge "$usage" "$serial:$slot:home-$user=$password" true "»${user}«'s password (to create key »:${usage}«)"
-)}
+}
 
 ## Generates a reproducible secret by prompting for a pin/password and then challenging slot »$slot« of YubiKey »$serial«.
 function gen-key-yubikey-pin {( set -eu # 1: usage, 2: serialAndSlot(as »serial:slot«)

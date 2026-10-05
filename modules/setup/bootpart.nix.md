@@ -17,9 +17,21 @@ in {
 
     options = { ${setup}.bootpart = {
         enable = lib.mkEnableOption "configuration of a boot partition as GPT partition 1 on the »primary« disk and a FAT32 filesystem on it";
-        mountpoint = lib.mkOption { description = "Path at which to mount a vfat boot partition."; type = lib.types.str; default = "/boot"; };
-        createMbr = lib.mkOption { description = "Whether to create a hybrid MBR with (only) the boot partition listed as partition 1."; type = lib.types.bool; default = true; };
-        size = lib.mkOption { description = "Size of the boot partition, should be *more* than 32M(iB)."; type = lib.types.str; default = "2G"; };
+        mountpoint = lib.mkOption {
+            description = "Path at which to mount a vfat boot partition.";
+            type = lib.types.str; default = "/boot";
+        };
+        createMbr = lib.mkOption {
+            description = "Whether to create a hybrid MBR with (only) the boot partition listed as partition 1.";
+            type = lib.types.bool; default = true;
+        };
+        size = lib.mkOption {
+            description = "Size of the boot partition, should be *more* than 32M(iB).";
+            type = lib.types.str; defaultText = "5% of the primary disk size, or 8GiB, whichever is smaller";
+            default = let
+                _5percent = config.setup.disks.devices.primary.size / 20; _8GB = 8589934592;
+            in "${toString ((lib.min _5percent _8GB) / 1024)}K";
+        };
     }; };
 
     config = let

@@ -8,8 +8,9 @@ TBD
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: let lib = inputs.self.lib.__internal__; hostModule = { config, options, pkgs, modulesPath, noUserModules, ... }: let
+dirname: inputs: let lib = inputs.self.lib.__internal__; hostModule = moduleArgs@{ config, options, pkgs, modulesPath, noUserModules, ... }: let
     #prefix = inputs.config.prefix;
+    types = moduleArgs.lib.types;
     #cfg = config.virtualisation.exec-vm;
 in {
 
@@ -25,7 +26,7 @@ in {
             };
             launch = lib.mkOption {
                 description = "Output shell script to launch the VM to run a passed command.";
-                type = lib.types.path; readOnly = true;
+                type = types.path; readOnly = true;
             };
         }; config = {
             launch = let

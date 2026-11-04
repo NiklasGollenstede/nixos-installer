@@ -47,25 +47,29 @@ in rec {
 
         modules = (nixosArgs.modules or [ ]) ++ [ { imports = [ # Anything specific to only this evaluation of the module tree should go here.
             mainWithName
-            { _module.args.name = lib.mkOverride 0 name; } # (specialisations can somehow end up with the name »configuration«, which is very incorrect)
-            { networking.hostName = name; }
-            # containers may or may not want to inherit extraModules (but it is easy to add), but there is no reason not to inherit specialArgs:
-            { options.containers = lib.mkOption { type = lib.types.attrsOf (lib.types.submodule (_: { config = {
-                specialArgs = builtins.mapAttrs (_: lib.mkDefault) args.specialArgs; # imports = args.extraModules;
-            }; })); }; }
-            # `specializations` use `noUserModules`, which inherit specialArgs and extraModules, or `extendModules` inherits all modules and arguments. VM-variants also use `extendModules`.
-        ]; _file = "${dirname}/nixos.nix#modules"; } ];
+            { config._module.args.name = lib.mkOverride 0 name; } # (specialisations can somehow end up with the name »configuration«, which is very incorrect)
+            { config.networking.hostName = name; }
+        ]; _file = "${dirname}/nixos.nix#mkNixosConfiguration-modules"; } ];
+
+        # »extraModules« here are passed as the »extraModules« module argument (such that they can be used explicitly), and are (along with »specialArgs« below) also included in anything that uses the »noUserModules« argument (which does *not* include the »modules« above) or the »extendModules« argument or attribute on the evaluated system (the return value of »nixosSystem«/»mkNixosConfiguration«).
+        # »specialisations« use either »noUserModules« or »extendModules«, VM-variants also use »extendModules«.
+        # »containers«, however, essentially call »nixosSystem« anew, and therefore do not inherit »extraModules« or »specialArgs«. They allow »specialArgs« to be passed explicitly (see below), but the »extraModules« can only be passed as config imports, which end up in »modules«. As a consequence, anything that uses »noUserModules« of the container will not see the »extraModules« passed here.
+        # The best solution I can come up with is to keep explicitly passing »extraModules« to the container:
+        # »config.containers."${name}".config.imports = (moduleArgs.)extraModules«.
+        # And to also explicitly pass »extraModules« to any container sub-configs that use »noUserModules«.
 
         extraModules = (nixosArgs.extraModules or [ ]) ++ modules ++ extraModules ++ [ { imports = [ ({ options, ... }: {
-            # These are passed as »extraModules« module argument and can thus be reused when defining containers and such (so define as much stuff as possible here).
-            # Containers, for example, should be defined with »config.containers."${name}".config.imports = (moduleArgs.)extraModules«.
 
-            nixpkgs = (lib.optionalAttrs (overlays != [ ]) { overlays = lib.mkIf (options.nixpkgs.overlays.type.name !="unique") (lib.mkBefore overlays); }) // (lib.optionalAttrs (buildPlatform != null) { inherit buildPlatform; });
+            config.nixpkgs = (lib.optionalAttrs (overlays != [ ]) { overlays = lib.mkIf (options.nixpkgs.overlays.type.name !=  "unique") (lib.mkBefore overlays); }) // (lib.optionalAttrs (buildPlatform != null) { inherit buildPlatform; });
 
-            _module.args = { inherit inputs; } // moduleArgs; # (pass the args here, so that they also apply to any other evaluation using »extraModules«)
+            config._module.args = { inherit inputs; } // moduleArgs; # (pass the args here, so that they also apply to any other evaluation using »extraModules«)
 
-            system.nixos.revision = lib.mkIf (inputs?nixpkgs.rev) inputs.nixpkgs.rev; # (evaluating the default value fails under some circumstances)
-            system.configurationRevision = lib.mkIf (inputs?nixpkgs.rev) inputs.nixpkgs.rev;
+            config.system.nixos.revision = lib.mkIf (inputs?nixpkgs.rev) inputs.nixpkgs.rev; # (evaluating the default value fails under some circumstances)
+            config.system.configurationRevision = lib.mkIf (inputs?nixpkgs.rev) inputs.nixpkgs.rev;
+
+            options.containers = lib.mkOption { type = lib.types.attrsOf (lib.types.submodule (_: { config = {
+                specialArgs = builtins.mapAttrs (_: lib.mkDefault) args.specialArgs; # imports = args.extraModules;
+            }; })); };
 
         }) ]; _file = "${dirname}/nixos.nix#mkNixosConfiguration-extraModule"; } ];
 

@@ -12,8 +12,9 @@ To delete previous files, one could: have a list of old files, read that as keys
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: args@{ config, options, pkgs, lib, ... }: let lib = inputs.self.lib.__internal__; in let
+dirname: inputs: moduleArgs@{ config, options, pkgs, lib, ... }: let lib = inputs.self.lib.__internal__; in let
     inherit (inputs.config.rename) setup;
+    types = moduleArgs.lib.types;
     cfg = config.boot.loader.extra-files;
     targetMount = let path = lib.findFirst (path: config.fileSystems?${path}) "/" (lib.fun.parentPaths cfg.targetDir); in config.fileSystems.${path};
     supportedFSes = [ "vfat" "ntfs" "ext2" "ext3" "ext4" "btrfs" "xfs" "ufs" ]; fsSupported = fs: builtins.elem fs supportedFSes;
@@ -46,21 +47,21 @@ in {
                 "start4.elf".source = "''${pkgs.raspberrypifw}/share/raspberrypi/boot/start4.elf";
             }
         ''; default = { }; type = lib.fun.types.attrsOfSubmodules ({ name, config, ... }: { options = {
-            path = lib.mkOption { description = "Relative target path of the file."; type = lib.types.path; readOnly = true; default = name; };
-            source = lib.mkOption { description = "Source path of the file. Takes precedence over `/.text`."; default = null; type = lib.types.nullOr lib.types.path; };
-            text = lib.mkOption { description = "Text lines of the file."; default = null; type = lib.types.nullOr lib.types.lines; };
-            format = lib.mkOption { description = "Formatter to use to transform `.data` into `.text` lines (if `!= null`)."; default = null; type = lib.types.nullOr (lib.types.functionTo (lib.types.nullOr lib.types.str)); };
+            path = lib.mkOption { description = "Relative target path of the file."; type = types.path; readOnly = true; default = name; };
+            source = lib.mkOption { description = "Source path of the file. Takes precedence over `/.text`."; default = null; type = types.nullOr types.path; };
+            text = lib.mkOption { description = "Text lines of the file."; default = null; type = types.nullOr types.lines; };
+            format = lib.mkOption { description = "Formatter to use to transform `.data` into `.text` lines (if `!= null`)."; default = null; type = types.nullOr (types.functionTo (types.nullOr types.str)); };
             data = lib.mkOption { description = "Data to serialize to become the files `.text`. A `.format`ter must be set for the file for this to become applicable, and the data assigned must conform to the particular formatters input requirements."; type = (pkgs.formats.json { }).type; };
         }; config = {
             text = lib.mkIf (config.format != null) (config.format config.data);
         }; }); default = { }; };
 
-        tree = lib.mkOption { internal = true; readOnly = true; type = lib.types.package; };
+        tree = lib.mkOption { internal = true; readOnly = true; type = types.package; };
 
         # Each bootloader seems to keep an option like this separately ...
         targetDir = lib.mkOption { description = ''
             Where the files will be installed (copied) to. This has to be mounted when `nixos-rebuild boot/switch` gets called.
-        ''; type = lib.types.strMatching ''^/.*[^/]$''; default = "/boot"; };
+        ''; type = types.strMatching ''^/.*[^/]$''; default = "/boot"; };
 
     }; } // {
 

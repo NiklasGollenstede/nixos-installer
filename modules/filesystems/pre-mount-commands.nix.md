@@ -10,10 +10,11 @@ So far, this has been shown to work as `preMountCommands` and `postUnmountComman
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
 dirname: inputs: moduleArgs@{ config, pkgs, lib, utils, ... }: let lib = inputs.self.lib.__internal__; in let
+    types = moduleArgs.lib.types;
 in {
 
     options = {
-        fileSystems = lib.mkOption { type = lib.types.attrsOf (lib.types.submodule [ { options = {
+        fileSystems = lib.mkOption { type = types.attrsOf (types.submodule [ { options = {
             preMountCommands = lib.mkOption { description = ''
                 Commands to be run as root every time before mounting this filesystem **via systemd**, but after all its dependents were mounted.
                 If, for whatever reason, the mount point is already mounted (which should never be the case), then the commands will be skipped.
@@ -28,19 +29,19 @@ in {
                 This does not order itself before or after `systemd-fsck@''${utils.escapeSystemdPath device}.service`.
                 Note that if a symlink exists at a mount point when systemd's fstab-generator runs, it will read/resolve the symlink and use the link's target as the mount point, resulting in mismatching unit names for that mount, effectively disabling its `.preMountCommands`.
                 This does not (apparently and unfortunately) run when mounting via the `mount` command (and probably not with the `mount` system call either).
-            ''; type = lib.types.lines; default = ""; };
+            ''; type = types.lines; default = ""; };
             postMountCommands = lib.mkOption { description = ''
                 Like `.preMountCommands`, but runs after mounting the filesystem.
                 Note that for mounts made in the initrd, these commands will run again in the normal system once systemd acknoledges the mount made earlier.
-            ''; type = lib.types.lines; default = ""; };
+            ''; type = types.lines; default = ""; };
             preUnmountCommands = lib.mkOption { description = ''
                 Like `.preMountCommands`, but runs before unmounting the filesystem.
                 This will only run before unmounting when the FS is unmounted via systemd. If it is unmounted by other means, systemd can only adjust the mount units state afterwards, and the commands will be skipped.
                 You may want to compensate for that in the `.postUnmountCommands`.
-            ''; type = lib.types.lines; default = ""; };
+            ''; type = types.lines; default = ""; };
             postUnmountCommands = lib.mkOption { description = ''
                 Like `.preMountCommands`, but runs after unmounting the filesystem.
-            ''; type = lib.types.lines; default = ""; };
+            ''; type = types.lines; default = ""; };
                 #Also, trying to create the "device" of a "nofail" mount will not work with `mount`, as it will not even attempt to mount anything (and thus not run the `.preMountCommands`) if the "device" is missing. # TODO: is that actually different? For "nofail" systemd holds back, and otherwise it just attempts the mount?
         }; } ]);
     }; };

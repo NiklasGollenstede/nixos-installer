@@ -10,8 +10,9 @@ Additionally, this module sets some defaults for ZFS (but only in an "always bet
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: { config, options, pkgs, lib, ... }: let lib = inputs.self.lib.__internal__; in let
+dirname: inputs: moduleArgs@{ config, options, pkgs, lib, ... }: let lib = inputs.self.lib.__internal__; in let
     inherit (inputs.config.rename) setup;
+    types = moduleArgs.lib.types;
     cfg = config.${setup}.zfs;
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
 in {
@@ -22,12 +23,12 @@ in {
         pools = lib.mkOption {
             description = "ZFS pools created during this host's installation.";
             type = lib.fun.types.attrsOfSubmodules ({ name, ... }: { options = {
-                name = lib.mkOption { description = "Attribute name as name of the pool."; type = lib.types.str; default = name; readOnly = true; };
-                vdevArgs = lib.mkOption { description = "List of arguments that specify the virtual devices (vdevs) used when initially creating the pool. Can consist of the device type keywords and partition labels. The latter are prefixed with »/dev/mapper/« if a mapping with that name is configured or »/dev/disk/by-partlabel/« otherwise, and then the resulting argument sequence is is used verbatim in »zpool create«."; type = lib.types.listOf lib.types.str; default = [ name ]; example = [ "raidz1" "data1-..." "data2-..." "data3-..." "cache" "cache-..." ]; };
-                props = lib.mkOption { description = "Zpool properties to pass when creating the pool. May also set »feature@...« and »compatibility«."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; apply = lib.filterAttrs (k: v: v != null); };
+                name = lib.mkOption { description = "Attribute name as name of the pool."; type = types.str; default = name; readOnly = true; };
+                vdevArgs = lib.mkOption { description = "List of arguments that specify the virtual devices (vdevs) used when initially creating the pool. Can consist of the device type keywords and partition labels. The latter are prefixed with »/dev/mapper/« if a mapping with that name is configured or »/dev/disk/by-partlabel/« otherwise, and then the resulting argument sequence is is used verbatim in »zpool create«."; type = types.listOf types.str; default = [ name ]; example = [ "raidz1" "data1-..." "data2-..." "data3-..." "cache" "cache-..." ]; };
+                props = lib.mkOption { description = "Zpool properties to pass when creating the pool. May also set »feature@...« and »compatibility«."; type = types.attrsOf (types.nullOr types.str); default = { }; apply = lib.filterAttrs (k: v: v != null); };
                 createDuringInstallation = (lib.mkEnableOption "creation of this pool during system installation. If disabled, the pool needs to exist already or be created manually and the pool's disk devices are expected to be present from the first boot onwards") // { default = true; };
-                autoApplyDuringBoot = lib.mkOption { description = "Whether to automatically re-apply dataset properties and create missing child datasets in the initramfs phase during boot after this pool's declared datasets changed. This does not get triggered by external changes to the ZFS pool, but when triggered by changes in the declaration, it may affect/revert/correct them. Doing this in the initrd can be useful since the keystore is open but no datasets are mounted at that time."; type = lib.types.bool; default = true; };
-                autoApplyOnActivation = lib.mkOption { description = "Same as »autoApplyDuringBoot«, but during system activation, not in the initrd. This works without rebooting, but may fail to apply some changes since datasets may be mounted and the keystore is usually closed at this time."; type = lib.types.bool; default = true; };
+                autoApplyDuringBoot = lib.mkOption { description = "Whether to automatically re-apply dataset properties and create missing child datasets in the initramfs phase during boot after this pool's declared datasets changed. This does not get triggered by external changes to the ZFS pool, but when triggered by changes in the declaration, it may affect/revert/correct them. Doing this in the initrd can be useful since the keystore is open but no datasets are mounted at that time."; type = types.bool; default = true; };
+                autoApplyOnActivation = lib.mkOption { description = "Same as »autoApplyDuringBoot«, but during system activation, not in the initrd. This works without rebooting, but may fail to apply some changes since datasets may be mounted and the keystore is usually closed at this time."; type = types.bool; default = true; };
             }; config = {
                 props.autotrim = lib.mkDefault "on"; # These days, there should be no reason not to trim.
                 props.ashift = lib.mkOptionDefault "12"; # be explicit
@@ -40,21 +41,21 @@ in {
         datasets = lib.mkOption {
             description = "ZFS datasets managed and mounted on this host.";
             type = lib.fun.types.attrsOfSubmodules ({ name, ... }: { options = {
-                name = lib.mkOption { description = "Attribute name as name/path of the dataset."; type = lib.types.str; default = name; readOnly = true; };
-                props = lib.mkOption { description = "ZFS properties to set on the dataset."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; apply = lib.filterAttrs (k: v: v != null); };
-                recursiveProps = lib.mkOption { description = "Whether to apply this dataset's ».props« (but not ».permissions«) recursively to its children, even those that are not declared. This applies to invocations of the »ensure-dataset« function (called either explicitly or after changes by »...pools.*.autoApplyDuringBoot/autoApplyOnActivation«) and makes sense for declared leaf datasets that will have children that the NixOS configuration is not aware of (like receive targets)."; type = lib.types.bool; default = false; };
-                mount = lib.mkOption { description = "Whether to create a »fileSystems« entry to mount the dataset. »noauto« creates an entry with that option set."; type = lib.types.enum [ true "noauto" false ]; default = false; };
-                permissions = lib.mkOption { description = ''Permissions to set on the dataset via »zfs allow«. Attribute names should express propagation/who and match »/^[dl]?([ug]\d+|e)$/«, the values are the list of permissions granted.''; type = lib.types.attrsOf lib.types.commas; default = { }; };
-                uid = lib.mkOption { description = "UID owning the dataset's root directory."; type = lib.types.ints.unsigned; default = 0; };
-                gid = lib.mkOption { description = "GID owning the dataset's root directory."; type = lib.types.ints.unsigned; default = 0; };
-                mode = lib.mkOption { description = "Permission mode of the dataset's root directory."; type = lib.types.str; default = "750"; };
+                name = lib.mkOption { description = "Attribute name as name/path of the dataset."; type = types.str; default = name; readOnly = true; };
+                props = lib.mkOption { description = "ZFS properties to set on the dataset."; type = types.attrsOf (types.nullOr types.str); default = { }; apply = lib.filterAttrs (k: v: v != null); };
+                recursiveProps = lib.mkOption { description = "Whether to apply this dataset's ».props« (but not ».permissions«) recursively to its children, even those that are not declared. This applies to invocations of the »ensure-dataset« function (called either explicitly or after changes by »...pools.*.autoApplyDuringBoot/autoApplyOnActivation«) and makes sense for declared leaf datasets that will have children that the NixOS configuration is not aware of (like receive targets)."; type = types.bool; default = false; };
+                mount = lib.mkOption { description = "Whether to create a »fileSystems« entry to mount the dataset. »noauto« creates an entry with that option set."; type = types.enum [ true "noauto" false ]; default = false; };
+                permissions = lib.mkOption { description = ''Permissions to set on the dataset via »zfs allow«. Attribute names should express propagation/who and match »/^[dl]?([ug]\d+|e)$/«, the values are the list of permissions granted.''; type = types.attrsOf types.commas; default = { }; };
+                uid = lib.mkOption { description = "UID owning the dataset's root directory."; type = types.ints.unsigned; default = 0; };
+                gid = lib.mkOption { description = "GID owning the dataset's root directory."; type = types.ints.unsigned; default = 0; };
+                mode = lib.mkOption { description = "Permission mode of the dataset's root directory."; type = types.str; default = "750"; };
             }; config = {
                 props.canmount = lib.mkOptionDefault "off"; # (need to know this explicitly for each dataset)
             }; });
             default = { };
         };
 
-        extraInitrdPools = lib.mkOption { description = "Additional pool that are imported in the initrd."; type = lib.types.listOf lib.types.str; default = [ ]; apply = lib.unique; };
+        extraInitrdPools = lib.mkOption { description = "Additional pool that are imported in the initrd."; type = types.listOf types.str; default = [ ]; apply = lib.unique; };
     }; };
 
     config = lib.mkMerge [ (lib.mkIf cfg.enable (lib.mkMerge [ ({

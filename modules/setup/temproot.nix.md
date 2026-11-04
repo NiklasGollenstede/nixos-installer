@@ -99,34 +99,35 @@ On a less beefy system, but also with less data to manage, `tmpfs` works fine fo
 #*/# end of MarkDown, beginning of NixOS module:
 dirname: inputs: moduleArgs@{ config, options, pkgs, lib, utils, ... }: let lib = inputs.self.lib.__internal__; in let
     inherit (inputs.config.rename) setup preMountCommands;
+    types = moduleArgs.lib.types;
     cfg = config.${setup}.temproot; opts = options.${setup}.temproot;
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
     keep = if cfg.remote.type == "none" then "local" else "remote"; # preferred place for data that should be kept
 
     optionsFor = type: desc: lib.fun.mergeAttrsRecursive [ ({
-        zfs.dataset = lib.mkOption { description = "Dataset path under which to create the ${desc} »${type}« datasets."; type = lib.types.str; default = "rpool-${hash}/${type}"; };
+        zfs.dataset = lib.mkOption { description = "Dataset path under which to create the ${desc} »${type}« datasets."; type = types.str; default = "rpool-${hash}/${type}"; };
     }) (lib.optionalAttrs (type != "temp") {
-        bind.source = lib.mkOption { description = "Prefix for bind-mount targets."; type = lib.types.str; default = "/.${type}"; };
+        bind.source = lib.mkOption { description = "Prefix for bind-mount targets."; type = types.str; default = "/.${type}"; };
     }) (lib.optionalAttrs (type == "local") {
-        bind.base = lib.mkOption { description = "Filesystem to automatically create as the ».source« for the bind mounts."; type = lib.types.enum [ null "f2fs" "f2fs-encrypted" "ext4" "ext4-encrypted" ]; default = null; };
+        bind.base = lib.mkOption { description = "Filesystem to automatically create as the ».source« for the bind mounts."; type = types.enum [ null "f2fs" "f2fs-encrypted" "ext4" "ext4-encrypted" ]; default = null; };
     }) ({
         mounts = lib.mkOption {
             description = "Locations ${if type == "temp" then "(in addition to »/«)" else ""} where a ${desc} filesystem should be mounted. Some are declared by default but may be removed by setting them to »null«.";
             type = lib.fun.types.attrsOfSubmodules ({ name, ... }: { options = {
-                target = lib.mkOption { description = "Attribute name as the mount target path."; type = lib.types.strMatching ''^/.*[^/]$''; default = name; readOnly = true; };
-                source = lib.mkOption { description = "Relative source path of the mount. (Irrelevant for »tmpfs«.)"; type = lib.types.str; default = builtins.substring 1 (builtins.stringLength name - 1) name; };
-                uid = lib.mkOption { description = "UID owning the mounted target."; type = lib.types.ints.unsigned; default = 0; };
-                gid = lib.mkOption { description = "GID owning the mounted target."; type = lib.types.ints.unsigned; default = 0; };
-                mode = lib.mkOption { description = "Permission mode of the mounted target."; type = lib.types.str; default = "750"; };
-                options = lib.mkOption { description = "Additional mount options to set. Note that not all mount types support all options, they may be silently ignored or cause errors. »bind« supports setting »nosuid«, »nodev«, »noexec«, »noatime«, »nodiratime«, and »relatime«. »zfs« will explicitly heed »noauto«, the other options are applied but may conflict with the ones implied by the ».zfsProps«."; type = lib.types.attrsOf (lib.types.oneOf [ lib.types.bool lib.types.str lib.types.int ]); default = { }; };
+                target = lib.mkOption { description = "Attribute name as the mount target path."; type = types.strMatching ''^/.*[^/]$''; default = name; readOnly = true; };
+                source = lib.mkOption { description = "Relative source path of the mount. (Irrelevant for »tmpfs«.)"; type = types.str; default = builtins.substring 1 (builtins.stringLength name - 1) name; };
+                uid = lib.mkOption { description = "UID owning the mounted target."; type = types.ints.unsigned; default = 0; };
+                gid = lib.mkOption { description = "GID owning the mounted target."; type = types.ints.unsigned; default = 0; };
+                mode = lib.mkOption { description = "Permission mode of the mounted target."; type = types.str; default = "750"; };
+                options = lib.mkOption { description = "Additional mount options to set. Note that not all mount types support all options, they may be silently ignored or cause errors. »bind« supports setting »nosuid«, »nodev«, »noexec«, »noatime«, »nodiratime«, and »relatime«. »zfs« will explicitly heed »noauto«, the other options are applied but may conflict with the ones implied by the ».zfsProps«."; type = types.attrsOf (types.oneOf [ types.bool types.str types.int ]); default = { }; };
                 extraFsConfig = lib.mkOption { description = "Extra config options to set on the generated »fileSystems.*« entry (unless this mount is forced to »null«)."; type = options.fileSystems.type.nestedTypes.elemType // { visible = "shallow"; }; default = { }; };
-                zfsProps = lib.mkOption { description = "ZFS properties to set on the dataset, if mode type is »zfs«. Note that ZFS mounts made in the initramfs don't have the correct mount options from ZFS properties, so properties that affect mount options should (also) be set as ».options«."; type = lib.types.attrsOf (lib.types.nullOr lib.types.str); default = { }; };
+                zfsProps = lib.mkOption { description = "ZFS properties to set on the dataset, if mode type is »zfs«. Note that ZFS mounts made in the initramfs don't have the correct mount options from ZFS properties, so properties that affect mount options should (also) be set as ».options«."; type = types.attrsOf (types.nullOr types.str); default = { }; };
             }; config = {
                 options = lib.mkMerge opts.${type}.mountOptions.definitions;
             }; });
             default = { };
         };
-        mountOptions = lib.mkOption { description = "Mount options that will be set for all ».mounts.*.options« (with the same priority). These are also used for ».bind.source«."; type = lib.types.attrsOf (lib.types.oneOf [ lib.types.bool lib.types.str lib.types.int ]); default = { nosuid = true; nodev = true; noatime = true; }; };
+        mountOptions = lib.mkOption { description = "Mount options that will be set for all ».mounts.*.options« (with the same priority). These are also used for ».bind.source«."; type = types.attrsOf (types.oneOf [ types.bool types.str types.int ]); default = { nosuid = true; nodev = true; noatime = true; }; };
     }) ];
 
     zfsNoSyncProps = { sync = "disabled"; logbias = "throughput"; }; # According to the documentation, »logbias« should be irrelevant without sync (i.e. no logging), but some claim setting it to »throughput« still improves performance.
@@ -142,7 +143,7 @@ in {
                 "tmpfs": Creates »tmpfs« filesystems at »/« and all specified mount points.
                 "zfs": Creates a ZFS dataset for »/« and each specified mount point, as (nested) children of ».zfs.dataset«, which will have »sync« disabled. Also adds an pre-mount command that rolls back all children of that dataset to their »@empty« snapshots (which are taken right after the datasets are created).
                 "bind": Expects a filesystem to be mounted at »/«. Creates a hook to cre-create that filesystem on boot (TODO: implement and then enable this), and bind-mounts any additional mounts to ».bind.source+"/"+<mount.source>« (creating those paths if necessary).
-            ''; type = lib.types.enum [ "tmpfs" "zfs" ]; default = "tmpfs"; };
+            ''; type = types.enum [ "tmpfs" "zfs" ]; default = "tmpfs"; };
         } // (optionsFor "temp" "temporary");
 
         # Settings for filesystems that persist across reboots:
@@ -151,7 +152,7 @@ in {
                 The type of filesystem that holds the system's files that needs (e.g. the Nix store) or should (e.g. caches, logs) be kept across reboots, but that can be regenerated or not worth backing up:
                 "bind": Expects a (locally persistent) filesystem to be mounted at ».bind.target«, and bind-mounts to ».bind.source+"/"+<mount.source>« (creating those paths if necessary). ».bind.base« can be used to automatically mount different default filesystems at ».bind.target«.
                 "zfs": Creates a ZFS dataset for »/« and each specified mount point, as (nested) children of ».zfs.dataset«.
-            ''; type = lib.types.enum [ "bind" "zfs" ]; default = "bind"; };
+            ''; type = types.enum [ "bind" "zfs" ]; default = "bind"; };
         } // (optionsFor "local" "locally persistent");
 
         # Settings for filesystems that should have remote backups:
@@ -161,13 +162,13 @@ in {
                 "bind": Expects a filesystem to be mounted at ».bind.target« that gets backed. Bind-mounts to ».bind.source+"/"+<mount.source>« (creating those paths if necessary).
                 "zfs": Creates a ZFS dataset for »/« and each specified mount point, as (nested) children of ».zfs.dataset«.
                 "none": Don't provide a »/remote«. For hosts that have no secrets or important state.
-            ''; type = lib.types.enum [ "bind" "zfs" "none" ]; default = "bind"; };
+            ''; type = types.enum [ "bind" "zfs" "none" ]; default = "bind"; };
         } // (optionsFor "remote" "remotely backed-up");
 
         swap = {
-            size = lib.mkOption { description = "Size of the swap partition or file to create."; type = lib.types.nullOr lib.types.str; default = null; };
-            encrypted = lib.mkOption { description = "Whether to encrypt the swap with a persistent key. Only relevant if ».asPartition = true«."; type = lib.types.bool; default = false; };
-            asPartition = lib.mkOption { description = "Whether to create a swap partition instead of a file."; type = lib.types.bool; default = cfg.local.type == "zfs"; };
+            size = lib.mkOption { description = "Size of the swap partition or file to create."; type = types.nullOr types.str; default = null; };
+            encrypted = lib.mkOption { description = "Whether to encrypt the swap with a persistent key. Only relevant if ».asPartition = true«."; type = types.bool; default = false; };
+            asPartition = lib.mkOption { description = "Whether to create a swap partition instead of a file."; type = types.bool; default = cfg.local.type == "zfs"; };
         };
 
         persistenceFixes = (lib.mkEnableOption "some fixes to cope with »/« being ephemeral") // { default = true; example = false; };

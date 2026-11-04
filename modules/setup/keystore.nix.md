@@ -27,8 +27,9 @@ Any number of other devices may thus specify paths in the keystore as keylocatio
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: { config, pkgs, lib, utils, ... }: let lib = inputs.self.lib.__internal__; in let
+dirname: inputs: moduleArgs@{ config, pkgs, lib, utils, ... }: let lib = inputs.self.lib.__internal__; in let
     inherit (inputs.config.rename) setup installer;
+    types = moduleArgs.lib.types;
     cfg = config.${setup}.keystore;
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
     keystore = "/run/${cfg.name}";
@@ -37,15 +38,15 @@ in {
 
     options = { ${setup}.keystore = {
         enable = lib.mkEnableOption "the use of a keystore partition to unlock various things during early boot";
-        name = lib.mkOption { type = lib.types.str; readOnly = true; default = "keystore-${hash}"; };
+        name = lib.mkOption { type = types.str; readOnly = true; default = "keystore-${hash}"; };
         enableLuksGeneration = (lib.mkEnableOption "the generation of a LUKS mapper configuration for each »luks/*/0« entry in ».keys«") // { default = true; example = false; };
-        keys = lib.mkOption { description = "Keys declared to be generated during installation and then exist in the keystore for unlocking disks and such. See »${dirname}/keystore.nix.md« for much more information."; type = lib.types.attrsOf (lib.types.either (lib.types.nullOr lib.types.str) (lib.types.attrsOf lib.types.str)); default = { }; apply = keys: (
+        keys = lib.mkOption { description = "Keys declared to be generated during installation and then exist in the keystore for unlocking disks and such. See »${dirname}/keystore.nix.md« for much more information."; type = types.attrsOf (types.either (types.nullOr types.str) (types.attrsOf types.str)); default = { }; apply = keys: (
             lib.fun.mapMergeUnique (usage: methods: if methods == null then { } else if builtins.isString methods then { "${usage}" = methods; } else lib.fun.mapMerge (slot: method: if method == null then { } else { "${usage}/${slot}" = method; }) methods) keys
         ); };
         unlockMethods = {
-            trivialHostname = lib.mkOption { description = "For headless auto boot, use »hostname« (in a file w/o newline) as trivial password/key for the keystore."; type = lib.types.bool; default = lib.elem "hostname" keystoreKeys; };
-            usbPartition = lib.mkOption { description = "Use (the random key stored on) a specifically named (tiny) GPT partition (usually on a USB-stick) to automatically unlock the keystore. Use »nix run .#$hostName -- add-bootkey-to-keydev $devPath« (see »${inputs.self}/lib/setup-scripts/maintenance.sh«) to cerate such a partition."; type = lib.types.bool; default = (lib.elem "usb-part" keystoreKeys); };
-            pinThroughYubikey = lib.mkOption { type = lib.types.bool; default = (lib.any (type: lib.fun.matches "^yubikey-pin=.*$" type) keystoreKeys); };
+            trivialHostname = lib.mkOption { description = "For headless auto boot, use »hostname« (in a file w/o newline) as trivial password/key for the keystore."; type = types.bool; default = lib.elem "hostname" keystoreKeys; };
+            usbPartition = lib.mkOption { description = "Use (the random key stored on) a specifically named (tiny) GPT partition (usually on a USB-stick) to automatically unlock the keystore. Use »nix run .#$hostName -- add-bootkey-to-keydev $devPath« (see »${inputs.self}/lib/setup-scripts/maintenance.sh«) to cerate such a partition."; type = types.bool; default = (lib.elem "usb-part" keystoreKeys); };
+            pinThroughYubikey = lib.mkOption { type = types.bool; default = (lib.any (type: lib.fun.matches "^yubikey-pin=.*$" type) keystoreKeys); };
         };
     }; };
 

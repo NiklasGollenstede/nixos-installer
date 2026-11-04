@@ -15,8 +15,9 @@ This uses the same implementation as `boot.loader.generic-extlinux-compatible` t
 
 ```nix
 #*/# end of MarkDown, beginning of NixOS module:
-dirname: inputs: args@{ config, options, pkgs, lib, modulesPath, ... }: let lib = inputs.self.lib.__internal__; in let
+dirname: inputs: moduleArgs@{ config, options, pkgs, lib, modulesPath, ... }: let lib = inputs.self.lib.__internal__; in let
     inherit (inputs.config.rename) setup;
+    types = moduleArgs.lib.types;
     cfg = config.boot.loader.extlinux;
     targetMount = let path = lib.findFirst (path: config.fileSystems?${path}) "/" (lib.fun.parentPaths cfg.targetDir); in config.fileSystems.${path};
     supportedFSes = [ "vfat" "ntfs" "ext2" "ext3" "ext4" "btrfs" "xfs" "ufs" ]; fsSupported = fs: builtins.elem fs supportedFSes;
@@ -32,20 +33,20 @@ in {
         '';
         package = lib.mkOption { description = ''
             The `syslinux` package to install `extlinux` from use.
-        ''; type = lib.types.package; default = pkgs.syslinux; defaultText = lib.literalExpression "pkgs.syslinux"; };
+        ''; type = types.package; default = pkgs.syslinux; defaultText = lib.literalExpression "pkgs.syslinux"; };
         targetDir = lib.mkOption { description = ''
             The path in whose `./extlinux` sub dir `extlinux` will be installed to. When `nixos-rebuild boot/switch` gets called, this or a parent path needs to be mounted from {option}`.targetPart`.
-        ''; type = lib.types.strMatching ''^/.*[^/]$''; default = "/boot"; };
+        ''; type = types.strMatching ''^/.*[^/]$''; default = "/boot"; };
         targetPart = lib.mkOption { description = ''
             The `/dev/disk/by-{id,label,partlabel,partuuid,uuid}/*` path of the *disk partition* holding the filesystem that `extlinux` is installed to. This must be formatted with a filesystem that `extlinux` supports and must be mounted as (a parent of) {option}`.targetDir`. The disk on which the partition lies will have the bootloader section of its MBR replaced by `extlinux`'s.
-        ''; type = lib.types.strMatching ''^/.*[^/]$''; default = targetMount.device; defaultText = "The `.device` of the `fileSystem` that is mounted at `.targetDir` (or its closest parent)"; };
+        ''; type = types.strMatching ''^/.*[^/]$''; default = targetMount.device; defaultText = "The `.device` of the `fileSystem` that is mounted at `.targetDir` (or its closest parent)"; };
         extraSettings = lib.mkOption { description = ''
             Additional KEYWORD-value pairs to include at the beginning of `.extraConfig`.
-        ''; type = lib.types.attrsOf lib.types.str; default = { }; };
+        ''; type = types.attrsOf types.str; default = { }; };
         extraConfig = lib.mkOption { description = ''
             Additional lines to insert at the very beginning of `extlinux.conf`.
-        ''; type = lib.types.lines; default = ""; };
-        allowInstableTargetPart = lib.mkOption { internal = true; type = lib.types.bool; };
+        ''; type = types.lines; default = ""; };
+        allowInstableTargetPart = lib.mkOption { internal = true; type = types.bool; };
         showUI = (lib.mkEnableOption ''
             a simple graphical user interface to select the configuration to start during early boot
         '') // { default = true; example = false; };

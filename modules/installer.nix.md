@@ -13,6 +13,7 @@ This module allows for the composition of the installer from multiple script, wh
 #*/# end of MarkDown, beginning of NixOS module:
 dirname: inputs: moduleArgs@{ config, options, pkgs, lib, modulesPath, ... }: let lib = inputs.self.lib.__internal__; in let
     inherit (inputs.config.rename) installer;
+    types = moduleArgs.lib.types;
     cfg = config.${installer}; opts = options.${installer};
 in {
 
@@ -25,17 +26,17 @@ in {
             '';
             defaultText = "inputs.installer.lib.setup-scripts with order 750";
             type = lib.fun.types.attrsOfSubmodules ({ name, config, ... }: { options = {
-                name = lib.mkOption { description = "Symbolic name of the script."; type = lib.types.str; default = name; readOnly = true; };
-                path = lib.mkOption { description = "Path of file for ».text« to be loaded from."; type = lib.types.nullOr lib.types.path; default = null; };
-                text = lib.mkOption { description = "Script text to process."; type = lib.types.str; default = builtins.readFile config.path; };
-                order = lib.mkOption { description = "Inclusion order of the scripts. Higher orders will be sourced later, and can thus overwrite earlier definitions."; type = lib.types.int; default = 1000; };
+                name = lib.mkOption { description = "Symbolic name of the script."; type = types.str; default = name; readOnly = true; };
+                path = lib.mkOption { description = "Path of file for ».text« to be loaded from."; type = types.nullOr types.path; default = null; };
+                text = lib.mkOption { description = "Script text to process."; type = types.str; default = builtins.readFile config.path; };
+                order = lib.mkOption { description = "Inclusion order of the scripts. Higher orders will be sourced later, and can thus overwrite earlier definitions."; type = types.int; default = 1000; };
             }; });
         };
         commands = let cmdOpt = when: mounted: lib.mkOption { description = ''
             Bash commands that are executed during the system installation, ${when}.
             Note that these commands are executed without any further sandboxing (i.e. when not using the VM installation mode, as root on the host).
             Partitions may be used via `/dev/disk/by-partlabel/`.${lib.optionalString mounted '' The target system is mounted at `$mnt`.''}
-        ''; type = lib.types.lines; default = ""; }; in {
+        ''; type = types.lines; default = ""; }; in {
             prepareInstaller = cmdOpt "early during preparation of the installer (right after CLI parsing)" false;
             postPartition = cmdOpt "after partitioning the disks" false;
             postFormat = cmdOpt "after formatting the partitions with filesystems" false;
@@ -45,14 +46,14 @@ in {
         };
         outputName = lib.mkOption {
             description = ''The name this system is (/ should be) exported as by its defining flake (as »nixosConfigurations.''${outputName}« and »apps.*-linux.''${outputName}«).'';
-            type = lib.types.nullOr lib.types.str; default = null;
+            type = types.nullOr types.str; default = null;
         };
         pkgs = lib.mkOption {
             description = ''The package set used to perform the installation. Especially, this sets the architecture for the installation VM (regardless of the target or host architecture). However, the installation is a lot faster if this matches the host architecture, and if this is different from the target architecture, the guest in the VM will use a QEMU binfmt interpreter to run the architecture-specific parts of the installation.'';
-            type = lib.types.pkgs; default = pkgs;
+            type = types.pkgs; default = pkgs;
         };
         build.scripts = lib.mkOption {
-            type = lib.types.anything; internal = true;
+            type = types.anything; internal = true;
             default = lib.fun.substituteImplicit { # This replaces the `@{}` references in the scripts with normal bash variables that hold serializations of the Nix values they refer to.
                 inherit pkgs;
                 scripts = lib.sort (a: b: a.order < b.order) (lib.attrValues cfg.scripts);

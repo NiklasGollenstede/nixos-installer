@@ -14,6 +14,7 @@ dirname: inputs: moduleArgs@{ config, options, pkgs, lib, ... }: let lib = input
     inherit (inputs.config.rename) setup;
     types = moduleArgs.lib.types;
     cfg = config.${setup}.zfs;
+    systemdInitrd = lib.versionAtLeast moduleArgs.lib.trivial.release "26.11" || config.boot.initrd.systemd.enable; # (scripted initrd and the option were removed in 26.11)
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
 in {
 
@@ -156,7 +157,9 @@ in {
             inherit (lib.fun.substituteImplicit {
                 inherit pkgs;
                 scripts = lib.attrValues { inherit (lib.self.setup-scripts) zfs utils; };
-                context = { inherit config; native = pkgs // { zfs = zfsPackage; } // (lib.optionalAttrs (extraUtils != null) (lib.genAttrs [
+                context = { inherit config; native = pkgs // {
+                    zfs = zfsPackage; nix = config.nix.package;
+                } // (lib.optionalAttrs (extraUtils != null) (lib.genAttrs [
                     "kmod" # modprobe
                     "util-linux" # mount umount
                     "nix" "openssh" "jq" # (unused)
@@ -201,10 +204,10 @@ in {
         }); };
     in {
 
-        boot.initrd.postResumeCommands = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mkIf (anyPool "autoApplyDuringBoot") (lib.mkOrder 2000 ''
+        boot.initrd.postResumeCommands = lib.mkIf (!systemdInitrd) (lib.mkIf (anyPool "autoApplyDuringBoot") (lib.mkOrder 2000 ''
             ${ensure-datasets-for "autoApplyDuringBoot" extraUtils extraUtils}
         ''));
-        boot.initrd.systemd.services = lib.mkIf (config.boot.initrd.systemd.enable) (lib.fun.mapMerge (pool: ensure-datasets-service pool true) (lib.attrValues cfg.pools));
+        boot.initrd.systemd.services = lib.mkIf systemdInitrd (lib.fun.mapMerge (pool: ensure-datasets-service pool true) (lib.attrValues cfg.pools));
         boot.initrd.systemd.storePaths = lib.mkIf (anyPool "autoApplyDuringBoot") (let deps = ensure-datasets "/" "/"; in [ "${pkgs.pkgsStatic.bash}/bin/bash" deps.script ] ++ deps.scripts ++ (lib.filter (v: lib.isStringLike v && lib.hasPrefix builtins.storeDir v) (lib.attrValues deps.vars))); # TODO: using pkgsStatic.bash may not be necessary here
         boot.initrd.supportedFilesystems = lib.mkIf (anyPool "autoApplyDuringBoot") [ "zfs" ];
         ${setup}.zfs.extraInitrdPools = (poolNames "autoApplyDuringBoot");

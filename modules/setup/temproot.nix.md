@@ -101,6 +101,7 @@ dirname: inputs: moduleArgs@{ config, options, pkgs, lib, utils, ... }: let lib 
     inherit (inputs.config.rename) setup preMountCommands;
     types = moduleArgs.lib.types;
     cfg = config.${setup}.temproot; opts = options.${setup}.temproot;
+    systemdInitrd = lib.versionAtLeast moduleArgs.lib.trivial.release "26.11" || config.boot.initrd.systemd.enable; # (scripted initrd and the option were removed in 26.11)
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
     keep = if cfg.remote.type == "none" then "local" else "remote"; # preferred place for data that should be kept
 
@@ -279,19 +280,19 @@ in {
         pool = builtins.head (builtins.split "/" cfg.temp.zfs.dataset);
     in {
 
-        boot.initrd.postResumeCommands = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mkAfter ''
+        boot.initrd.postResumeCommands = lib.mkIf (!systemdInitrd) (lib.mkAfter ''
             echo '${description}'
             ( ${command} )
         '');
 
-        boot.initrd.systemd.services.zfs-rollback-temp = lib.mkIf (config.boot.initrd.systemd.enable) (rec {
+        boot.initrd.systemd.services.zfs-rollback-temp = lib.mkIf systemdInitrd (rec {
             after = [ "zfs-import-${pool}.service" ]; before = [ "zfs-import.target" ]; wantedBy = before;
             serviceConfig.Type = "oneshot";
             #inherit description; script = "PATH=${lib.makeBinPath [ pkgs.findutils pkgs.gnugrep ]}:$PATH ; ${command}";
             inherit description; script = command;
         });
-        #boot.initrd.systemd.initrdBin = lib.mkIf (config.boot.initrd.systemd.enable) [ pkgs.findutils pkgs.gnugrep ];
-        boot.initrd.systemd.extraBin = lib.mkIf (config.boot.initrd.systemd.enable) {
+        #boot.initrd.systemd.initrdBin = lib.mkIf systemdInitrd [ pkgs.findutils pkgs.gnugrep ];
+        boot.initrd.systemd.extraBin = lib.mkIf systemdInitrd {
             grep = lib.getExe pkgs.gnugrep;
             xargs = "${pkgs.findutils}/bin/xargs";
         };

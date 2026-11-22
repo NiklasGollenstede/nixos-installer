@@ -178,7 +178,10 @@ in rec {
         lib.mkHosts = override; # where one might use it to create additional sets of hosts, based on the defaults set for the hosts that are exported by the flake
     } // (forEachSystem setupPlatforms (setupPlatform: rec {
 
-        apps = lib.mapAttrs (name: system: rec { type = "app"; derivation = writeSystemScripts { inherit name system setupPlatform; }; program = "${derivation}"; }) nixosConfigurations;
+        apps = lib.mapAttrs (name: system: rec { type = "app"; program = "${meta.derivation}"; meta = {
+            description = "Installation and management scripts for the »${name}« host system, built for »${setupPlatform}«.";
+            derivation = writeSystemScripts { inherit name system setupPlatform; };
+        }; }) nixosConfigurations;
 
         # dummy that just pulls in all system builds
         packages = let
@@ -214,7 +217,7 @@ in rec {
         #differentPlatform = !(lib.systems.equals (lib.systems.elaborate setupPlatform) args.system.config.nixpkgs.hostPlatform);
         differentPlatform = setupPlatform != args.system.config.nixpkgs.hostPlatform.system;
         # If override in the line below is missing, make sure to apply the `../../patches/nixpkgs/pkgs-overridable.patch` (or `../../patches/nixpkgs/better-nixpkgsFun.patch`) to `inputs.nixpkgs`:
-        setupPlatformPkgs = if !differentPlatform then args.system.config.${installer}.pkgs else (args.system.config.${installer}.pkgs.mkPkgs args.system.config.${installer}.pkgs.override) { localSystem = setupPlatform; crossSystem = null; };
+        setupPlatformPkgs = if !differentPlatform then args.system.config.${installer}.pkgs else (args.system.config.${installer}.pkgs.mkPkgs or args.system.config.${installer}.pkgs.override) { localSystem = setupPlatform; crossSystem = null; };
 
         pkgs = if args.pkgs or null != null then args.pkgs else setupPlatformPkgs;
         system = if args.pkgs or null != null || differentPlatform then args.system.extendModules { modules = [ {

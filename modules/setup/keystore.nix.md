@@ -31,6 +31,7 @@ dirname: inputs: moduleArgs@{ config, pkgs, lib, utils, ... }: let lib = inputs.
     inherit (inputs.config.rename) setup installer;
     types = moduleArgs.lib.types;
     cfg = config.${setup}.keystore;
+    systemdInitrd = lib.versionAtLeast moduleArgs.lib.trivial.release "26.11" || config.boot.initrd.systemd.enable; # (scripted initrd and the option were removed in 26.11)
     hash = builtins.substring 0 8 (builtins.hashString "sha256" config.networking.hostName);
     keystore = "/run/${cfg.name}";
     keystoreKeys = lib.attrValues (lib.filterAttrs (n: v: lib.fun.startsWith "luks/${cfg.name}/" n) cfg.keys);
@@ -72,7 +73,7 @@ in {
             allowDiscards = lib.mkDefault true; # If attackers can observe trimmed blocks, then they can probably do much worse ...
         }; }) (lib.fun.filterMatching ''^luks/.*/0$'' (lib.attrNames cfg.keys)));
 
-        boot.initrd.systemd.services = lib.mkIf (config.boot.initrd.systemd.enable) (lib.fun.mapMerge (key: let
+        boot.initrd.systemd.services = lib.mkIf systemdInitrd (lib.fun.mapMerge (key: let
             label = builtins.substring 5 ((builtins.stringLength key) - 7) key;
         in if label == cfg.name || (!config.boot.initrd.luks.devices?${label}) then { } else { "systemd-cryptsetup@${utils.escapeSystemdPath label}" = rec {
             overrideStrategy = "asDropin"; # (could this be set via a x-systemd.after= crypttab option?)
@@ -96,14 +97,14 @@ in {
     in lib.mkMerge [ ({
 
         boot.initrd.luks.devices.${cfg.name}.keyFile = lib.mkMerge [
-            (lib.mkIf (cfg.unlockMethods.trivialHostname) "${pkgs.writeText "hostname" config.networking.hostName}")
+            (lib.mkIf (cfg.unlockMethods.trivialHostname && !cfg.unlockMethods.usbPartition) "${pkgs.writeText "hostname" config.networking.hostName}") # (only one »keyFile« is possible; the hostname can still be typed in)
             (lib.mkIf (cfg.unlockMethods.usbPartition) "/dev/disk/by-partlabel/bootkey-${hash}")
         ];
-        boot.initrd.systemd.storePaths = lib.mkIf (cfg.unlockMethods.trivialHostname && config.boot.initrd.systemd.enable) [ "${pkgs.writeText "hostname" config.networking.hostName}" ];
+        boot.initrd.systemd.storePaths = lib.mkIf (cfg.unlockMethods.trivialHostname && systemdInitrd) [ "${pkgs.writeText "hostname" config.networking.hostName}" ];
 
         boot.initrd.supportedFilesystems = [ "vfat" ];
 
-    }) (lib.mkIf (config.boot.initrd.systemd.enable) (let # Systemd initrd
+    }) (lib.mkIf systemdInitrd (let # Systemd initrd
 
         unlockWithYubikey = pkgs.writeShellScript "unlock-with-yubikey" (let
             dev = config.boot.initrd.luks.devices.${cfg.name};

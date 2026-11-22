@@ -42,8 +42,6 @@ in { preface = { # (any »preface« options have to be defined here)
     # Example of adding and/or overwriting setup/maintenance functions:
     #installer.scripts.install-overwrite.path = ../lib/install.sh.md;
 
-    boot.initrd.systemd.enable = true; # default now
-
 
 }) (lib.mkIf (name == "explicit-fs") { ## Minimal explicit FS setup
 
@@ -199,7 +197,7 @@ in { preface = { # (any »preface« options have to be defined here)
         "start4.elf" "fixup4.dat" "bcm2711-rpi-cm4s.dtb" "bcm2711-rpi-400.dtb" "bcm2711-rpi-4-b.dtb" "bcm2711-rpi-cm4.dtb" "bcm2711-rpi-cm4-io.dtb"
     ]);
 
-    installer.pkgs = lib.mkIf (name == "rpi-cross") (pkgs.override { localSystem = "x86_64-linux"; crossSystem = null; }); # Build the default installer to be runnable on x64.
+    installer.pkgs = lib.mkIf (name == "rpi-cross") ((pkgs.mkPkgs or pkgs.override) { localSystem = "x86_64-linux"; crossSystem = null; }); # Build the default installer to be runnable on x64.
 
     #imports = [ "${inputs.nixos-hardware}/raspberry-pi/4" ]; # activating the correct hardware config should help
     #hardware.deviceTree.filter = "bcm271*.dtb";

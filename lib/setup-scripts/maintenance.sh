@@ -78,8 +78,13 @@ function run-qemu { # ...: qemuArgs
 
     local qemu=( ) ; apply-vm-args
 
+    storeReadable=1 ; if [[ "@{native.qemu-hidden-9pfs!isAttrs:-}" && $( stat -c %a /nix/store ) != *5 ]] ; then storeReadable= ; fi
     if [[ @{pkgs.stdenv.hostPlatform.system} == "@{native.stdenv.hostPlatform.system}" ]] ; then
-        qemu=( $( build-lazy @{native.qemu_kvm.drvPath!unsafeDiscardStringContext} )/bin/qemu-kvm "${qemu[@]}" ) || return
+        if [[ $storeReadable == 1 ]] ; then
+            qemu=( $( build-lazy @{native.qemu_kvm.drvPath!unsafeDiscardStringContext} )/bin/qemu-kvm "${qemu[@]}" ) || return
+        else
+            qemu=( $( build-lazy @{native.qemu-hidden-9pfs.qemu_kvm.drvPath!unsafeDiscardStringContext} )/bin/qemu-kvm "${qemu[@]}" ) || return
+        fi
         if [[ ! ${args[no-kvm]:-} && -r /dev/kvm && -w /dev/kvm ]] ; then
             # For KVM to work, vBox must not be running anything at the same time (and vBox hangs on start if qemu runs). Pass »--no-kvm« and accept ~10x slowdown, or stop vBox.
             qemu+=( -enable-kvm -cpu host )
@@ -91,7 +96,11 @@ function run-qemu { # ...: qemuArgs
             args[vm-smp]=1 # the emulation is single-threaded anyway
         fi
     else
-        qemu=( $( build-lazy @{native.qemu_full.drvPath!unsafeDiscardStringContext} )/bin/qemu-system-@{pkgs.stdenv.hostPlatform.system%%-linux} "${qemu[@]}" ) || return
+        if [[ $storeReadable == 1 ]] ; then
+            qemu=( $( build-lazy @{native.qemu_full.drvPath!unsafeDiscardStringContext} )/bin/qemu-system-@{pkgs.stdenv.hostPlatform.system%%-linux} "${qemu[@]}" ) || return
+        else
+            qemu=( $( build-lazy @{native.qemu-hidden-9pfs.qemu_full.drvPath!unsafeDiscardStringContext} )/bin/qemu-system-@{pkgs.stdenv.hostPlatform.system%%-linux} "${qemu[@]}" ) || return
+        fi
     fi
     if [[ @{pkgs.stdenv.hostPlatform.system} == aarch64-* ]] ; then
         qemu+=( -machine type=virt ) # aarch64 has no default, but this seems good

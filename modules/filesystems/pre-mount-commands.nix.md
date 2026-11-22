@@ -48,11 +48,6 @@ in {
 
     config = let
 
-        assertions = lib.mkIf (!config.boot.initrd.systemd.enable) (lib.mapAttrsToList (name: fs: {
-            assertion = (fs.preMountCommands == "") || (!utils.fsNeededForBoot fs);
-            message = ''The filesystem "${name}" has `.preMountCommands` but is also (possibly implicitly) `.neededForBoot`. This is not supported without `boot.initrd.systemd.enable`.'';
-        }) config.fileSystems);
-
         # The implementation is derived from the "mkfs-${device'}" service in nixpkgs.
         mkServices = inInitrd: lib.fun.mapMergeUnique (_: fs@{ mountPoint, device, depends, ... }: let
             isDevice = lib.fun.startsWith "/dev/" device;
@@ -96,10 +91,9 @@ in {
         )) config.fileSystems;
 
     in {
-        inherit assertions;
         systemd.services = mkServices false;
-        boot.initrd.systemd.services = lib.mkIf (config.boot.initrd.systemd.enable) (mkServices true);
-        boot.initrd.systemd.extraBin = lib.mkIf (config.boot.initrd.systemd.enable && (mkServices true) != { }) {
+        boot.initrd.systemd.services = mkServices true;
+        boot.initrd.systemd.extraBin = lib.mkIf ((mkServices true) != { }) {
             mountpoint = "${config.boot.initrd.systemd.package.util-linux}/bin/mountpoint";
         };
     };

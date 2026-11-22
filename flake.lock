@@ -18,11 +18,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791215195,
-        "narHash": "sha256-XhdG2lVjy40Va6NMMXcXhOrC9SkQR5wKHlUbDHrJY/o=",
+        "lastModified": 1795380201,
+        "narHash": "sha256-KPZ8L4ON5883NupHnZHdEhm2nUSkmIRMd6wYR55vFJk=",
         "owner": "NiklasGollenstede",
         "repo": "nix-functions",
-        "rev": "3ecb2cb5489e9345d55ecf1c5821b82077418eec",
+        "rev": "da764ce931c9108362726e47eff58923f85e98ca",
         "type": "github"
       },
       "original": {

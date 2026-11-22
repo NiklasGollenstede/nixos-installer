@@ -125,7 +125,6 @@ in {
 
         # Static system for fast-ish booting:
         system.stateVersion = modulesVersion;
-        boot.initrd.systemd.enable = true;
         system.nixos-init.enable = true;
         system.etc.overlay = { enable = true; mutable = false; };
         services.userborn = { enable = true; static = true; }; # NB: this works here, but is otherwise pretty bad, as uids set to null get potentially unstable values between builds
@@ -150,7 +149,7 @@ in {
             };
             "/nix/var/nix/.ro-db" = {
                 fsType = "9p"; device = "nix-var-nix-db"; neededForBoot = true;
-                options = [ "trans=virtio" "version=9p2000.L" "msize=${toString config.virtualisation.msize}" "ro" ];
+                options = [ "trans=virtio" "version=9p2000.L" "msize=16384" "ro" ]; # (same as nixpkgs' default/hardcoded value; »virtualisation.msize« was removed in 26.11)
             };
             "/nix/var/nix/db" = { overlay = {
                 lowerdir = [ "/nix/var/nix/.ro-db" ];
@@ -158,7 +157,6 @@ in {
                 workdir = "/nix/var/nix/.rw-db/work";
             }; neededForBoot = true; };
         };
-        virtualisation.msize = 16384; # TODO: might want to increase this
         virtualisation.memorySize = 4096; # qemu options on the CLI override this
         virtualisation.qemu.options = [ "-virtfs local,path=/nix/var/nix/db,security_model=none,mount_tag=nix-var-nix-db,readonly=on" ]; # (doing this manually to pass »readonly«, to not ever corrupt the host's Nix DBs)
 
